@@ -1,0 +1,8 @@
+[package]
+name = "validate_locale"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "validate_locale"
+path = "src/main.rs"

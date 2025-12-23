@@ -1,0 +1,1800 @@
+use crate::activity_ext::ActivityExt;
+use crate::colors::ColorPalette;
+use egui::{
+    Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
+};
+use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
+use rpa_core::{Activity, BranchType, LogLevel, Node, Scenario, UiConstants, VariableType};
+use rust_i18n::t;
+use std::collections::HashSet;
+use uuid::Uuid;
+
+pub enum ContextMenuAction {
+    None,
+    Copy,
+    Paste,
+    Delete,
+    SelectAll,
+}
+
+pub struct RenderState<'a> {
+    pub selected_nodes: &'a mut HashSet<Uuid>,
+    pub connection_from: &'a mut Option<(Uuid, usize)>,
+    pub pan_offset: &'a mut Vec2,
+    pub zoom: &'a mut f32,
+    pub clipboard_empty: bool,
+    pub show_minimap: bool,
+    pub knife_tool_active: &'a mut bool,
+    pub knife_path: &'a mut Vec<Pos2>,
+    pub resizing_node: &'a mut Option<(Uuid, ResizeHandle)>,
+    pub allow_node_resize: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResizeHandle {
+    Right,
+    Left,
+    Bottom,
+    Top,
+    BottomRight,
+    BottomLeft,
+    TopRight,
+    TopLeft,
+}
+
+fn line_segments_intersect(p1: Pos2, p2: Pos2, p3: Pos2, p4: Pos2) -> bool {
+    let d = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
+    if d.abs() < 0.0001 {
+        return false;
+    }
+
+    let t = ((p3.x - p1.x) * (p4.y - p3.y) - (p3.y - p1.y) * (p4.x - p3.x)) / d;
+    let u = ((p3.x - p1.x) * (p2.y - p1.y) - (p3.y - p1.y) * (p2.x - p1.x)) / d;
+
+    (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)
+}
+
+fn bezier_to_line_segments(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> {
+    let steps = UiConstants::BEZIER_STEPS;
+    let mut points = Vec::with_capacity(steps + 1);
+
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let mt = 1.0 - t;
+        let mt2 = mt * mt;
+        let mt3 = mt2 * mt;
+
+        let x = mt3 * p0.x + 3.0 * mt2 * t * p1.x + 3.0 * mt * t2 * p2.x + t3 * p3.x;
+        let y = mt3 * p0.y + 3.0 * mt2 * t * p1.y + 3.0 * mt * t2 * p2.y + t3 * p3.y;
+
+        points.push(Pos2::new(x, y));
+    }
+
+    points
+}
+
+fn point_to_bezier_distance(point: Pos2, bezier_points: &[Pos2]) -> f32 {
+    let mut min_distance = f32::MAX;
+
+    for i in 0..bezier_points.len() - 1 {
+        let segment_start = bezier_points[i];
+        let segment_end = bezier_points[i + 1];
+
+        let segment = segment_end - segment_start;
+        let point_vec = point - segment_start;
+
+        let segment_length_sq = segment.length_sq();
+        if segment_length_sq < 0.0001 {
+            min_distance = min_distance.min(point_vec.length());
+            continue;
+        }
+
+        let t = (point_vec.dot(segment) / segment_length_sq).clamp(0.0, 1.0);
+        let projection = segment_start + segment * t;
+        let distance = (point - projection).length();
+
+        min_distance = min_distance.min(distance);
+    }
+
+    min_distance
+}
+
+fn find_connection_near_point(
+    scenario: &Scenario,
+    point: Pos2,
+    pan_offset: Vec2,
+    zoom: f32,
+    threshold: f32,
+) -> Option<(Uuid, Uuid)> {
+    let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
+
+    for connection in &scenario.connections {
+        if let (Some(from_node), Some(to_node)) = (
+            scenario.get_node(connection.from_node),
+            scenario.get_node(connection.to_node),
+        ) {
+            use rpa_core::BranchType;
+
+            let start = match connection.branch_type {
+                BranchType::TrueBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
+                BranchType::FalseBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                BranchType::LoopBody => to_screen(from_node.get_output_pin_pos_by_index(0)),
+                BranchType::ErrorBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                BranchType::TryBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
+                BranchType::CatchBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                BranchType::Default => {
+                    if from_node.get_output_pin_count() > 1 {
+                        match &from_node.activity {
+                            Activity::Loop { .. } | Activity::While { .. } | Activity::TryCatch => {
+                                to_screen(from_node.get_output_pin_pos_by_index(1))
+                            }
+                            _ if from_node.activity.can_have_error_output() => {
+                                to_screen(from_node.get_output_pin_pos_by_index(0))
+                            }
+                            _ => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                        }
+                    } else {
+                        to_screen(from_node.get_output_pin_pos())
+                    }
+                }
+            };
+            let end = to_screen(to_node.get_input_pin_pos());
+
+            let distance = (end.x - start.x).abs();
+            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+            let control1 = start + Vec2::new(control_offset, 0.0);
+            let control2 = end - Vec2::new(control_offset, 0.0);
+
+            let bezier_points = bezier_to_line_segments(start, control1, control2, end);
+            let dist = point_to_bezier_distance(point, &bezier_points);
+
+            if dist < threshold {
+                return Some((connection.from_node, connection.to_node));
+            }
+        }
+    }
+
+    None
+}
+
+fn find_intersecting_connections(
+    scenario: &Scenario,
+    cut_path: &[Pos2],
+    pan_offset: Vec2,
+    zoom: f32,
+) -> Vec<(Uuid, Uuid)> {
+    let mut intersecting = Vec::new();
+
+    if cut_path.len() < 2 {
+        return intersecting;
+    }
+
+    let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
+
+    for connection in &scenario.connections {
+        if let (Some(from_node), Some(to_node)) = (
+            scenario.get_node(connection.from_node),
+            scenario.get_node(connection.to_node),
+        ) {
+            use rpa_core::BranchType;
+
+            let start = match connection.branch_type {
+                BranchType::TrueBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
+                BranchType::FalseBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                BranchType::LoopBody => to_screen(from_node.get_output_pin_pos_by_index(0)),
+                BranchType::ErrorBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                BranchType::TryBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
+                BranchType::CatchBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                BranchType::Default => {
+                    if from_node.get_output_pin_count() > 1 {
+                        match &from_node.activity {
+                            Activity::Loop { .. } | Activity::While { .. } | Activity::TryCatch => {
+                                to_screen(from_node.get_output_pin_pos_by_index(1))
+                            }
+                            _ if from_node.activity.can_have_error_output() => {
+                                to_screen(from_node.get_output_pin_pos_by_index(0))
+                            }
+                            _ => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                        }
+                    } else {
+                        to_screen(from_node.get_output_pin_pos())
+                    }
+                }
+            };
+            let end = to_screen(to_node.get_input_pin_pos());
+
+            let distance = (end.x - start.x).abs();
+            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+            let control1 = start + Vec2::new(control_offset, 0.0);
+            let control2 = end - Vec2::new(control_offset, 0.0);
+
+            let bezier_points = bezier_to_line_segments(start, control1, control2, end);
+
+            for i in 0..cut_path.len() - 1 {
+                let cut_start = cut_path[i];
+                let cut_end = cut_path[i + 1];
+
+                for j in 0..bezier_points.len() - 1 {
+                    let bezier_start = bezier_points[j];
+                    let bezier_end = bezier_points[j + 1];
+
+                    if line_segments_intersect(cut_start, cut_end, bezier_start, bezier_end) {
+                        intersecting.push((connection.from_node, connection.to_node));
+                        break;
+                    }
+                }
+
+                if intersecting
+                    .iter()
+                    .any(|(f, t)| *f == connection.from_node && *t == connection.to_node)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    intersecting
+}
+
+fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<ContextMenuAction> {
+    let mut action = None;
+
+    Popup::context_menu(&response)
+        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(150.0);
+
+            if !state.selected_nodes.is_empty()
+                && ui.button(t!("context_menu.copy").as_ref()).clicked()
+            {
+                action = Some(ContextMenuAction::Copy);
+                ui.close();
+            }
+
+            if !state.clipboard_empty && ui.button(t!("context_menu.paste").as_ref()).clicked() {
+                action = Some(ContextMenuAction::Paste);
+                ui.close();
+            }
+
+            if !state.selected_nodes.is_empty()
+                && ui.button(t!("context_menu.delete").as_ref()).clicked()
+            {
+                action = Some(ContextMenuAction::Delete);
+                ui.close();
+            }
+
+            if ui.button(t!("context_menu.select_all").as_ref()).clicked() {
+                action = Some(ContextMenuAction::SelectAll);
+                ui.close();
+            }
+        });
+
+    action
+}
+
+pub fn render_node_graph(
+    ui: &mut Ui,
+    scenario: &mut Scenario,
+    state: &mut RenderState,
+) -> (ContextMenuAction, Vec2) {
+    let mut context_action = ContextMenuAction::None;
+    let (response, painter) =
+        ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+
+    let rect = response.rect;
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(40, 40, 40));
+
+    let mouse_world_pos = if let Some(mouse_pos) = ui.ctx().pointer_hover_pos() {
+        (mouse_pos.to_vec2() - *state.pan_offset) / *state.zoom
+    } else {
+        let viewport_center = ui.ctx().viewport_rect().center();
+        (viewport_center.to_vec2() - *state.pan_offset) / *state.zoom
+    };
+
+    if response.hovered() {
+        let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
+        if scroll_delta != 0.0
+            && let Some(mouse_pos) = ui.ctx().pointer_hover_pos()
+        {
+            let old_zoom = *state.zoom;
+            let zoom_delta = scroll_delta * UiConstants::ZOOM_DELTA_MULTIPLIER;
+            *state.zoom =
+                (*state.zoom + zoom_delta).clamp(UiConstants::ZOOM_MIN, UiConstants::ZOOM_MAX);
+
+            let mouse_world_before =
+                ((mouse_pos.to_vec2() - *state.pan_offset) / old_zoom).to_pos2();
+            let mouse_world_after = mouse_world_before;
+            let mouse_screen_after =
+                (mouse_world_after.to_vec2() * *state.zoom + *state.pan_offset).to_pos2();
+            *state.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
+        }
+    }
+
+    let is_panning = ui.input(|i| {
+        i.pointer.button_down(egui::PointerButton::Middle)
+            || (i.pointer.button_down(egui::PointerButton::Primary) && i.key_down(egui::Key::Space))
+    });
+
+    if is_panning && response.dragged() && !*state.knife_tool_active {
+        *state.pan_offset += response.drag_delta();
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+
+    let alt_rmb =
+        ui.input(|i| i.modifiers.alt && i.pointer.button_down(egui::PointerButton::Secondary));
+
+    if alt_rmb && !*state.knife_tool_active {
+        *state.knife_tool_active = true;
+        state.knife_path.clear();
+    }
+
+    if *state.knife_tool_active && !alt_rmb {
+        if !state.knife_path.is_empty() {
+            let connections_to_remove = find_intersecting_connections(
+                scenario,
+                state.knife_path,
+                *state.pan_offset,
+                *state.zoom,
+            );
+            for (from_node, to_node) in connections_to_remove {
+                scenario
+                    .connections
+                    .retain(|c| !(c.from_node == from_node && c.to_node == to_node));
+            }
+        }
+        *state.knife_tool_active = false;
+        state.knife_path.clear();
+    }
+
+    if *state.knife_tool_active
+        && alt_rmb
+        && let Some(pos) = ui.ctx().pointer_interact_pos()
+        && (state.knife_path.is_empty() || response.dragged())
+    {
+        state.knife_path.push(pos);
+    }
+
+    let to_screen =
+        |pos: Pos2| -> Pos2 { (pos.to_vec2() * *state.zoom + *state.pan_offset).to_pos2() };
+
+    draw_grid_transformed(&painter, rect, *state.pan_offset, *state.zoom);
+
+    for connection in &scenario.connections {
+        if let (Some(from_node), Some(to_node)) = (
+            scenario.get_node(connection.from_node),
+            scenario.get_node(connection.to_node),
+        ) {
+            draw_connection_transformed(
+                &painter,
+                from_node,
+                to_node,
+                &connection.branch_type,
+                to_screen,
+            );
+        }
+    }
+
+    let mut clicked_node: Option<Uuid> = None;
+    let mut any_node_hovered = false;
+    let mut new_connection: Option<(Uuid, usize, Uuid)> = None;
+    let shift_held = ui.input(|i| i.modifiers.shift);
+
+    let box_select_start =
+        ui.memory(|mem| mem.data.get_temp::<Pos2>(ui.id().with("box_select_start")));
+    let mut box_select_rect: Option<Rect> = None;
+
+    let is_left_drag = ui.input(|i| i.pointer.primary_down()) && response.drag_started();
+    if !*state.knife_tool_active
+        && !is_panning
+        && is_left_drag
+        && !any_node_hovered
+        && let Some(pos) = ui.ctx().pointer_interact_pos()
+    {
+        ui.memory_mut(|mem| {
+            mem.data.insert_temp(ui.id().with("box_select_start"), pos);
+        });
+    }
+
+    if !*state.knife_tool_active
+        && let Some(start) = box_select_start
+        && let Some(current) = ui.ctx().pointer_latest_pos()
+    {
+        box_select_rect = Some(Rect::from_two_pos(start, current));
+
+        if let Some(rect) = box_select_rect {
+            painter.rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0, Color32::from_rgb(100, 150, 255)),
+                StrokeKind::Middle,
+            );
+            painter.rect_filled(
+                rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(100, 150, 255, 30),
+            );
+        }
+    }
+
+    if ui.input(|i| i.pointer.any_released()) {
+        if let Some(select_rect) = box_select_rect {
+            if !shift_held {
+                state.selected_nodes.clear();
+            }
+
+            for node in &scenario.nodes {
+                let node_rect = egui::Rect::from_min_max(
+                    to_screen(node.get_rect().min),
+                    to_screen(node.get_rect().max),
+                );
+                if select_rect.intersects(node_rect) {
+                    state.selected_nodes.insert(node.id);
+                }
+            }
+        }
+        ui.memory_mut(|mem| {
+            mem.data.remove::<Pos2>(ui.id().with("box_select_start"));
+        });
+    }
+
+    let mut drag_delta_to_apply: Option<Vec2> = None;
+    let mut node_being_dragged: Option<Uuid> = None;
+    let mut node_drag_released: Option<Uuid> = None;
+
+    let node_hovering_connection = if state.selected_nodes.len() == 1
+        && let Some(selected_id) = state.selected_nodes.iter().next().copied()
+        && let Some(selected_node) = scenario.get_node(selected_id)
+        && ui.input(|i| i.pointer.primary_down())
+        && state.connection_from.is_none()
+    {
+        let node_center_screen = to_screen(selected_node.get_rect().center());
+        if find_connection_near_point(
+            scenario,
+            node_center_screen,
+            *state.pan_offset,
+            *state.zoom,
+            UiConstants::LINK_INSERT_THRESHOLD * *state.zoom,
+        )
+        .is_some()
+        {
+            Some(selected_id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some((resizing_id, handle)) = *state.resizing_node
+        && let Some(node) = scenario.nodes.iter_mut().find(|n| n.id == resizing_id)
+    {
+        if ui.input(|i| i.pointer.any_released()) {
+            *state.resizing_node = None;
+        } else {
+            let delta = ui.input(|i| i.pointer.delta());
+            let delta_world = delta / *state.zoom;
+            match handle {
+                ResizeHandle::Right => {
+                    node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                }
+                ResizeHandle::Left => {
+                    let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                    let width_change = node.width - new_width;
+                    node.position.x += width_change;
+                    node.width = new_width;
+                }
+                ResizeHandle::Bottom => {
+                    node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                }
+                ResizeHandle::Top => {
+                    let new_height =
+                        (node.height - delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                    let height_change = node.height - new_height;
+                    node.position.y += height_change;
+                    node.height = new_height;
+                }
+                ResizeHandle::BottomRight => {
+                    node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                    node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                }
+                ResizeHandle::BottomLeft => {
+                    let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                    let width_change = node.width - new_width;
+                    node.position.x += width_change;
+                    node.width = new_width;
+                    node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                }
+                ResizeHandle::TopRight => {
+                    node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                    let new_height =
+                        (node.height - delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                    let height_change = node.height - new_height;
+                    node.position.y += height_change;
+                    node.height = new_height;
+                }
+                ResizeHandle::TopLeft => {
+                    let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                    let width_change = node.width - new_width;
+                    node.position.x += width_change;
+                    node.width = new_width;
+                    let new_height =
+                        (node.height - delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                    let height_change = node.height - new_height;
+                    node.position.y += height_change;
+                    node.height = new_height;
+                }
+            }
+            if let Activity::Note { width, height, .. } = &mut node.activity {
+                *width = node.width;
+                *height = node.height;
+            }
+        }
+    }
+
+    for i in (0..scenario.nodes.len()).rev() {
+        let node = &mut scenario.nodes[i];
+        let is_selected = state.selected_nodes.contains(&node.id);
+
+        let node_rect_world = node.get_rect();
+        let node_rect_screen = egui::Rect::from_min_max(
+            to_screen(node_rect_world.min),
+            to_screen(node_rect_world.max),
+        );
+
+        let node_response = ui.interact(
+            node_rect_screen,
+            ui.id().with(node.id),
+            egui::Sense::click_and_drag(),
+        );
+
+        let mut handle_interaction = false;
+        let is_note_node = matches!(node.activity, Activity::Note { .. });
+        let can_resize = is_note_node || state.allow_node_resize;
+
+        if can_resize
+            && state.connection_from.is_none()
+            && !is_panning
+            && state.resizing_node.is_none()
+        {
+            let handle_size = UiConstants::NOTE_RESIZE_HANDLE_SIZE * *state.zoom;
+
+            let corner_br = egui::Rect::from_min_size(
+                node_rect_screen.max - egui::vec2(handle_size, handle_size),
+                egui::vec2(handle_size, handle_size),
+            );
+            let corner_bl = egui::Rect::from_min_size(
+                egui::pos2(node_rect_screen.min.x, node_rect_screen.max.y - handle_size),
+                egui::vec2(handle_size, handle_size),
+            );
+            let corner_tr = egui::Rect::from_min_size(
+                egui::pos2(node_rect_screen.max.x - handle_size, node_rect_screen.min.y),
+                egui::vec2(handle_size, handle_size),
+            );
+            let corner_tl = egui::Rect::from_min_size(
+                node_rect_screen.min,
+                egui::vec2(handle_size, handle_size),
+            );
+
+            let edge_right = egui::Rect::from_min_size(
+                egui::pos2(
+                    node_rect_screen.max.x - handle_size,
+                    node_rect_screen.min.y + handle_size,
+                ),
+                egui::vec2(handle_size, node_rect_screen.height() - handle_size * 2.0),
+            );
+            let edge_left = egui::Rect::from_min_size(
+                egui::pos2(node_rect_screen.min.x, node_rect_screen.min.y + handle_size),
+                egui::vec2(handle_size, node_rect_screen.height() - handle_size * 2.0),
+            );
+            let edge_bottom = egui::Rect::from_min_size(
+                egui::pos2(
+                    node_rect_screen.min.x + handle_size,
+                    node_rect_screen.max.y - handle_size,
+                ),
+                egui::vec2(node_rect_screen.width() - handle_size * 2.0, handle_size),
+            );
+            let edge_top = egui::Rect::from_min_size(
+                egui::pos2(node_rect_screen.min.x + handle_size, node_rect_screen.min.y),
+                egui::vec2(node_rect_screen.width() - handle_size * 2.0, handle_size),
+            );
+
+            let br_response = ui.interact(
+                corner_br,
+                ui.id().with(("resize_br", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let bl_response = ui.interact(
+                corner_bl,
+                ui.id().with(("resize_bl", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let tr_response = ui.interact(
+                corner_tr,
+                ui.id().with(("resize_tr", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let tl_response = ui.interact(
+                corner_tl,
+                ui.id().with(("resize_tl", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let r_response = ui.interact(
+                edge_right,
+                ui.id().with(("resize_r", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let l_response = ui.interact(
+                edge_left,
+                ui.id().with(("resize_l", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let b_response = ui.interact(
+                edge_bottom,
+                ui.id().with(("resize_b", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+            let t_response = ui.interact(
+                edge_top,
+                ui.id().with(("resize_t", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+
+            if br_response.hovered()
+                || br_response.dragged()
+                || tl_response.hovered()
+                || tl_response.dragged()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+                any_node_hovered = true;
+                handle_interaction = true;
+            } else if bl_response.hovered()
+                || bl_response.dragged()
+                || tr_response.hovered()
+                || tr_response.dragged()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNeSw);
+                any_node_hovered = true;
+                handle_interaction = true;
+            } else if r_response.hovered()
+                || r_response.dragged()
+                || l_response.hovered()
+                || l_response.dragged()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                any_node_hovered = true;
+                handle_interaction = true;
+            } else if b_response.hovered()
+                || b_response.dragged()
+                || t_response.hovered()
+                || t_response.dragged()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                any_node_hovered = true;
+                handle_interaction = true;
+            }
+
+            if br_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::BottomRight));
+            } else if bl_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::BottomLeft));
+            } else if tr_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::TopRight));
+            } else if tl_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::TopLeft));
+            } else if r_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::Right));
+            } else if l_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::Left));
+            } else if b_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::Bottom));
+            } else if t_response.drag_started() {
+                *state.resizing_node = Some((node.id, ResizeHandle::Top));
+            }
+        }
+
+        if node_response.dragged()
+            && state.connection_from.is_none()
+            && !is_panning
+            && state.resizing_node.is_none()
+            && !handle_interaction
+            && !*state.knife_tool_active
+        {
+            if !is_selected {
+                node_being_dragged = Some(node.id);
+            }
+
+            drag_delta_to_apply = Some(node_response.drag_delta() / *state.zoom);
+        }
+
+        if node_response.drag_stopped()
+            && state.connection_from.is_none()
+            && !is_panning
+            && is_selected
+            && state.selected_nodes.len() == 1
+        {
+            node_drag_released = Some(node.id);
+        }
+
+        if node_response.clicked()
+            && clicked_node.is_none()
+            && state.connection_from.is_none()
+            && !*state.knife_tool_active
+        {
+            clicked_node = Some(node.id);
+        }
+
+        if !*state.knife_tool_active {
+            Popup::context_menu(&node_response)
+                .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    if !state.selected_nodes.contains(&node.id) {
+                        state.selected_nodes.clear();
+                        state.selected_nodes.insert(node.id);
+                    }
+
+                    ui.set_min_width(150.0);
+
+                    if ui.button(t!("context_menu.copy").as_ref()).clicked() {
+                        context_action = ContextMenuAction::Copy;
+                        ui.close();
+                    }
+                    if ui.button(t!("context_menu.paste").as_ref()).clicked() {
+                        context_action = ContextMenuAction::Paste;
+                        ui.close();
+                    }
+                    if ui.button(t!("context_menu.delete").as_ref()).clicked() {
+                        context_action = ContextMenuAction::Delete;
+                        ui.close();
+                    }
+                });
+        }
+
+        if node_response.hovered() {
+            any_node_hovered = true;
+        }
+
+        let is_hovering_connection = node_hovering_connection == Some(node.id);
+        let is_being_resized = state
+            .resizing_node
+            .map(|(id, _)| id == node.id)
+            .unwrap_or(false);
+
+        draw_node_transformed(
+            &painter,
+            node,
+            is_selected,
+            is_hovering_connection,
+            is_being_resized,
+            to_screen,
+            *state.zoom,
+        );
+    }
+
+    if let Some(dragged_id) = node_being_dragged {
+        if !shift_held {
+            state.selected_nodes.clear();
+        }
+        state.selected_nodes.insert(dragged_id);
+    }
+
+    if let Some(drag_delta) = drag_delta_to_apply {
+        for node in &mut scenario.nodes {
+            if state.selected_nodes.contains(&node.id) {
+                node.position += drag_delta;
+            }
+        }
+    }
+
+    if let Some(released_node_id) = node_drag_released
+        && let Some(released_node) = scenario.get_node(released_node_id)
+    {
+        let node_center_screen = to_screen(released_node.get_rect().center());
+
+        if let Some((from_id, to_id)) = find_connection_near_point(
+            scenario,
+            node_center_screen,
+            *state.pan_offset,
+            *state.zoom,
+            UiConstants::LINK_INSERT_THRESHOLD * *state.zoom,
+        ) && released_node_id != from_id
+            && released_node_id != to_id
+            && let Some(conn_to_remove) = scenario
+                .connections
+                .iter()
+                .find(|c| c.from_node == from_id && c.to_node == to_id)
+                .cloned()
+        {
+            let branch_type = conn_to_remove.branch_type.clone();
+
+            scenario
+                .connections
+                .retain(|c| !(c.from_node == from_id && c.to_node == to_id));
+
+            if let (Some(from_node), Some(to_node)) = (
+                scenario.nodes.iter().find(|n| n.id == from_id),
+                scenario.nodes.iter().find(|n| n.id == to_id),
+            ) {
+                let from_pos = from_node.position;
+                let to_pos = to_node.position;
+
+                let horizontal_distance = to_pos.x - from_pos.x;
+
+                if horizontal_distance < UiConstants::MIN_NODE_SPACING * 2.0 {
+                    let total_needed = UiConstants::MIN_NODE_SPACING * 2.0;
+                    let expansion_needed = total_needed - horizontal_distance;
+
+                    for node in &mut scenario.nodes {
+                        if node.id == from_id {
+                            node.position.x -= expansion_needed * 0.5;
+                        } else if node.id == to_id {
+                            node.position.x += expansion_needed * 0.5;
+                        }
+                    }
+                }
+
+                let from_x = scenario
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == from_id)
+                    .unwrap()
+                    .position
+                    .x;
+                let from_y = scenario
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == from_id)
+                    .unwrap()
+                    .position
+                    .y;
+                let to_x = scenario
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == to_id)
+                    .unwrap()
+                    .position
+                    .x;
+                let to_y = scenario
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == to_id)
+                    .unwrap()
+                    .position
+                    .y;
+
+                if let Some(inserted_node_mut) =
+                    scenario.nodes.iter_mut().find(|n| n.id == released_node_id)
+                {
+                    inserted_node_mut.position.x = (from_x + to_x) / 2.0;
+                    inserted_node_mut.position.y = (from_y + to_y) / 2.0;
+                }
+            }
+
+            scenario.add_connection_with_branch(from_id, released_node_id, branch_type);
+            scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
+        }
+    }
+
+    for i in (0..scenario.nodes.len()).rev() {
+        let node = &scenario.nodes[i];
+
+        if node.has_output_pin() {
+            let pin_count = node.get_output_pin_count();
+
+            for pin_index in 0..pin_count {
+                let output_pin = to_screen(node.get_output_pin_pos_by_index(pin_index));
+                let output_pin_rect = egui::Rect::from_center_size(
+                    output_pin,
+                    egui::vec2(
+                        UiConstants::PIN_INTERACT_SIZE * *state.zoom,
+                        UiConstants::PIN_INTERACT_SIZE * *state.zoom,
+                    ),
+                );
+                let output_response = ui.interact(
+                    output_pin_rect,
+                    ui.id().with(("output", node.id, pin_index)),
+                    egui::Sense::click_and_drag(),
+                );
+
+                if output_response.drag_started() && !*state.knife_tool_active {
+                    *state.connection_from = Some((node.id, pin_index));
+
+                    let branch_type = node.get_branch_type_for_pin(pin_index);
+
+                    if node.get_output_pin_count() > 1 {
+                        scenario
+                            .connections
+                            .retain(|c| !(c.from_node == node.id && c.branch_type == branch_type));
+                    } else {
+                        scenario.connections.retain(|c| c.from_node != node.id);
+                    }
+                }
+            }
+        }
+
+        if node.has_input_pin() {
+            let input_pin = to_screen(node.get_input_pin_pos());
+            let input_pin_rect = egui::Rect::from_center_size(
+                input_pin,
+                egui::vec2(
+                    UiConstants::PIN_INTERACT_SIZE * *state.zoom,
+                    UiConstants::PIN_INTERACT_SIZE * *state.zoom,
+                ),
+            );
+            let input_response = ui.interact(
+                input_pin_rect,
+                ui.id().with(("input", node.id)),
+                egui::Sense::click_and_drag(),
+            );
+
+            let node_rect_world = node.get_rect();
+            let node_rect_screen = egui::Rect::from_min_max(
+                to_screen(node_rect_world.min),
+                to_screen(node_rect_world.max),
+            );
+            let node_body_response = ui.interact(
+                node_rect_screen,
+                ui.id().with(("input_body", node.id)),
+                egui::Sense::hover(),
+            );
+
+            if input_response.drag_started()
+                && !*state.knife_tool_active
+                && let Some(conn) = scenario
+                    .connections
+                    .iter()
+                    .find(|c| c.to_node == node.id)
+                    .cloned()
+            {
+                if let Some(from_node) = scenario.get_node(conn.from_node) {
+                    let pin_index = from_node.get_pin_index_for_branch(&conn.branch_type);
+                    *state.connection_from = Some((conn.from_node, pin_index));
+                }
+
+                scenario
+                    .connections
+                    .retain(|c| c.from_node == conn.from_node && c.to_node == node.id);
+            }
+
+            if let Some((from_id, pin_index)) = *state.connection_from
+                && (input_response.hovered() || node_body_response.hovered())
+                && ui.input(|i| i.pointer.any_released())
+                && !*state.knife_tool_active
+            {
+                if from_id != node.id {
+                    new_connection = Some((from_id, pin_index, node.id));
+                }
+                *state.connection_from = None;
+            }
+        }
+    }
+
+    if let Some((from_id, pin_index)) = *state.connection_from {
+        if let Some(from_node) = scenario.get_node(from_id)
+            && let Some(pointer_pos) = ui.ctx().pointer_latest_pos()
+        {
+            let start = to_screen(from_node.get_output_pin_pos_by_index(pin_index));
+            let end = pointer_pos;
+
+            let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
+            let control1 = start + Vec2::new(control_offset, 0.0);
+            let control2 = end - Vec2::new(control_offset, 0.0);
+
+            let preview_color = match &from_node.activity {
+                Activity::IfCondition { .. } => {
+                    if pin_index == 0 {
+                        ColorPalette::CONNECTION_TRUE
+                    } else {
+                        ColorPalette::CONNECTION_FALSE
+                    }
+                }
+                Activity::Loop { .. } | Activity::While { .. } => {
+                    if pin_index == 0 {
+                        ColorPalette::CONNECTION_LOOP_BODY
+                    } else {
+                        ColorPalette::CONNECTION_DEFAULT
+                    }
+                }
+                Activity::TryCatch => {
+                    if pin_index == 0 {
+                        ColorPalette::CONNECTION_DEFAULT
+                    } else {
+                        ColorPalette::CONNECTION_ERROR
+                    }
+                }
+                _ => {
+                    if from_node.activity.can_have_error_output() {
+                        if pin_index == 0 {
+                            ColorPalette::CONNECTION_DEFAULT
+                        } else {
+                            ColorPalette::CONNECTION_ERROR
+                        }
+                    } else {
+                        ColorPalette::CONNECTION_DEFAULT
+                    }
+                }
+            };
+
+            draw_bezier(
+                &painter,
+                start,
+                control1,
+                control2,
+                end,
+                Stroke::new(2.0 * *state.zoom, preview_color),
+            );
+        }
+
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+            *state.connection_from = None;
+        }
+
+        if ui.input(|i| i.pointer.any_released()) && !any_node_hovered {
+            *state.connection_from = None;
+        }
+    }
+
+    if let Some((from, pin_index, to)) = new_connection {
+        let from_node = scenario.get_node(from).unwrap();
+        let branch_type = from_node.get_branch_type_for_pin(pin_index);
+
+        if from_node.get_output_pin_count() > 1 {
+            scenario
+                .connections
+                .retain(|c| !(c.from_node == from && c.branch_type == branch_type));
+        } else {
+            scenario.connections.retain(|c| c.from_node != from);
+        }
+
+        scenario.add_connection_with_branch(from, to, branch_type);
+    }
+
+    if let Some(clicked) = clicked_node {
+        if shift_held {
+            if state.selected_nodes.contains(&clicked) {
+                state.selected_nodes.remove(&clicked);
+            } else {
+                state.selected_nodes.insert(clicked);
+            }
+        } else {
+            state.selected_nodes.clear();
+            state.selected_nodes.insert(clicked);
+        }
+    } else if response.clicked()
+        && !any_node_hovered
+        && box_select_rect.is_none()
+        && !*state.knife_tool_active
+    {
+        state.selected_nodes.clear();
+    }
+
+    if !*state.knife_tool_active
+        && let Some(action) = canvas_context_menu(state, &response)
+    {
+        context_action = action;
+    }
+
+    if state.show_minimap {
+        let minimap_layer =
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("minimap_layer"));
+        let minimap_painter = ui.ctx().layer_painter(minimap_layer);
+        render_minimap_internal(
+            &minimap_painter,
+            scenario,
+            *state.pan_offset,
+            *state.zoom,
+            rect,
+        );
+    }
+
+    if *state.knife_tool_active {
+        if ui.ctx().pointer_latest_pos().is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+
+        if state.knife_path.len() > 1 {
+            painter.add(egui::Shape::line(
+                state.knife_path.clone(),
+                Stroke::new(3.0, Color32::from_rgb(255, 100, 100)),
+            ));
+        }
+    }
+
+    (context_action, mouse_world_pos)
+}
+
+fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, zoom: f32) {
+    let grid_spacing = UiConstants::GRID_SPACING * zoom;
+    let grid_color = Color32::from_rgb(50, 50, 50);
+
+    let start_x = (rect.left() - pan_offset.x % grid_spacing).floor();
+    let start_y = (rect.top() - pan_offset.y % grid_spacing).floor();
+
+    let mut x = start_x;
+    while x < rect.right() {
+        painter.line_segment(
+            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+            Stroke::new(1.0, grid_color),
+        );
+        x += grid_spacing;
+    }
+
+    let mut y = start_y;
+    while y < rect.bottom() {
+        painter.line_segment(
+            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            Stroke::new(1.0, grid_color),
+        );
+        y += grid_spacing;
+    }
+}
+
+fn draw_node_transformed<F>(
+    painter: &egui::Painter,
+    node: &Node,
+    is_selected: bool,
+    is_hovering_connection: bool,
+    is_being_resized: bool,
+    to_screen: F,
+    zoom: f32,
+) where
+    F: Fn(Pos2) -> Pos2,
+{
+    let rect_world = node.get_rect();
+    let rect = egui::Rect::from_min_max(to_screen(rect_world.min), to_screen(rect_world.max));
+    let mut color = node.activity.get_color();
+    let rounding = UiConstants::NODE_ROUNDING * zoom;
+
+    if is_hovering_connection {
+        let r = color.r().saturating_add(30);
+        let g = color.g().saturating_add(30);
+        let b = color.b().saturating_add(30);
+        color = Color32::from_rgb(r, g, b);
+    }
+
+    let shadow_offset = Vec2::new(
+        UiConstants::NODE_SHADOW_OFFSET * zoom,
+        UiConstants::NODE_SHADOW_OFFSET * zoom,
+    );
+    painter.rect_filled(
+        rect.translate(shadow_offset),
+        rounding,
+        Color32::from_black_alpha(100),
+    );
+
+    painter.rect_filled(rect, rounding, color);
+
+    if is_being_resized {
+        painter.rect_stroke(
+            rect,
+            rounding,
+            Stroke::new(4.0 * zoom, Color32::from_rgb(100, 150, 255)),
+            StrokeKind::Outside,
+        );
+    } else if is_selected {
+        painter.rect_stroke(
+            rect,
+            rounding,
+            Stroke::new(2.0 * zoom, Color32::from_rgb(255, 255, 0)),
+            StrokeKind::Outside,
+        );
+    } else {
+        painter.rect_stroke(
+            rect,
+            rounding,
+            Stroke::new(1.0 * zoom, Color32::from_rgb(20, 20, 20)),
+            StrokeKind::Outside,
+        );
+    }
+
+    if let Activity::Note { text, .. } = &node.activity {
+        let padding = UiConstants::NOTE_PADDING * zoom;
+        let text_rect = egui::Rect::from_min_max(
+            rect.min + Vec2::new(padding, padding),
+            rect.max - Vec2::new(padding, padding),
+        );
+
+        let font_id = egui::FontId::proportional(12.0 * zoom);
+        let mut job = egui::text::LayoutJob::default();
+        job.wrap.max_width = text_rect.width();
+        job.append(
+            text,
+            0.0,
+            egui::text::TextFormat {
+                font_id: font_id.clone(),
+                color: Color32::from_rgb(60, 60, 60),
+                ..Default::default()
+            },
+        );
+
+        let galley = painter.layout_job(job);
+        painter.galley(text_rect.min, galley, Color32::from_rgb(60, 60, 60));
+    } else {
+        let text_pos = rect.min + Vec2::new(10.0 * zoom, 10.0 * zoom);
+        painter.text(
+            text_pos,
+            egui::Align2::LEFT_TOP,
+            node.activity.get_name(),
+            egui::FontId::proportional(14.0 * zoom),
+            Color32::WHITE,
+        );
+    }
+
+    if node.has_input_pin() {
+        let input_pin = to_screen(node.get_input_pin_pos());
+        painter.circle_filled(
+            input_pin,
+            UiConstants::PIN_RADIUS * zoom,
+            Color32::from_rgb(150, 150, 150),
+        );
+        painter.circle_stroke(
+            input_pin,
+            UiConstants::PIN_RADIUS * zoom,
+            Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
+        );
+    }
+
+    if node.has_output_pin() {
+        let pin_count = node.get_output_pin_count();
+
+        if pin_count == 2 {
+            match &node.activity {
+                Activity::IfCondition { .. } => {
+                    let true_pin = to_screen(node.get_output_pin_pos_by_index(0));
+                    let false_pin = to_screen(node.get_output_pin_pos_by_index(1));
+
+                    painter.circle_filled(
+                        true_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        ColorPalette::PIN_TRUE,
+                    );
+                    painter.circle_stroke(
+                        true_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
+                    );
+
+                    painter.text(
+                        true_pin + Vec2::new(12.0 * zoom, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "T",
+                        egui::FontId::proportional(10.0 * zoom),
+                        ColorPalette::PIN_TRUE,
+                    );
+
+                    painter.circle_filled(
+                        false_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        ColorPalette::PIN_FALSE,
+                    );
+                    painter.circle_stroke(
+                        false_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
+                    );
+
+                    painter.text(
+                        false_pin + Vec2::new(12.0 * zoom, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "F",
+                        egui::FontId::proportional(10.0 * zoom),
+                        ColorPalette::PIN_FALSE,
+                    );
+                }
+                Activity::Loop { .. } | Activity::While { .. } => {
+                    let body_pin = to_screen(node.get_output_pin_pos_by_index(0));
+                    let next_pin = to_screen(node.get_output_pin_pos_by_index(1));
+
+                    painter.circle_filled(
+                        body_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        ColorPalette::PIN_LOOP_BODY,
+                    );
+                    painter.circle_stroke(
+                        body_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        Stroke::new(1.0 * zoom, Color32::from_rgb(200, 120, 0)),
+                    );
+
+                    painter.text(
+                        body_pin + Vec2::new(12.0 * zoom, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "B",
+                        egui::FontId::proportional(10.0 * zoom),
+                        ColorPalette::PIN_LOOP_BODY,
+                    );
+
+                    painter.circle_filled(
+                        next_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        ColorPalette::PIN_LOOP_NEXT,
+                    );
+                    painter.circle_stroke(
+                        next_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
+                    );
+
+                    painter.text(
+                        next_pin + Vec2::new(12.0 * zoom, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "N",
+                        egui::FontId::proportional(10.0 * zoom),
+                        ColorPalette::PIN_LOOP_NEXT,
+                    );
+                }
+                Activity::TryCatch => {
+                    let try_pin = to_screen(node.get_output_pin_pos_by_index(0));
+                    let catch_pin = to_screen(node.get_output_pin_pos_by_index(1));
+
+                    painter.circle_filled(
+                        try_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        ColorPalette::PIN_SUCCESS,
+                    );
+                    painter.circle_stroke(
+                        try_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
+                    );
+
+                    painter.text(
+                        try_pin + Vec2::new(12.0 * zoom, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "T",
+                        egui::FontId::proportional(10.0 * zoom),
+                        ColorPalette::PIN_SUCCESS,
+                    );
+
+                    painter.circle_filled(
+                        catch_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        ColorPalette::PIN_ERROR,
+                    );
+                    painter.circle_stroke(
+                        catch_pin,
+                        UiConstants::PIN_RADIUS * zoom,
+                        Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
+                    );
+
+                    painter.text(
+                        catch_pin + Vec2::new(12.0 * zoom, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "C",
+                        egui::FontId::proportional(10.0 * zoom),
+                        ColorPalette::PIN_ERROR,
+                    );
+                }
+                _ => {
+                    if node.activity.can_have_error_output() {
+                        let success_pin = to_screen(node.get_output_pin_pos_by_index(0));
+                        let error_pin = to_screen(node.get_output_pin_pos_by_index(1));
+
+                        painter.circle_filled(
+                            success_pin,
+                            UiConstants::PIN_RADIUS * zoom,
+                            ColorPalette::PIN_SUCCESS,
+                        );
+                        painter.circle_stroke(
+                            success_pin,
+                            UiConstants::PIN_RADIUS * zoom,
+                            Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
+                        );
+
+                        painter.text(
+                            success_pin + Vec2::new(12.0 * zoom, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            "S",
+                            egui::FontId::proportional(10.0 * zoom),
+                            ColorPalette::PIN_SUCCESS,
+                        );
+
+                        painter.circle_filled(
+                            error_pin,
+                            UiConstants::PIN_RADIUS * zoom,
+                            ColorPalette::PIN_ERROR,
+                        );
+                        painter.circle_stroke(
+                            error_pin,
+                            UiConstants::PIN_RADIUS * zoom,
+                            Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
+                        );
+
+                        painter.text(
+                            error_pin + Vec2::new(12.0 * zoom, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            "E",
+                            egui::FontId::proportional(10.0 * zoom),
+                            ColorPalette::PIN_ERROR,
+                        );
+                    }
+                }
+            }
+        } else {
+            let output_pin = to_screen(node.get_output_pin_pos());
+            painter.circle_filled(
+                output_pin,
+                UiConstants::PIN_RADIUS * zoom,
+                ColorPalette::PIN_DEFAULT,
+            );
+            painter.circle_stroke(
+                output_pin,
+                UiConstants::PIN_RADIUS * zoom,
+                Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
+            );
+        }
+    }
+}
+
+fn draw_connection_transformed<F>(
+    painter: &egui::Painter,
+    from_node: &Node,
+    to_node: &Node,
+    branch_type: &BranchType,
+    to_screen: F,
+) where
+    F: Fn(Pos2) -> Pos2,
+{
+    let start = match branch_type {
+        BranchType::TrueBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
+        BranchType::FalseBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+        BranchType::LoopBody => to_screen(from_node.get_output_pin_pos_by_index(0)),
+        BranchType::ErrorBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+        BranchType::TryBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
+        BranchType::CatchBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
+        BranchType::Default => {
+            if from_node.get_output_pin_count() > 1 {
+                match &from_node.activity {
+                    crate::Activity::Loop { .. } => {
+                        to_screen(from_node.get_output_pin_pos_by_index(1))
+                    }
+                    _ if from_node.activity.can_have_error_output() => {
+                        to_screen(from_node.get_output_pin_pos_by_index(0))
+                    }
+                    _ => to_screen(from_node.get_output_pin_pos_by_index(1)),
+                }
+            } else {
+                to_screen(from_node.get_output_pin_pos())
+            }
+        }
+    };
+    let end = to_screen(to_node.get_input_pin_pos());
+
+    let distance = (end.x - start.x).abs();
+    let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+    let control1 = start + Vec2::new(control_offset, 0.0);
+    let control2 = end - Vec2::new(control_offset, 0.0);
+
+    let color = match branch_type {
+        BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
+        BranchType::FalseBranch => ColorPalette::CONNECTION_FALSE,
+        BranchType::LoopBody => ColorPalette::CONNECTION_LOOP_BODY,
+        BranchType::ErrorBranch => ColorPalette::CONNECTION_ERROR,
+        BranchType::TryBranch => ColorPalette::CONNECTION_DEFAULT,
+        BranchType::CatchBranch => ColorPalette::CONNECTION_ERROR,
+        BranchType::Default => ColorPalette::CONNECTION_DEFAULT,
+    };
+
+    draw_bezier(
+        painter,
+        start,
+        control1,
+        control2,
+        end,
+        Stroke::new(2.0, color),
+    );
+}
+
+fn draw_bezier(painter: &egui::Painter, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, stroke: Stroke) {
+    let steps = UiConstants::BEZIER_STEPS;
+    let mut points = Vec::with_capacity(steps);
+
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let mt = 1.0 - t;
+        let mt2 = mt * mt;
+        let mt3 = mt2 * mt;
+
+        let x = mt3 * p0.x + 3.0 * mt2 * t * p1.x + 3.0 * mt * t2 * p2.x + t3 * p3.x;
+        let y = mt3 * p0.y + 3.0 * mt2 * t * p1.y + 3.0 * mt * t2 * p2.y + t3 * p3.y;
+
+        points.push(Pos2::new(x, y));
+    }
+
+    painter.add(egui::Shape::line(points, stroke));
+}
+
+fn render_minimap_internal(
+    painter: &egui::Painter,
+    scenario: &Scenario,
+    pan_offset: Vec2,
+    zoom: f32,
+    canvas_rect: egui::Rect,
+) {
+    let minimap_size = egui::vec2(UiConstants::MINIMAP_WIDTH, UiConstants::MINIMAP_HEIGHT);
+    let minimap_pos = canvas_rect.max
+        - minimap_size
+        - egui::vec2(UiConstants::MINIMAP_OFFSET_X, UiConstants::MINIMAP_OFFSET_Y);
+    let minimap_rect = egui::Rect::from_min_size(minimap_pos, minimap_size);
+
+    painter.rect_filled(
+        minimap_rect,
+        5.0,
+        egui::Color32::from_rgba_unmultiplied(30, 30, 30, 200),
+    );
+    painter.rect_stroke(
+        minimap_rect,
+        5.0,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 100)),
+        egui::StrokeKind::Outside,
+    );
+
+    if scenario.nodes.is_empty() {
+        return;
+    }
+
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+
+    for node in &scenario.nodes {
+        let rect = node.get_rect();
+        min_x = min_x.min(rect.min.x);
+        min_y = min_y.min(rect.min.y);
+        max_x = max_x.max(rect.max.x);
+        max_y = max_y.max(rect.max.y);
+    }
+
+    min_x -= UiConstants::MINIMAP_WORLD_PADDING;
+    min_y -= UiConstants::MINIMAP_WORLD_PADDING;
+    max_x += UiConstants::MINIMAP_WORLD_PADDING;
+    max_y += UiConstants::MINIMAP_WORLD_PADDING;
+
+    let world_width = max_x - min_x;
+    let world_height = max_y - min_y;
+
+    let scale_x = (minimap_size.x - UiConstants::MINIMAP_PADDING * 2.0) / world_width;
+    let scale_y = (minimap_size.y - UiConstants::MINIMAP_PADDING * 2.0) / world_height;
+    let minimap_scale = scale_x.min(scale_y);
+
+    let to_minimap = |world_pos: egui::Pos2| -> egui::Pos2 {
+        let relative_x = (world_pos.x - min_x) * minimap_scale;
+        let relative_y = (world_pos.y - min_y) * minimap_scale;
+        minimap_rect.min
+            + egui::vec2(
+                relative_x + UiConstants::MINIMAP_PADDING,
+                relative_y + UiConstants::MINIMAP_PADDING,
+            )
+    };
+
+    for node in &scenario.nodes {
+        let node_rect = node.get_rect();
+        let minimap_min = to_minimap(node_rect.min);
+        let minimap_max = to_minimap(node_rect.max);
+        let node_minimap_rect = egui::Rect::from_min_max(minimap_min, minimap_max);
+
+        painter.rect_filled(node_minimap_rect, 1.0, node.activity.get_color());
+    }
+
+    for connection in &scenario.connections {
+        if let (Some(from_node), Some(to_node)) = (
+            scenario.get_node(connection.from_node),
+            scenario.get_node(connection.to_node),
+        ) {
+            let from_pos = to_minimap(from_node.get_output_pin_pos());
+            let to_pos = to_minimap(to_node.get_input_pin_pos());
+            painter.line_segment(
+                [from_pos, to_pos],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 150)),
+            );
+        }
+    }
+
+    let viewport_world_min = (-pan_offset) / zoom;
+    let viewport_world_max = (canvas_rect.size() - pan_offset) / zoom;
+
+    let viewport_minimap_min = to_minimap(viewport_world_min.to_pos2());
+    let viewport_minimap_max = to_minimap(viewport_world_max.to_pos2());
+    let viewport_minimap_rect =
+        egui::Rect::from_min_max(viewport_minimap_min, viewport_minimap_max);
+
+    let clipped_viewport_rect = viewport_minimap_rect.intersect(minimap_rect);
+
+    painter.rect_stroke(
+        clipped_viewport_rect,
+        2.0,
+        egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)),
+        egui::StrokeKind::Outside,
+    );
+    painter.rect_filled(
+        clipped_viewport_rect,
+        2.0,
+        egui::Color32::from_rgba_unmultiplied(100, 150, 255, 30),
+    );
+}
+
+pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::Scenario]) {
+    use rpa_core::{ActivityMetadata, PropertyType};
+
+    ui.horizontal(|ui| {
+        ui.strong(node.activity.get_name());
+        ui.label("💡")
+            .on_hover_text(t!("tooltips.variable_syntax").as_ref());
+    });
+    ui.separator();
+
+    let metadata = ActivityMetadata::for_activity(&node.activity);
+
+    for (prop_idx, prop_def) in metadata.properties.iter().enumerate() {
+        let label = t!(prop_def.label_key).to_string();
+
+        match prop_def.property_type {
+            PropertyType::Description => {
+                ui.label(label);
+            }
+            PropertyType::TextSingleLine => {
+                let mut label_widget = ui.label(&label);
+                if let Some(tooltip) = prop_def.tooltip_key {
+                    label_widget = label_widget.on_hover_text(t!(tooltip).as_ref());
+                }
+
+                match &mut node.activity {
+                    Activity::SetVariable { name, .. } if prop_idx == 0 => {
+                        ui.text_edit_singleline(name);
+                    }
+                    Activity::SetVariable { var_type, .. } if prop_idx == 1 => {
+                        egui::ComboBox::from_id_salt("var_type_combo")
+                            .selected_text(var_type.as_str())
+                            .show_ui(ui, |ui| {
+                                for vt in rpa_core::VariableType::all() {
+                                    if ui.selectable_label(*var_type == vt, vt.as_str()).clicked() {
+                                        *var_type = vt;
+                                    }
+                                }
+                            });
+                    }
+                    Activity::SetVariable {
+                        value, var_type, ..
+                    } if prop_idx == 2 => match var_type {
+                        VariableType::String => {
+                            ui.text_edit_singleline(value);
+                        }
+                        VariableType::Number => {
+                            let mut n: f64 = value.parse().unwrap_or(0.0);
+                            ui.add(egui::DragValue::new(&mut n));
+                            *value = n.to_string();
+                        }
+                        VariableType::Boolean => {
+                            let mut b: bool =
+                                matches!(value.to_lowercase().as_str(), "true" | "1" | "yes");
+                            ui.checkbox(&mut b, "");
+                            *value = b.to_string();
+                        }
+                    },
+                    Activity::GetVariable { name } => {
+                        ui.text_edit_singleline(name);
+                    }
+                    Activity::IfCondition { condition } | Activity::While { condition } => {
+                        ui.text_edit_singleline(condition);
+                    }
+                    Activity::Loop { index, .. } if prop_idx == 0 => {
+                        ui.text_edit_singleline(index);
+                    }
+                    Activity::Evaluate { expression } if prop_idx == 0 => {
+                        ui.text_edit_singleline(expression);
+                    }
+                    _ => {}
+                }
+            }
+            PropertyType::TextMultiLine => {
+                ui.label(&label);
+
+                match &mut node.activity {
+                    Activity::Log { level, message } => {
+                        ui.text_edit_multiline(message);
+
+                        egui::ComboBox::from_id_salt("log_level_selector")
+                            .selected_text(level.as_str())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(level, LogLevel::Info, "INFO");
+                                ui.selectable_value(level, LogLevel::Warning, "WARN");
+                                ui.selectable_value(level, LogLevel::Error, "ERROR");
+                                ui.selectable_value(level, LogLevel::Debug, "DEBUG");
+                            });
+                    }
+                    Activity::Note { text, .. } => {
+                        ui.text_edit_multiline(text);
+                    }
+                    _ => {}
+                }
+            }
+            PropertyType::Slider => {
+                ui.label(&label);
+
+                if let Activity::Delay { milliseconds } = &mut node.activity {
+                    ui.add(egui::Slider::new(
+                        milliseconds,
+                        0..=UiConstants::DELAY_MAX_MS,
+                    ));
+                }
+            }
+            PropertyType::DragInt => {
+                ui.label(&label);
+
+                if let Activity::Loop {
+                    start, end, step, ..
+                } = &mut node.activity
+                {
+                    match prop_idx {
+                        1 => {
+                            ui.add(egui::DragValue::new(start));
+                        }
+                        2 => {
+                            ui.add(egui::DragValue::new(end));
+                        }
+                        3 => {
+                            ui.add(egui::DragValue::new(step));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            PropertyType::ScenarioSelector => {
+                ui.label(&label);
+
+                if let Activity::CallScenario { scenario_id } = &mut node.activity {
+                    if scenarios.is_empty() {
+                        ui.label(t!("status.no_scenarios").as_ref());
+                    } else {
+                        let invalid_text = t!("status.scenario_invalid").to_string();
+                        let current_name = scenarios
+                            .iter()
+                            .find(|s| s.id == *scenario_id)
+                            .map(|s| s.name.as_str())
+                            .unwrap_or(&invalid_text);
+
+                        egui::ComboBox::from_id_salt("scenario_selector")
+                            .selected_text(current_name)
+                            .show_ui(ui, |ui| {
+                                for scenario in scenarios {
+                                    ui.selectable_value(scenario_id, scenario.id, &scenario.name);
+                                }
+                            });
+                    }
+                }
+            }
+            PropertyType::CodeEditor => {
+                ui.label(&label);
+
+                if let Activity::RunPowershell { code } = &mut node.activity {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        CodeEditor::default()
+                            .id_source("code editor")
+                            .with_rows(12)
+                            .with_fontsize(14.0)
+                            .with_theme(ColorTheme::GRUVBOX)
+                            .with_syntax(Syntax::shell())
+                            .with_numlines(true)
+                            .show(ui, code);
+                    });
+                }
+            }
+        }
+    }
+
+    ui.separator();
+    ui.label(
+        t!(
+            "properties.position",
+            x = node.position.x : {:.2},
+            y = node.position.y : {:.2}
+        )
+        .as_ref(),
+    );
+    ui.label(t!("properties.node_id", node_id = node.id,).as_ref());
+}
