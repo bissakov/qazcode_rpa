@@ -153,12 +153,6 @@ impl LogStorage {
         }
     }
 
-    pub fn default() -> Self {
-        Self {
-            values: VecDeque::new(),
-        }
-    }
-
     pub fn push(&mut self, entry: LogEntry) {
         if self.values.len() == MAX_LOG_ENTRIES {
             self.values.pop_front();
@@ -172,6 +166,10 @@ impl LogStorage {
 
     pub fn len(&mut self) -> usize {
         self.values.len()
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.values.len() == 0
     }
 
     pub fn clear(&mut self) {

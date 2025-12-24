@@ -1,9 +1,10 @@
 mod activity_ext;
 mod colors;
+mod dialogs;
 mod loglevel_ext;
 mod ui;
 
-use egui::IconData;
+use egui::{DragValue, IconData};
 use egui_extras::{Column, TableBuilder};
 use loglevel_ext::LogLevelExt;
 
@@ -11,6 +12,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 use eframe::egui;
 
+use dialogs::DialogState;
 use rpa_core::{
     Activity, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
     ScenarioValidator, UiConstants, VarEvent, VariableType, VariableValue, Variables,
@@ -25,7 +27,7 @@ use std::time::SystemTime;
 use uuid::Uuid;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct AppSettings {
+pub struct AppSettings {
     font_size: f32,
     show_minimap: bool,
     allow_node_resize: bool,
@@ -104,24 +106,15 @@ struct RpaApp {
     pan_offset: egui::Vec2,
     zoom: f32,
     settings: AppSettings,
-    temp_settings: Option<AppSettings>,
-    show_settings: bool,
-    show_debug: bool,
-    show_debug_ir: bool,
     log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
-    rename_scenario_index: Option<usize>,
     clipboard: Vec<Node>,
     variables: Variables,
     variable_receiver: Option<std::sync::mpsc::Receiver<VarEvent>>,
     knife_tool_active: bool,
     knife_path: Vec<egui::Pos2>,
-    show_add_variable: bool,
-    new_var_name: String,
-    new_var_value: String,
-    new_var_type: VariableType,
     resizing_node: Option<(Uuid, ui::ResizeHandle)>,
     stop_flag: Arc<AtomicBool>,
-    selected_log_entry: Option<usize>,
+    dialogs: DialogState,
 }
 
 impl Default for RpaApp {
@@ -136,24 +129,15 @@ impl Default for RpaApp {
             pan_offset: egui::Vec2::ZERO,
             zoom: 1.0,
             settings: AppSettings::default(),
-            temp_settings: None,
-            show_settings: false,
-            show_debug: false,
-            show_debug_ir: false,
             log_receiver: None,
-            rename_scenario_index: None,
             clipboard: Vec::new(),
             variables: Variables::new(),
             variable_receiver: None,
             knife_tool_active: false,
             knife_path: Vec::new(),
-            show_add_variable: false,
-            new_var_name: String::new(),
-            new_var_value: String::new(),
-            new_var_type: VariableType::String,
             resizing_node: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
-            selected_log_entry: None,
+            dialogs: DialogState::default(),
         }
     }
 }
@@ -300,7 +284,7 @@ impl RpaApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(t!("bottom_bar.clear").as_ref()).clicked() {
                             self.project.execution_log.clear();
-                            self.selected_log_entry = None;
+                            self.dialogs.selected_log_entry = None;
                         }
                     });
                 });
@@ -381,7 +365,7 @@ impl RpaApp {
                                         );
 
                                         if response.clicked() {
-                                            self.selected_log_entry = Some(row_index);
+                                            self.dialogs.selected_log_entry = Some(row_index);
                                         }
 
                                         if response.hovered() {
@@ -399,7 +383,7 @@ impl RpaApp {
     }
 
     fn render_dialogs(&mut self, ctx: &egui::Context) {
-        if let Some(log_index) = self.selected_log_entry {
+        if let Some(log_index) = self.dialogs.selected_log_entry {
             let mut is_open = true;
             egui::Window::new("Log Message")
                 .id(egui::Id::new("log_message_window"))
@@ -416,22 +400,22 @@ impl RpaApp {
                 });
 
             if !is_open {
-                self.selected_log_entry = None;
+                self.dialogs.selected_log_entry = None;
             }
         }
 
-        if self.show_settings {
-            if self.temp_settings.is_none() {
-                self.temp_settings = Some(self.settings.clone());
+        if self.dialogs.settings.show {
+            if self.dialogs.settings.temp_settings.is_none() {
+                self.dialogs.settings.temp_settings = Some(self.settings.clone());
             }
 
             let mut close_dialog = false;
 
             egui::Window::new(t!("settings_dialog.title").as_ref())
                 .id(egui::Id::new("settings_window"))
-                .open(&mut self.show_settings)
+                .open(&mut self.dialogs.settings.show)
                 .show(ctx, |ui| {
-                    if let Some(temp) = &mut self.temp_settings {
+                    if let Some(temp) = &mut self.dialogs.settings.temp_settings {
                         ui.heading(t!("settings_dialog.display_settings").as_ref());
                         ui.separator();
 
@@ -513,12 +497,12 @@ impl RpaApp {
                     }
                 });
 
-            if !self.show_settings || close_dialog {
-                self.temp_settings = None;
+            if !self.dialogs.settings.show || close_dialog {
+                self.dialogs.settings.temp_settings = None;
             }
         }
 
-        if let Some(index) = self.rename_scenario_index {
+        if let Some(index) = self.dialogs.rename_scenario.scenario_index {
             let mut close_window = false;
 
             if index < self.project.scenarios.len() {
@@ -564,29 +548,40 @@ impl RpaApp {
             }
 
             if close_window {
-                self.rename_scenario_index = None;
+                self.dialogs.rename_scenario.scenario_index = None;
             }
         }
 
-        if self.show_add_variable {
+        if self.dialogs.add_variable.show {
             let mut close_window = false;
+
+            let screen_rect = ctx.content_rect();
+            let sidebar_width = UiConstants::PROPERTIES_PANEL_WIDTH;
+            let sidebar_left = screen_rect.right() - sidebar_width;
+            let dialog_width = 300.0;
+            let pos = egui::Pos2 {
+                x: (sidebar_left - dialog_width - 10.0).max(10.0),
+                y: (screen_rect.top() + 500.0).max(10.0),
+            };
 
             egui::Window::new(t!("add_variable_dialog.title").as_ref())
                 .id(egui::Id::new("add_variable_window"))
                 .collapsible(false)
                 .resizable(false)
+                .default_pos(pos)
                 .show(ctx, |ui| {
                     ui.label(t!("add_variable_dialog.variable_name").as_ref());
 
-                    let name_response = ui.text_edit_singleline(&mut self.new_var_name);
+                    let name_response =
+                        ui.text_edit_singleline(&mut self.dialogs.add_variable.name);
 
                     ui.label(t!("add_variable_dialog.type").as_ref());
                     egui::ComboBox::from_id_salt("var_type_combo")
-                        .selected_text(self.new_var_type.as_str())
+                        .selected_text(self.dialogs.add_variable.var_type.as_str())
                         .show_ui(ui, |ui| {
                             for var_type in VariableType::all() {
                                 ui.selectable_value(
-                                    &mut self.new_var_type,
+                                    &mut self.dialogs.add_variable.var_type,
                                     var_type.clone(),
                                     var_type.as_str(),
                                 );
@@ -594,14 +589,41 @@ impl RpaApp {
                         });
 
                     ui.label(t!("add_variable_dialog.value").as_ref());
-                    let value_response = ui.text_edit_singleline(&mut self.new_var_value);
 
-                    if self.new_var_name.is_empty() {
+                    let value_response = match self.dialogs.add_variable.var_type {
+                        VariableType::String => {
+                            ui.text_edit_singleline(&mut self.dialogs.add_variable.value)
+                        }
+                        VariableType::Boolean => {
+                            let mut bool_val = self
+                                .dialogs
+                                .add_variable
+                                .value
+                                .parse::<bool>()
+                                .unwrap_or(false);
+                            let response = ui.checkbox(&mut bool_val, "");
+                            self.dialogs.add_variable.value = bool_val.to_string();
+                            response
+                        }
+                        VariableType::Number => {
+                            let mut num_val = self
+                                .dialogs
+                                .add_variable
+                                .value
+                                .parse::<f64>()
+                                .unwrap_or(0.0);
+                            let response = ui.add(DragValue::new(&mut num_val));
+                            self.dialogs.add_variable.value = num_val.to_string();
+                            response
+                        }
+                    };
+
+                    if self.dialogs.add_variable.name.is_empty() {
                         name_response.request_focus();
                     }
 
                     ui.horizontal(|ui| {
-                        let can_add = !self.new_var_name.trim().is_empty();
+                        let can_add = !self.dialogs.add_variable.name.trim().is_empty();
 
                         if ui
                             .add_enabled(
@@ -614,21 +636,21 @@ impl RpaApp {
                                 && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                         {
                             match VariableValue::from_string(
-                                &self.new_var_value.to_string(),
-                                &self.new_var_type,
+                                &self.dialogs.add_variable.value,
+                                &self.dialogs.add_variable.var_type,
                             ) {
                                 Ok(value) => {
-                                    let var_name = self.new_var_name.trim();
+                                    let var_name = self.dialogs.add_variable.name.trim();
                                     let id = self.project.variables.id(var_name);
                                     self.project.variables.set(id, value);
-                                    self.new_var_name.clear();
-                                    self.new_var_value.clear();
-                                    self.new_var_type = VariableType::String;
+                                    self.dialogs.add_variable.name.clear();
+                                    self.dialogs.add_variable.value.clear();
+                                    self.dialogs.add_variable.var_type = VariableType::String;
                                     close_window = true;
                                 }
                                 Err(err) => {
                                     self.project.execution_log.push(LogEntry {
-                                        timestamp: "[00:00.000]".to_string(),
+                                        timestamp: "[00:00.00]".to_string(),
                                         level: LogLevel::Error,
                                         activity: "SYSTEM".to_string(),
                                         message: t!(
@@ -644,29 +666,29 @@ impl RpaApp {
                             .button(t!("add_variable_dialog.cancel").as_ref())
                             .clicked()
                         {
-                            self.new_var_name.clear();
-                            self.new_var_value.clear();
-                            self.new_var_type = VariableType::String;
+                            self.dialogs.add_variable.name.clear();
+                            self.dialogs.add_variable.value.clear();
+                            self.dialogs.add_variable.var_type = VariableType::String;
                             close_window = true;
                         }
                     });
                 });
 
             if close_window {
-                self.show_add_variable = false;
+                self.dialogs.add_variable.show = false;
             }
         }
 
-        if self.show_debug {
+        if self.dialogs.debug.show_debug {
             egui::Window::new("Debug")
                 .id(egui::Id::new("debug_window"))
-                .open(&mut self.show_debug)
+                .open(&mut self.dialogs.debug.show_debug)
                 .show(ctx, |ui| {
                     ctx.inspection_ui(ui);
                 });
         }
 
-        if self.show_debug_ir {
+        if self.dialogs.debug.show_debug_ir {
             // egui::Window::new("Debug Instructions")
             //     .id(egui::Id::new("debug_instructions_window"))
             //     .open(&mut self.show_debug_ir)
@@ -684,7 +706,7 @@ impl RpaApp {
             //     });
         }
 
-        if let Some(index) = self.rename_scenario_index {
+        if let Some(index) = self.dialogs.rename_scenario.scenario_index {
             let mut close_window = false;
 
             if index < self.project.scenarios.len() {
@@ -721,95 +743,7 @@ impl RpaApp {
             }
 
             if close_window {
-                self.rename_scenario_index = None;
-            }
-        }
-
-        if self.show_add_variable {
-            let mut close_window = false;
-
-            egui::Window::new(t!("add_variable_dialog.title").as_ref())
-                .id(egui::Id::new("add_variable_window"))
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(t!("add_variable_dialog.variable_name").as_ref());
-                    let name_response = ui.text_edit_singleline(&mut self.new_var_name);
-
-                    ui.label(t!("add_variable_dialog.type").as_ref());
-                    egui::ComboBox::from_id_salt("var_type_combo")
-                        .selected_text(self.new_var_type.as_str())
-                        .show_ui(ui, |ui| {
-                            for var_type in VariableType::all() {
-                                ui.selectable_value(
-                                    &mut self.new_var_type,
-                                    var_type.clone(),
-                                    var_type.as_str(),
-                                );
-                            }
-                        });
-
-                    ui.label(t!("add_variable_dialog.value").as_ref());
-                    let value_response = ui.text_edit_singleline(&mut self.new_var_value);
-
-                    if self.new_var_name.is_empty() {
-                        name_response.request_focus();
-                    }
-
-                    ui.horizontal(|ui| {
-                        let can_add = !self.new_var_name.trim().is_empty();
-
-                        if ui
-                            .add_enabled(
-                                can_add,
-                                egui::Button::new(t!("add_variable_dialog.add").as_ref()),
-                            )
-                            .clicked()
-                            || (can_add
-                                && value_response.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                        {
-                            match VariableValue::from_string(
-                                &self.new_var_value,
-                                &self.new_var_type,
-                            ) {
-                                Ok(value) => {
-                                    let var_name = self.new_var_name.trim();
-                                    let id = self.project.variables.id(var_name);
-                                    self.project.variables.set(id, value);
-                                    self.new_var_name.clear();
-                                    self.new_var_value.clear();
-                                    self.new_var_type = VariableType::String;
-                                    close_window = true;
-                                }
-                                Err(err) => {
-                                    self.project.execution_log.push(LogEntry {
-                                        timestamp: "[00:00.000]".to_string(),
-                                        level: LogLevel::Error,
-                                        activity: "SYSTEM".to_string(),
-                                        message: t!(
-                                            "system_messages.invalid_variable_value",
-                                            error = err
-                                        )
-                                        .to_string(),
-                                    });
-                                }
-                            }
-                        }
-                        if ui
-                            .button(t!("add_variable_dialog.cancel").as_ref())
-                            .clicked()
-                        {
-                            self.new_var_name.clear();
-                            self.new_var_value.clear();
-                            self.new_var_type = VariableType::String;
-                            close_window = true;
-                        }
-                    });
-                });
-
-            if close_window {
-                self.show_add_variable = false;
+                self.dialogs.rename_scenario.scenario_index = None;
             }
         }
     }
@@ -821,8 +755,8 @@ impl RpaApp {
         let paste_event =
             ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
         let has_selected = !self.selected_nodes.is_empty();
-        let no_settings = !self.show_settings;
-        let no_rename = self.rename_scenario_index.is_none();
+        let no_settings = !self.dialogs.settings.show;
+        let no_rename = self.dialogs.rename_scenario.scenario_index.is_none();
 
         if copy_event && has_selected && no_settings && no_rename {
             self.copy_selected_nodes();
@@ -908,11 +842,11 @@ impl RpaApp {
                 ui.menu_button(t!("menu.edit").as_ref(), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                     if ui.button(t!("menu.settings").as_ref()).clicked() {
-                        self.show_settings = true;
+                        self.dialogs.settings.show = true;
                         ui.close();
                     }
                     if ui.button("Debug").clicked() {
-                        self.show_debug = true;
+                        self.dialogs.debug.show_debug = true;
                         ui.close();
                     }
                 });
@@ -981,7 +915,7 @@ impl RpaApp {
                         }
 
                         if ui.small_button("✏").clicked() {
-                            self.rename_scenario_index = Some(i);
+                            self.dialogs.rename_scenario.scenario_index = Some(i);
                         }
 
                         if ui.small_button("🗑").clicked() {
@@ -1039,7 +973,7 @@ impl RpaApp {
                                                 Some(Activity::CallScenario { scenario_id });
                                         } else {
                                             self.project.execution_log.push(LogEntry {
-                                                timestamp: "[00:00.000]".to_string(),
+                                                timestamp: "[00:00.00]".to_string(),
                                                 level: LogLevel::Warning,
                                                 activity: "SYSTEM".to_string(),
                                                 message: t!("system_messages.no_scenarios_warning")
@@ -1153,9 +1087,8 @@ impl RpaApp {
                             ui.end_row();
 
                             for (name, value) in &all_vars {
-                                ui.label(name);
-
                                 if !matches!(value, VariableValue::Undefined) {
+                                    ui.label(name);
                                     ui.label(value.get_type().as_str());
                                     let value_str = format!("{}", value);
                                     let display_value = if value_str.len() > 15 {
@@ -1164,15 +1097,12 @@ impl RpaApp {
                                         value_str
                                     };
                                     ui.label(display_value);
-                                } else {
-                                    ui.label("—");
-                                    ui.label(t!("variables.undefined").as_ref());
-                                }
 
-                                if ui.small_button("🗑").clicked() {
-                                    to_remove = Some(name.clone());
+                                    if ui.small_button("🗑").clicked() {
+                                        to_remove = Some(name.clone());
+                                    }
+                                    ui.end_row();
                                 }
-                                ui.end_row();
                             }
                         });
 
@@ -1189,7 +1119,7 @@ impl RpaApp {
 
                 ui.add_space(5.0);
                 if ui.button(t!("variables.add_variable").as_ref()).clicked() {
-                    self.show_add_variable = true;
+                    self.dialogs.add_variable.show = true;
                 }
             });
     }
@@ -1334,7 +1264,7 @@ impl RpaApp {
     fn execute_project(&mut self) {
         self.project.execution_log.clear();
         self.project.execution_log.push(LogEntry {
-            timestamp: "[00:00.000]".to_string(),
+            timestamp: "[00:00.00]".to_string(),
             level: LogLevel::Info,
             activity: "SYSTEM".to_string(),
             message: t!("system_messages.execution_start").to_string(),
@@ -1378,7 +1308,7 @@ impl RpaApp {
                 ),
             });
             self.project.execution_log.push(LogEntry {
-                timestamp: "[00:00.000]".to_string(),
+                timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Info,
                 activity: "SYSTEM".to_string(),
                 message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
@@ -1403,7 +1333,7 @@ impl RpaApp {
                     message: format!("IR compilation failed: {}", e),
                 });
                 self.project.execution_log.push(LogEntry {
-                    timestamp: "[00:00.000]".to_string(),
+                    timestamp: "[00:00.00]".to_string(),
                     level: LogLevel::Info,
                     activity: "SYSTEM".to_string(),
                     message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
@@ -1450,7 +1380,7 @@ impl RpaApp {
                 Ok(_) => {
                     self.current_file = Some(path.clone());
                     self.project.execution_log.push(LogEntry {
-                        timestamp: "[00:00.000]".to_string(),
+                        timestamp: "[00:00.00]".to_string(),
                         level: LogLevel::Info,
                         activity: "SYSTEM".to_string(),
                         message: t!("system_messages.project_saved", path = path.display())
@@ -1459,7 +1389,7 @@ impl RpaApp {
                 }
                 Err(e) => {
                     self.project.execution_log.push(LogEntry {
-                        timestamp: "[00:00.000]".to_string(),
+                        timestamp: "[00:00.00]".to_string(),
                         level: LogLevel::Error,
                         activity: "SYSTEM".to_string(),
                         message: t!("system_messages.failed_save", error = e).to_string(),
@@ -1468,7 +1398,7 @@ impl RpaApp {
             },
             Err(e) => {
                 self.project.execution_log.push(LogEntry {
-                    timestamp: "[00:00.000]".to_string(),
+                    timestamp: "[00:00.00]".to_string(),
                     level: LogLevel::Error,
                     activity: "SYSTEM".to_string(),
                     message: t!("system_messages.failed_serialize", error = e).to_string(),
@@ -1493,7 +1423,7 @@ impl RpaApp {
                         Ok(mut project_file) => {
                             project_file.project.execution_log.clear();
                             project_file.project.execution_log.push(LogEntry {
-                                timestamp: "[00:00.000]".to_string(),
+                                timestamp: "[00:00.00]".to_string(),
                                 level: LogLevel::Info,
                                 activity: "SYSTEM".to_string(),
                                 message: t!(
@@ -1515,7 +1445,7 @@ impl RpaApp {
                         }
                         Err(e) => {
                             self.project.execution_log.push(LogEntry {
-                                timestamp: "[00:00.000]".to_string(),
+                                timestamp: "[00:00.00]".to_string(),
                                 level: LogLevel::Error,
                                 activity: "SYSTEM".to_string(),
                                 message: t!("system_messages.failed_parse", error = e).to_string(),
@@ -1525,7 +1455,7 @@ impl RpaApp {
                 }
                 Err(e) => {
                     self.project.execution_log.push(LogEntry {
-                        timestamp: "[00:00.000]".to_string(),
+                        timestamp: "[00:00.00]".to_string(),
                         level: LogLevel::Error,
                         activity: "SYSTEM".to_string(),
                         message: t!("system_messages.failed_read", error = e).to_string(),

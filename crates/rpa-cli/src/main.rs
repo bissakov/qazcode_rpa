@@ -52,21 +52,19 @@ fn main() {
 
     println!("                                                  ");
     println!("                  ##################              ");
-    println!("                  ###################             ");
-    println!("           ######                ####             ");
-    println!("         ########                ####             ");
-    println!("         ########                ####             ");
-    println!("             ####     ######     ####             ");
-    println!("             ####     ######     ####             ");
-    println!("             ####     ######     ####             ");
-    println!("             ####                ####             ");
-    println!("             ####                ####             ");
-    println!("             ####                ####             ");
+    println!("                  ####################            ");
+    println!("           ######                 ####            ");
+    println!("         ########                 ####            ");
+    println!("         ########                 ####            ");
+    println!("             ####     ######      ####            ");
+    println!("             ####     ######      ####            ");
+    println!("             ####     ######      ####            ");
+    println!("             ####                 ####            ");
+    println!("             #### QazCode RPA CLI ####            ");
+    println!("             ####                 ####            ");
     println!("             ###################     ####         ");
     println!("              ##################     ####         ");
     println!("                                                  ");
-    println!("QazCode RPA CLI");
-    println!("==================");
     println!("Project: {}", project.name);
     println!();
 
@@ -85,7 +83,10 @@ fn main() {
     let validation_result = validator.validate();
 
     if !validation_result.is_valid() {
-        eprintln!("Execution aborted: {} validation errors", validation_result.errors.len());
+        eprintln!(
+            "Execution aborted: {} validation errors",
+            validation_result.errors.len()
+        );
         for error in &validation_result.errors {
             eprintln!("  ERROR: {:?}", error);
         }
@@ -111,15 +112,17 @@ fn main() {
 
     std::thread::spawn(move || {
         if let Some(_scenario_name) = scenario_name {
-            eprintln!("Error: Specific scenario execution not supported in new IR-based architecture");
+            eprintln!(
+                "Error: Specific scenario execution not supported in new IR-based architecture"
+            );
             let _ = log_sender.send(LogEntry {
-                timestamp: "[00:00.000]".to_string(),
+                timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Error,
                 activity: "CLI".to_string(),
                 message: "Scenario-specific execution not supported".to_string(),
             });
             let _ = log_sender.send(LogEntry {
-                timestamp: "[00:00.000]".to_string(),
+                timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Info,
                 activity: "SYSTEM".to_string(),
                 message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),

@@ -218,12 +218,14 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 });
 
                 match utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
-                    Ok(()) => Ok(pc + 1),
-                    Err(()) => Err("Aborted".into()),
+                    true => Ok(pc + 1),
+                    false => Err("Aborted".into()),
                 }
             }
             Instruction::SetVar { var, value } => {
                 let timestamp = get_timestamp(self.context.start_time);
+
+                self.context.variables.set(*var, value.clone());
 
                 if let Some(sender) = &self.context.variable_sender {
                     let _ = sender.send(VarEvent::SetId {
@@ -612,7 +614,7 @@ pub fn execute_project_with_vars(
             ),
         });
         let _ = log_sender.send(LogEntry {
-            timestamp: "[00:00.000]".to_string(),
+            timestamp: "[00:00.00]".to_string(),
             level: LogLevel::Info,
             activity: "SYSTEM".to_string(),
             message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
@@ -636,7 +638,7 @@ pub fn execute_project_with_vars(
                 message: format!("IR compilation failed: {}", e),
             });
             let _ = log_sender.send(LogEntry {
-                timestamp: "[00:00.000]".to_string(),
+                timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Info,
                 activity: "SYSTEM".to_string(),
                 message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
@@ -679,69 +681,7 @@ pub fn execute_project_with_typed_vars(
     stop_flag: Arc<AtomicBool>,
 ) {
     let mut context = ExecutionContext::new(start_time, var_sender, variables, stop_flag);
-
-    // // for (name, value) in initial_vars {
-    // //     let id = context.variables.id(&name);
-    // //     context.variables.set(id, value.clone());
-    // //     // if let Some(sender) = &context.variable_sender {
-    // //     //     let _ = sender.send(VarEvent::Set {
-    // //     //         name: name.clone(),
-    // //     //         value,
-    // //     //     });
-    // //     // }
-    // // }
-    //
     let mut log = log_sender.clone();
-    //
-    // let validator = ScenarioValidator::new(&project.main_scenario, project);
-    // let validation_result = validator.validate();
-    //
-    // let timestamp = get_timestamp(context.start_time);
-    // validation_result.log_to_output(&mut log, &timestamp);
-    //
-    // if !validation_result.is_valid() {
-    //     let _ = log_sender.send(LogEntry {
-    //         timestamp: get_timestamp(context.start_time),
-    //         level: LogLevel::Error,
-    //         activity: "SYSTEM".to_string(),
-    //         message: format!(
-    //             "Execution aborted: {} validation errors",
-    //             validation_result.errors.len()
-    //         ),
-    //     });
-    //     let _ = log_sender.send(LogEntry {
-    //         timestamp: "[00:00.000]".to_string(),
-    //         level: LogLevel::Info,
-    //         activity: "SYSTEM".to_string(),
-    //         message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-    //     });
-    //     return;
-    // }
-    //
-    // let ir_builder = IrBuilder::new(
-    //     &project.main_scenario,
-    //     project,
-    //     &validation_result.reachable_nodes,
-    //     &mut context.variables,
-    // );
-    // let program = match ir_builder.build() {
-    //     Ok(prog) => prog,
-    //     Err(e) => {
-    //         let _ = log_sender.send(LogEntry {
-    //             timestamp: get_timestamp(context.start_time),
-    //             level: LogLevel::Error,
-    //             activity: "SYSTEM".to_string(),
-    //             message: format!("IR compilation failed: {}", e),
-    //         });
-    //         let _ = log_sender.send(LogEntry {
-    //             timestamp: "[00:00.000]".to_string(),
-    //             level: LogLevel::Info,
-    //             activity: "SYSTEM".to_string(),
-    //             message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-    //         });
-    //         return;
-    //     }
-    // };
 
     let mut executor = IrExecutor::new(&program, project, &mut context, &mut log);
     if let Err(e) = executor.execute() {

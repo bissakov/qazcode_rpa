@@ -204,7 +204,7 @@ impl<'a> IrBuilder<'a> {
                 let start = i + c.len_utf8();
 
                 let mut end = None;
-                while let Some((j, c2)) = chars.next() {
+                for (j, c2) in chars.by_ref() {
                     if c2 == UiConstants::VARIABLE_PLACEHOLDER_CLOSE {
                         end = Some(j);
                         break;
