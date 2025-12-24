@@ -1,6 +1,6 @@
 use crate::{constants::UiConstants, variables::Variables};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{collections::VecDeque, fmt};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
@@ -87,11 +87,10 @@ impl VariableValue {
         }
     }
 
-    pub fn as_string(&self) -> Option<&str> {
-        if let VariableValue::String(s) = self {
-            Some(s)
-        } else {
-            None
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            VariableValue::String(s) => Some(s),
+            _ => None,
         }
     }
 }
@@ -140,15 +139,53 @@ pub struct LogEntry {
     pub message: String,
 }
 
+const MAX_LOG_ENTRIES: usize = 100;
+
+#[derive(Default, Debug, Clone)]
+pub struct LogStorage {
+    values: VecDeque<LogEntry>,
+}
+
+impl LogStorage {
+    pub fn new() -> Self {
+        Self {
+            values: VecDeque::new(),
+        }
+    }
+
+    pub fn default() -> Self {
+        Self {
+            values: VecDeque::new(),
+        }
+    }
+
+    pub fn push(&mut self, entry: LogEntry) {
+        if self.values.len() == MAX_LOG_ENTRIES {
+            self.values.pop_front();
+        }
+        self.values.push_back(entry);
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&LogEntry> {
+        self.values.get(idx)
+    }
+
+    pub fn len(&mut self) -> usize {
+        self.values.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.values.clear();
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub name: String,
     pub main_scenario: Scenario,
     pub scenarios: Vec<Scenario>,
     #[serde(skip)]
-    pub execution_log: Vec<LogEntry>,
-    // #[serde(default)]
-    // pub initial_variables: indexmap::IndexMap<String, VariableValue>,
+    pub execution_log: LogStorage,
     pub variables: Variables,
 }
 
@@ -212,14 +249,6 @@ impl Default for UiState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub project: Project,
-    #[serde(default)]
-    pub ui_state: UiState,
-}
-
-impl ProjectFile {
-    pub fn normalized_max_iterations(&self) -> usize {
-        UiState::normalize_max_iterations(self.ui_state.max_iterations)
-    }
 }
 
 impl Project {
@@ -228,7 +257,7 @@ impl Project {
             name: name.to_string(),
             main_scenario: Scenario::new("Main"),
             scenarios: Vec::new(),
-            execution_log: Vec::new(),
+            execution_log: LogStorage::new(),
             // initial_variables: indexmap::IndexMap::new(),
             variables,
         }
@@ -504,9 +533,6 @@ pub enum Activity {
         name: String,
         value: String,
         var_type: VariableType,
-    },
-    GetVariable {
-        name: String,
     },
     Evaluate {
         expression: String,

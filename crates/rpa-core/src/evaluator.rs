@@ -1,4 +1,32 @@
-use crate::{constants::UiConstants, node_graph::VariableValue, variables::Variables};
+use crate::{
+    constants::UiConstants,
+    node_graph::VariableValue,
+    variables::{VarId, Variables},
+};
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Const(VariableValue),
+    Load(VarId),
+
+    Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
+    Mul(Box<Expr>, Box<Expr>),
+    Div(Box<Expr>, Box<Expr>),
+    Mod(Box<Expr>, Box<Expr>),
+    Neg(Box<Expr>),
+
+    Eq(Box<Expr>, Box<Expr>),
+    Ne(Box<Expr>, Box<Expr>),
+    Gt(Box<Expr>, Box<Expr>),
+    Ge(Box<Expr>, Box<Expr>),
+    Lt(Box<Expr>, Box<Expr>),
+    Le(Box<Expr>, Box<Expr>),
+
+    And(Box<Expr>, Box<Expr>),
+    Or(Box<Expr>, Box<Expr>),
+    Not(Box<Expr>),
+}
 
 trait ValueExt {
     fn to_bool(&self) -> Result<bool, String>;
@@ -306,7 +334,7 @@ impl Parser {
         }
     }
 
-    fn parse(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let result = self.parse_or(variables)?;
         if self.current().is_some() {
             return Err(format!("Unexpected token: {:?}", self.current()));
@@ -314,104 +342,77 @@ impl Parser {
         Ok(result)
     }
 
-    fn parse_or(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_or(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let mut left = self.parse_and(variables)?;
         while self.current() == Some(&Token::Or) {
             self.advance();
             let right = self.parse_and(variables)?;
-            let left_bool = left.to_bool()?;
-            let right_bool = right.to_bool()?;
-            left = VariableValue::Boolean(left_bool || right_bool);
+            left = Expr::Or(Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
-    fn parse_and(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_and(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let mut left = self.parse_comparison(variables)?;
         while self.current() == Some(&Token::And) {
             self.advance();
             let right = self.parse_comparison(variables)?;
-            let left_bool = left.to_bool()?;
-            let right_bool = right.to_bool()?;
-            left = VariableValue::Boolean(left_bool && right_bool);
+            left = Expr::And(Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
-    fn parse_comparison(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_comparison(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let left = self.parse_additive(variables)?;
 
         match self.current() {
             Some(Token::Equal) => {
                 self.advance();
                 let right = self.parse_additive(variables)?;
-                Ok(VariableValue::Boolean(self.compare_values(&left, &right)?))
+                Ok(Expr::Eq(Box::new(left), Box::new(right)))
             }
             Some(Token::NotEqual) => {
                 self.advance();
                 let right = self.parse_additive(variables)?;
-                Ok(VariableValue::Boolean(!self.compare_values(&left, &right)?))
+                Ok(Expr::Ne(Box::new(left), Box::new(right)))
             }
             Some(Token::Greater) => {
                 self.advance();
                 let right = self.parse_additive(variables)?;
-                Ok(VariableValue::Boolean(
-                    left.to_number()? > right.to_number()?,
-                ))
+                Ok(Expr::Gt(Box::new(left), Box::new(right)))
             }
             Some(Token::GreaterEqual) => {
                 self.advance();
                 let right = self.parse_additive(variables)?;
-                Ok(VariableValue::Boolean(
-                    left.to_number()? >= right.to_number()?,
-                ))
+                Ok(Expr::Ge(Box::new(left), Box::new(right)))
             }
             Some(Token::Less) => {
                 self.advance();
                 let right = self.parse_additive(variables)?;
-                Ok(VariableValue::Boolean(
-                    left.to_number()? < right.to_number()?,
-                ))
+                Ok(Expr::Lt(Box::new(left), Box::new(right)))
             }
             Some(Token::LessEqual) => {
                 self.advance();
                 let right = self.parse_additive(variables)?;
-                Ok(VariableValue::Boolean(
-                    left.to_number()? <= right.to_number()?,
-                ))
+                Ok(Expr::Le(Box::new(left), Box::new(right)))
             }
             _ => Ok(left),
         }
     }
 
-    fn compare_values(&self, left: &VariableValue, right: &VariableValue) -> Result<bool, String> {
-        match (left, right) {
-            (VariableValue::Number(l), VariableValue::Number(r)) => {
-                Ok((l - r).abs() < f64::EPSILON)
-            }
-            (VariableValue::Boolean(l), VariableValue::Boolean(r)) => Ok(l == r),
-            (VariableValue::String(l), VariableValue::String(r)) => Ok(l == r),
-            _ => {
-                let l_num = left.to_number()?;
-                let r_num = right.to_number()?;
-                Ok((l_num - r_num).abs() < f64::EPSILON)
-            }
-        }
-    }
-
-    fn parse_additive(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_additive(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let mut left = self.parse_multiplicative(variables)?;
         loop {
             match self.current() {
                 Some(Token::Plus) => {
                     self.advance();
                     let right = self.parse_multiplicative(variables)?;
-                    left = VariableValue::Number(left.to_number()? + right.to_number()?);
+                    left = Expr::Add(Box::new(left), Box::new(right));
                 }
                 Some(Token::Minus) => {
                     self.advance();
                     let right = self.parse_multiplicative(variables)?;
-                    left = VariableValue::Number(left.to_number()? - right.to_number()?);
+                    left = Expr::Sub(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }
@@ -419,32 +420,24 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_multiplicative(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_multiplicative(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let mut left = self.parse_unary(variables)?;
         loop {
             match self.current() {
                 Some(Token::Multiply) => {
                     self.advance();
                     let right = self.parse_unary(variables)?;
-                    left = VariableValue::Number(left.to_number()? * right.to_number()?);
+                    left = Expr::Mul(Box::new(left), Box::new(right));
                 }
                 Some(Token::Divide) => {
                     self.advance();
                     let right = self.parse_unary(variables)?;
-                    let divisor = right.to_number()?;
-                    if divisor.abs() < f64::EPSILON {
-                        return Err("Division by zero".to_string());
-                    }
-                    left = VariableValue::Number(left.to_number()? / divisor);
+                    left = Expr::Div(Box::new(left), Box::new(right));
                 }
                 Some(Token::Modulo) => {
                     self.advance();
                     let right = self.parse_unary(variables)?;
-                    let divisor = right.to_number()?;
-                    if divisor.abs() < f64::EPSILON {
-                        return Err("Modulo by zero".to_string());
-                    }
-                    left = VariableValue::Number(left.to_number()? % divisor);
+                    left = Expr::Mod(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }
@@ -452,17 +445,17 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_unary(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_unary(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         match self.current() {
             Some(Token::Not) => {
                 self.advance();
                 let value = self.parse_unary(variables)?;
-                Ok(VariableValue::Boolean(!value.to_bool()?))
+                Ok(Expr::Not(Box::new(value)))
             }
             Some(Token::Minus) => {
                 self.advance();
                 let value = self.parse_unary(variables)?;
-                Ok(VariableValue::Number(-value.to_number()?))
+                Ok(Expr::Neg(Box::new(value)))
             }
             Some(Token::Plus) => {
                 self.advance();
@@ -472,34 +465,27 @@ impl Parser {
         }
     }
 
-    fn parse_primary(&mut self, variables: &mut Variables) -> Result<VariableValue, String> {
+    fn parse_primary(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         match self.current() {
             Some(Token::Number(n)) => {
                 let value = *n;
                 self.advance();
-                Ok(VariableValue::Number(value))
+                Ok(Expr::Const(VariableValue::Number(value)))
             }
             Some(Token::Boolean(b)) => {
                 let value = *b;
                 self.advance();
-                Ok(VariableValue::Boolean(value))
+                Ok(Expr::Const(VariableValue::Boolean(value)))
             }
             Some(Token::String(s)) => {
                 let value = s.clone();
                 self.advance();
-                Ok(VariableValue::String(value))
+                Ok(Expr::Const(VariableValue::String(value)))
             }
             Some(Token::Variable(name)) => {
-                let var_name = name.clone();
+                let id = variables.id(name.as_str());
                 self.advance();
-
-                let id = variables.id(var_name.as_str());
-                let value = variables.get(id).clone();
-                if matches!(value, VariableValue::Undefined) {
-                    Err(format!("Undefined variable: {}", var_name))
-                } else {
-                    Ok(value)
-                }
+                Ok(Expr::Load(id))
             }
             Some(Token::LeftParen) => {
                 self.advance();
@@ -513,7 +499,7 @@ impl Parser {
     }
 }
 
-pub fn evaluate(expression: &str, variables: &mut Variables) -> Result<VariableValue, String> {
+pub fn parse_expr(expression: &str, variables: &mut Variables) -> Result<Expr, String> {
     if expression.trim().is_empty() {
         return Err("Empty expression".to_string());
     }
@@ -529,6 +515,91 @@ pub fn evaluate(expression: &str, variables: &mut Variables) -> Result<VariableV
     parser.parse(variables)
 }
 
+pub fn eval_expr(expr: &Expr, variables: &[VariableValue]) -> Result<VariableValue, String> {
+    match expr {
+        Expr::Const(v) => Ok(v.clone()),
+
+        Expr::Load(id) => {
+            let v = &variables[id.index()];
+            if matches!(v, VariableValue::Undefined) {
+                Err(format!("Undefined variable: {:?}", id))
+            } else {
+                Ok(v.clone())
+            }
+        }
+
+        Expr::Add(a, b) => Ok(VariableValue::Number(
+            eval_expr(a, variables)?.to_number()? + eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::Sub(a, b) => Ok(VariableValue::Number(
+            eval_expr(a, variables)?.to_number()? - eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::Mul(a, b) => Ok(VariableValue::Number(
+            eval_expr(a, variables)?.to_number()? * eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::Div(a, b) => {
+            let rhs = eval_expr(b, variables)?.to_number()?;
+            if rhs.abs() < f64::EPSILON {
+                return Err("Division by zero".into());
+            }
+            Ok(VariableValue::Number(
+                eval_expr(a, variables)?.to_number()? / rhs,
+            ))
+        }
+
+        Expr::Mod(a, b) => {
+            let rhs = eval_expr(b, variables)?.to_number()?;
+            if rhs.abs() < f64::EPSILON {
+                return Err("Division by zero".into());
+            }
+            Ok(VariableValue::Number(
+                eval_expr(a, variables)?.to_number()? % rhs,
+            ))
+        }
+
+        Expr::Neg(e) => Ok(VariableValue::Number(
+            -eval_expr(e, variables)?.to_number()?,
+        )),
+
+        Expr::Eq(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)? == eval_expr(b, variables)?,
+        )),
+
+        Expr::Ne(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)? != eval_expr(b, variables)?,
+        )),
+
+        Expr::Gt(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)?.to_number()? > eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::Ge(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)?.to_number()? >= eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::Lt(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)?.to_number()? < eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::Le(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)?.to_number()? <= eval_expr(b, variables)?.to_number()?,
+        )),
+
+        Expr::And(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)?.to_bool()? && eval_expr(b, variables)?.to_bool()?,
+        )),
+
+        Expr::Or(a, b) => Ok(VariableValue::Boolean(
+            eval_expr(a, variables)?.to_bool()? || eval_expr(b, variables)?.to_bool()?,
+        )),
+
+        Expr::Not(e) => Ok(VariableValue::Boolean(!eval_expr(e, variables)?.to_bool()?)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,144 +607,170 @@ mod tests {
     #[test]
     fn test_arithmetic() {
         let mut variables = Variables::new();
-        assert_eq!(
-            evaluate("2 + 3", &mut variables).unwrap(),
-            VariableValue::Number(5.0)
-        );
-        assert_eq!(
-            evaluate("10 - 4", &mut variables).unwrap(),
-            VariableValue::Number(6.0)
-        );
-        assert_eq!(
-            evaluate("3 * 4", &mut variables).unwrap(),
-            VariableValue::Number(12.0)
-        );
-        assert_eq!(
-            evaluate("15 / 3", &mut variables).unwrap(),
-            VariableValue::Number(5.0)
-        );
-        assert_eq!(
-            evaluate("10 % 3", &mut variables).unwrap(),
-            VariableValue::Number(1.0)
-        );
+
+        {
+            let expression = "2 + 3";
+            let expr = parse_expr(expression, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, &variables.values()).unwrap(),
+                VariableValue::Number(5.0)
+            );
+        }
+
+        {
+            let expression = "10 - 4";
+            let expr = parse_expr(expression, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, &variables.values()).unwrap(),
+                VariableValue::Number(6.0)
+            );
+        }
+
+        {
+            let expression = "3 * 4";
+            let expr = parse_expr(expression, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, &variables.values()).unwrap(),
+                VariableValue::Number(12.0)
+            );
+        }
+
+        {
+            let expression = "15 / 3";
+            let expr = parse_expr(expression, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, &variables.values()).unwrap(),
+                VariableValue::Number(5.0)
+            );
+        }
+
+        {
+            let expression = "10 % 3";
+            let expr = parse_expr(expression, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, &variables.values()).unwrap(),
+                VariableValue::Number(1.0)
+            );
+        }
     }
 
     #[test]
     fn test_parentheses() {
         let mut variables = Variables::new();
-        assert_eq!(
-            evaluate("(2 + 3) * 4", &mut variables).unwrap(),
-            VariableValue::Number(20.0)
-        );
-        assert_eq!(
-            evaluate("2 + (3 * 4)", &mut variables).unwrap(),
-            VariableValue::Number(14.0)
-        );
+
+        {
+            let expr = parse_expr("(2 + 3) * 4", &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Number(20.0)
+            );
+        }
+
+        {
+            let expr = parse_expr("2 + (3 * 4)", &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Number(14.0)
+            );
+        }
     }
 
     #[test]
     fn test_comparison() {
         let mut variables = Variables::new();
-        assert_eq!(
-            evaluate("5 > 3", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("5 < 3", &mut variables).unwrap(),
-            VariableValue::Boolean(false)
-        );
-        assert_eq!(
-            evaluate("5 >= 5", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("5 <= 4", &mut variables).unwrap(),
-            VariableValue::Boolean(false)
-        );
-        assert_eq!(
-            evaluate("5 == 5", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("5 != 3", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
+
+        for (expr_str, expected) in [
+            ("5 > 3", true),
+            ("5 < 3", false),
+            ("5 >= 5", true),
+            ("5 <= 4", false),
+            ("5 == 5", true),
+            ("5 != 3", true),
+        ] {
+            let expr = parse_expr(expr_str, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Boolean(expected)
+            );
+        }
     }
 
     #[test]
     fn test_boolean() {
         let mut variables = Variables::new();
-        assert_eq!(
-            evaluate("true && true", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("true && false", &mut variables).unwrap(),
-            VariableValue::Boolean(false)
-        );
-        assert_eq!(
-            evaluate("true || false", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("!true", &mut variables).unwrap(),
-            VariableValue::Boolean(false)
-        );
-        assert_eq!(
-            evaluate("!false", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
+
+        for (expr_str, expected) in [
+            ("true && true", true),
+            ("true && false", false),
+            ("true || false", true),
+            ("!true", false),
+            ("!false", true),
+        ] {
+            let expr = parse_expr(expr_str, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Boolean(expected)
+            );
+        }
     }
 
     #[test]
     fn test_boolean_uppercase() {
         let mut variables = Variables::new();
-        assert_eq!(
-            evaluate("true AND true", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("true OR false", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
-        assert_eq!(
-            evaluate("NOT false", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
+
+        for (expr_str, expected) in [
+            ("true AND true", true),
+            ("true OR false", true),
+            ("NOT false", true),
+        ] {
+            let expr = parse_expr(expr_str, &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Boolean(expected)
+            );
+        }
     }
 
     #[test]
     fn test_variables() {
         let mut variables = Variables::new();
 
-        let id = variables.id("x");
-        variables.set(id, VariableValue::Number(10.0));
+        let x = variables.id("x");
+        variables.set(x, VariableValue::Number(10.0));
 
-        let id = variables.id("y");
-        variables.set(id, VariableValue::Number(5.0));
+        let y = variables.id("y");
+        variables.set(y, VariableValue::Number(5.0));
 
-        assert_eq!(
-            evaluate("{x} + {y}", &mut variables).unwrap(),
-            VariableValue::Number(15.0)
-        );
-        assert_eq!(
-            evaluate("{x} > {y}", &mut variables).unwrap(),
-            VariableValue::Boolean(true)
-        );
+        {
+            let expr = parse_expr("{x} + {y}", &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Number(15.0)
+            );
+        }
+
+        {
+            let expr = parse_expr("{x} > {y}", &mut variables).unwrap();
+            assert_eq!(
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Boolean(true)
+            );
+        }
     }
 
     #[test]
     fn test_complex() {
         let mut variables = Variables::new();
 
-        let id = variables.id("a");
-        variables.set(id, VariableValue::Number(10.0));
+        let a = variables.id("a");
+        variables.set(a, VariableValue::Number(10.0));
 
-        let id = variables.id("b");
-        variables.set(id, VariableValue::Number(5.0));
+        let b = variables.id("b");
+        variables.set(b, VariableValue::Number(5.0));
 
+        let expr = parse_expr("({a} + {b}) * 2 > 20", &mut variables).unwrap();
         assert_eq!(
-            evaluate("({a} + {b}) * 2 > 20", &mut variables).unwrap(),
+            eval_expr(&expr, variables.values()).unwrap(),
             VariableValue::Boolean(true)
         );
     }
@@ -681,20 +778,25 @@ mod tests {
     #[test]
     fn test_errors() {
         let mut variables = Variables::new();
-        assert!(evaluate("", &mut variables).is_err());
-        assert!(evaluate("2 +", &mut variables).is_err());
-        assert!(evaluate("(2 + 3", &mut variables).is_err());
-        assert!(evaluate("2 + 3)", &mut variables).is_err());
-        assert!(evaluate("10 / 0", &mut variables).is_err());
-        assert!(evaluate("{undefined}", &mut variables).is_err());
+
+        assert!(parse_expr("", &mut variables).is_err());
+        assert!(parse_expr("2 +", &mut variables).is_err());
+        assert!(parse_expr("(2 + 3", &mut variables).is_err());
+        assert!(parse_expr("2 + 3)", &mut variables).is_err());
+
+        let expr = parse_expr("10 / 0", &mut variables).unwrap();
+        assert!(eval_expr(&expr, variables.values()).is_err());
+
+        let expr = parse_expr("{undefined}", &mut variables).unwrap();
+        assert!(eval_expr(&expr, variables.values()).is_err());
     }
 
     #[test]
     fn test_boolean_strict() {
         let mut variables = Variables::new();
-        assert!(evaluate("yes", &mut variables).is_err());
-        assert!(evaluate("and", &mut variables).is_err());
-        assert!(evaluate("or", &mut variables).is_err());
-        assert!(evaluate("not", &mut variables).is_err());
+
+        for expr_str in ["yes", "and", "or", "not"] {
+            assert!(parse_expr(expr_str, &mut variables).is_err());
+        }
     }
 }

@@ -19,6 +19,3 @@ dhat-heap = ["dhat"]
 
 [build-dependencies]
 embed-resource = "2.5.2"
-
-[profile.release]
-debug = true

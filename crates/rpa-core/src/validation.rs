@@ -551,7 +551,7 @@ impl<'a> ScenarioValidator<'a> {
             }
 
             match &node.activity {
-                Activity::SetVariable { name, .. } | Activity::GetVariable { name } => {
+                Activity::SetVariable { name, .. } => {
                     if name.is_empty() {
                         issues.push(ValidationIssue {
                             level: ValidationLevel::Error,
@@ -583,8 +583,7 @@ impl<'a> ScenarioValidator<'a> {
 
     fn check_undefined_variables(&self, reachable_nodes: &HashSet<Uuid>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
-        let mut defined_vars: HashSet<String> =
-            self.project.variables.names().cloned().collect();
+        let mut defined_vars: HashSet<String> = self.project.variables.names().cloned().collect();
         let mut used_vars: HashSet<String> = HashSet::new();
 
         let start_node = self
@@ -635,11 +634,6 @@ impl<'a> ScenarioValidator<'a> {
             Activity::SetVariable { name, value, .. } => {
                 self.extract_variables_from_string(&value.to_string(), used_vars);
                 defined_vars.insert(name.clone());
-            }
-            Activity::GetVariable { name } => {
-                if !defined_vars.contains(name) {
-                    used_vars.insert(name.clone());
-                }
             }
             Activity::Log { level: _, message } => {
                 self.extract_variables_from_string(message, used_vars);
@@ -841,7 +835,6 @@ fn get_activity_name(activity: &Activity) -> String {
         Activity::Log { level, message } => format!("Log {} '{}'", level.as_str(), message),
         Activity::Delay { milliseconds } => format!("Delay {}ms", milliseconds),
         Activity::SetVariable { name, .. } => format!("SetVar '{}'", name),
-        Activity::GetVariable { name } => format!("GetVar '{}'", name),
         Activity::Evaluate { expression } => format!("Expression '{}'", expression),
         Activity::IfCondition { condition } => format!("If '{}'", condition),
         Activity::Loop { index, .. } => format!("Loop '{}'", index),
@@ -961,10 +954,6 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             name.hash(hasher);
             value.hash(hasher);
             var_type.hash(hasher);
-        }
-        Activity::GetVariable { name } => {
-            5u8.hash(hasher);
-            name.hash(hasher);
         }
         Activity::Evaluate { expression } => {
             6u8.hash(hasher);

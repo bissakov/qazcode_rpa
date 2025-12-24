@@ -4,6 +4,7 @@ mod loglevel_ext;
 mod ui;
 
 use egui::IconData;
+use egui_extras::{Column, TableBuilder};
 use loglevel_ext::LogLevelExt;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -11,13 +12,16 @@ rust_i18n::i18n!("locales", fallback = "en");
 use eframe::egui;
 
 use rpa_core::{
-    Activity, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario, UiConstants, UiState,
-    VarEvent, VariableType, VariableValue, Variables, execute_project_with_typed_vars,
+    Activity, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
+    ScenarioValidator, UiConstants, VarEvent, VariableType, VariableValue, Variables,
+    execute_project_with_typed_vars, get_timestamp,
 };
 use rust_i18n::t;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::channel;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -26,7 +30,6 @@ struct AppSettings {
     show_minimap: bool,
     allow_node_resize: bool,
     language: String,
-    max_iterations: usize,
 }
 
 impl Default for AppSettings {
@@ -36,7 +39,6 @@ impl Default for AppSettings {
             show_minimap: true,
             allow_node_resize: false,
             language: "en".to_string(),
-            max_iterations: UiState::normalize_max_iterations(UiConstants::LOOP_MAX_ITERATIONS),
         }
     }
 }
@@ -109,7 +111,7 @@ struct RpaApp {
     log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
     rename_scenario_index: Option<usize>,
     clipboard: Vec<Node>,
-    runtime_variables: indexmap::IndexMap<String, VariableValue>,
+    variables: Variables,
     variable_receiver: Option<std::sync::mpsc::Receiver<VarEvent>>,
     knife_tool_active: bool,
     knife_path: Vec<egui::Pos2>,
@@ -141,7 +143,7 @@ impl Default for RpaApp {
             log_receiver: None,
             rename_scenario_index: None,
             clipboard: Vec::new(),
-            runtime_variables: indexmap::IndexMap::new(),
+            variables: Variables::new(),
             variable_receiver: None,
             knife_tool_active: false,
             knife_path: Vec::new(),
@@ -190,10 +192,18 @@ impl RpaApp {
             for event in var_receiver.try_iter() {
                 match event {
                     VarEvent::Set { name, value } => {
-                        self.runtime_variables.insert(name, value);
+                        let id = self.variables.id(&name);
+                        self.variables.set(id, value);
                     }
                     VarEvent::Remove { name } => {
-                        self.runtime_variables.shift_remove(&name);
+                        let id = self.variables.id(&name);
+                        self.variables.remove(id);
+                    }
+                    VarEvent::SetId { id, value } => {
+                        self.variables.set(id, value);
+                    }
+                    VarEvent::RemoveId { id } => {
+                        self.variables.remove(id);
                     }
                 }
             }
@@ -284,24 +294,38 @@ impl RpaApp {
             .resizable(true)
             .default_height(UiConstants::CONSOLE_HEIGHT)
             .show(ctx, |ui| {
-                ui.heading(t!("panels.output").as_ref());
+                ui.horizontal(|ui| {
+                    ui.heading(t!("panels.output").as_ref());
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(t!("bottom_bar.clear").as_ref()).clicked() {
+                            self.project.execution_log.clear();
+                            self.selected_log_entry = None;
+                        }
+                    });
+                });
                 ui.separator();
 
-                use egui_extras::{Column, TableBuilder};
-
-                let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
-
                 let row_count = self.project.execution_log.len();
+                let text_height = egui::TextStyle::Body
+                    .resolve(ui.style())
+                    .size
+                    .max(ui.spacing().interact_size.y);
+                let available_height = ui.available_height();
 
-                TableBuilder::new(ui)
+                let table = TableBuilder::new(ui)
                     .auto_shrink(false)
                     .stick_to_bottom(true)
-                    .striped(row_count != 0)
+                    .striped(row_count > 0 && row_count < 500)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .column(Column::initial(100.0).resizable(true))
                     .column(Column::initial(100.0).resizable(true))
                     .column(Column::initial(120.0).resizable(true))
                     .column(Column::remainder().resizable(true))
+                    .min_scrolled_height(0.0)
+                    .max_scroll_height(available_height);
+
+                table
                     .header(20.0, |mut header| {
                         header.col(|ui| {
                             ui.strong(t!("output_table.timestamp").as_ref());
@@ -317,76 +341,59 @@ impl RpaApp {
                         });
                     })
                     .body(|body| {
-                        body.rows(
-                            text_height * 1.5,
-                            match row_count != 0 {
-                                true => row_count,
-                                false => 5,
-                            },
-                            |mut row| match row_count == 0 {
-                                true => {
-                                    row.col(|ui| {
-                                        ui.label("");
-                                    });
-                                    row.col(|ui| {
-                                        ui.label("");
-                                    });
-                                    row.col(|ui| {
-                                        ui.label("");
-                                    });
-                                    row.col(|ui| {
-                                        ui.label("");
-                                    });
-                                }
-                                false => {
-                                    let row_index = row.index();
-                                    let log_entry = &self.project.execution_log[row_index];
-                                    row.col(|ui| {
-                                        ui.label(&log_entry.timestamp);
-                                    });
-                                    row.col(|ui| {
-                                        ui.colored_label(
-                                            log_entry.level.get_color(),
-                                            log_entry.level.as_str(),
+                        if row_count == 0 {
+                            body.rows(text_height, 5, |_row| {});
+                            return;
+                        }
+
+                        body.rows(text_height * 1.4, row_count, |mut row| {
+                            let row_index = row.index();
+                            if let Some(log_entry) = &self.project.execution_log.get(row_index) {
+                                row.col(|ui| {
+                                    ui.label(&log_entry.timestamp);
+                                });
+
+                                row.col(|ui| {
+                                    ui.colored_label(
+                                        log_entry.level.get_color(),
+                                        log_entry.level.as_str(),
+                                    );
+                                });
+
+                                row.col(|ui| {
+                                    ui.label(&log_entry.activity);
+                                });
+
+                                row.col(|ui| {
+                                    let message = &log_entry.message;
+                                    let has_newlines = message.contains('\n');
+
+                                    if has_newlines {
+                                        let mut lines = message.lines();
+                                        let first_line = lines.next().unwrap_or("");
+                                        let line_count = lines.count();
+                                        let truncated =
+                                            format!("{} [+{} lines]", first_line, line_count - 1);
+
+                                        let response = ui.add(
+                                            egui::Label::new(&truncated)
+                                                .sense(egui::Sense::click()),
                                         );
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(&log_entry.activity);
-                                    });
-                                    row.col(|ui| {
-                                        let message = &log_entry.message;
-                                        let has_newlines = message.contains('\n');
 
-                                        if has_newlines {
-                                            let first_line = message.lines().next().unwrap_or("");
-                                            let line_count = message.lines().count();
-                                            let truncated = format!(
-                                                "{} [+{} lines]",
-                                                first_line,
-                                                line_count - 1
-                                            );
-
-                                            let response = ui.add(
-                                                egui::Label::new(&truncated)
-                                                    .sense(egui::Sense::click()),
-                                            );
-
-                                            if response.clicked() {
-                                                self.selected_log_entry = Some(row_index);
-                                            }
-
-                                            if response.hovered() {
-                                                ui.ctx().set_cursor_icon(
-                                                    egui::CursorIcon::PointingHand,
-                                                );
-                                            }
-                                        } else {
-                                            ui.label(message);
+                                        if response.clicked() {
+                                            self.selected_log_entry = Some(row_index);
                                         }
-                                    });
-                                }
-                            },
-                        );
+
+                                        if response.hovered() {
+                                            ui.ctx()
+                                                .set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+                                    } else {
+                                        ui.label(message);
+                                    }
+                                });
+                            }
+                        });
                     });
             });
     }
@@ -474,24 +481,6 @@ impl RpaApp {
                             });
 
                         ui.separator();
-
-                        ui.horizontal(|ui| {
-                            ui.label(t!("settings_dialog.max_iterations").as_ref());
-                            if UiState::is_unlimited(temp.max_iterations) {
-                                ui.strong(t!("settings_dialog.iterations_unlimited").as_ref());
-                            } else {
-                                ui.label(t!("settings_dialog.iterations_hint").as_ref());
-                            }
-                        });
-                        ui.add(
-                            egui::Slider::new(
-                                &mut temp.max_iterations,
-                                UiConstants::LOOP_ITERATIONS_MIN..=UiConstants::LOOP_ITERATIONS_MAX,
-                            )
-                            .text(t!("settings_dialog.iterations_hint").as_ref()),
-                        );
-
-                        ui.separator();
                         if ui.button(t!("settings_dialog.apply").as_ref()).clicked() {
                             let mut style = (*ctx.style()).clone();
                             style.text_styles.insert(
@@ -518,8 +507,6 @@ impl RpaApp {
                                 ctx.request_repaint();
                             }
 
-                            temp.max_iterations =
-                                UiState::normalize_max_iterations(temp.max_iterations);
                             self.settings = temp.clone();
                             close_dialog = true;
                         }
@@ -1211,8 +1198,8 @@ impl RpaApp {
         egui::CollapsingHeader::new(t!("panels.runtime_variables").as_ref())
             .default_open(true)
             .show(ui, |ui| {
-                if self.is_executing || !self.runtime_variables.is_empty() {
-                    if !self.runtime_variables.is_empty() {
+                if self.is_executing || !self.variables.is_empty() {
+                    if !self.variables.is_empty() {
                         egui::Grid::new("runtime_vars_grid")
                             .striped(true)
                             .spacing([10.0, 4.0])
@@ -1223,7 +1210,7 @@ impl RpaApp {
                                 ui.strong(t!("variables.value").as_ref());
                                 ui.end_row();
 
-                                for (name, value) in &self.runtime_variables {
+                                for (name, value) in self.variables.iter() {
                                     ui.label(name);
                                     ui.label(value.get_type().as_str());
                                     let value_str = value.to_string();
@@ -1356,36 +1343,82 @@ impl RpaApp {
         self.stop_flag.store(false, Ordering::Relaxed);
 
         let project = self.project.clone();
-        let initial_vars: indexmap::IndexMap<String, VariableValue> = self
-            .project
-            .variables
-            .iter()
-            .filter_map(|(name, value)| {
-                if !matches!(value, VariableValue::Undefined) {
-                    Some((name.clone(), value.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // let initial_vars: indexmap::IndexMap<String, VariableValue> = self
+        //     .project
+        //     .variables
+        //     .iter()
+        //     .filter_map(|(name, value)| {
+        //         if !matches!(value, VariableValue::Undefined) {
+        //             Some((name.clone(), value.clone()))
+        //         } else {
+        //             None
+        //         }
+        //     })
+        //     .collect();
 
-        let (log_sender, log_receiver) = std::sync::mpsc::channel();
-        let (var_sender, var_receiver) = std::sync::mpsc::channel();
+        let (log_sender, log_receiver) = channel();
+        let (var_sender, var_receiver) = channel::<VarEvent>();
 
         self.log_receiver = Some(log_receiver);
         self.variable_receiver = Some(var_receiver);
-        self.runtime_variables.clear();
+        // self.variables.clear();
 
-        let max_iterations = self.settings.max_iterations;
+        let start_time = SystemTime::now();
+        let validator = ScenarioValidator::new(&project.main_scenario, &project);
+        let validation_result = validator.validate();
+
+        if !validation_result.is_valid() {
+            self.project.execution_log.push(LogEntry {
+                timestamp: get_timestamp(start_time),
+                level: LogLevel::Error,
+                activity: "SYSTEM".to_string(),
+                message: format!(
+                    "Execution aborted: {} validation errors",
+                    validation_result.errors.len()
+                ),
+            });
+            self.project.execution_log.push(LogEntry {
+                timestamp: "[00:00.000]".to_string(),
+                level: LogLevel::Info,
+                activity: "SYSTEM".to_string(),
+                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+            });
+            self.is_executing = false;
+            return;
+        }
+
+        let ir_builder = IrBuilder::new(
+            &project.main_scenario,
+            &project,
+            &validation_result.reachable_nodes,
+            &mut self.variables,
+        );
+        let program = match ir_builder.build() {
+            Ok(prog) => prog,
+            Err(e) => {
+                self.project.execution_log.push(LogEntry {
+                    timestamp: get_timestamp(start_time),
+                    level: LogLevel::Error,
+                    activity: "SYSTEM".to_string(),
+                    message: format!("IR compilation failed: {}", e),
+                });
+                self.project.execution_log.push(LogEntry {
+                    timestamp: "[00:00.000]".to_string(),
+                    level: LogLevel::Info,
+                    activity: "SYSTEM".to_string(),
+                    message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+                });
+                self.is_executing = false;
+                return;
+            }
+        };
+
+        let variables = self.variables.clone();
+
         let stop_flag = Arc::clone(&self.stop_flag);
         std::thread::spawn(move || {
             execute_project_with_typed_vars(
-                &project,
-                log_sender,
-                var_sender,
-                initial_vars,
-                max_iterations,
-                stop_flag,
+                &project, log_sender, var_sender, start_time, program, variables, stop_flag,
             );
         });
     }
@@ -1408,20 +1441,8 @@ impl RpaApp {
     }
 
     fn save_to_file(&mut self, path: std::path::PathBuf) {
-        let ui_state = UiState {
-            current_scenario_index: self.current_scenario_index,
-            pan_offset: self.pan_offset,
-            zoom: self.zoom,
-            font_size: self.settings.font_size,
-            show_minimap: self.settings.show_minimap,
-            allow_node_resize: self.settings.allow_node_resize,
-            language: self.settings.language.clone(),
-            max_iterations: UiState::normalize_max_iterations(self.settings.max_iterations),
-        };
-
         let project_file = ProjectFile {
             project: self.project.clone(),
-            ui_state,
         };
 
         match serde_json::to_string(&project_file) {
@@ -1464,10 +1485,8 @@ impl RpaApp {
             match std::fs::read_to_string(&path) {
                 Ok(contents) => {
                     let result = serde_json::from_str::<ProjectFile>(&contents).or_else(|_| {
-                        serde_json::from_str::<Project>(&contents).map(|project| ProjectFile {
-                            project,
-                            ui_state: UiState::default(),
-                        })
+                        serde_json::from_str::<Project>(&contents)
+                            .map(|project| ProjectFile { project })
                     });
 
                     match result {
@@ -1485,19 +1504,9 @@ impl RpaApp {
                             });
 
                             self.project = project_file.project;
-                            self.current_scenario_index =
-                                project_file.ui_state.current_scenario_index;
-                            self.pan_offset = project_file.ui_state.pan_offset;
-                            self.zoom = project_file.ui_state.zoom;
-
-                            self.settings.font_size = project_file.ui_state.font_size;
-                            self.settings.show_minimap = project_file.ui_state.show_minimap;
-                            self.settings.allow_node_resize =
-                                project_file.ui_state.allow_node_resize;
-                            self.settings.language = project_file.ui_state.language.clone();
-                            self.settings.max_iterations = UiState::normalize_max_iterations(
-                                project_file.ui_state.max_iterations,
-                            );
+                            self.current_scenario_index = None;
+                            self.pan_offset = egui::Vec2::ZERO;
+                            self.zoom = 1.0;
 
                             rust_i18n::set_locale(&self.settings.language);
                             self.current_file = Some(path);

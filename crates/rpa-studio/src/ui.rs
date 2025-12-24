@@ -242,7 +242,7 @@ fn find_intersecting_connections(
 fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<ContextMenuAction> {
     let mut action = None;
 
-    Popup::context_menu(&response)
+    Popup::context_menu(response)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(150.0);
@@ -1676,9 +1676,6 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
                             *value = b.to_string();
                         }
                     },
-                    Activity::GetVariable { name } => {
-                        ui.text_edit_singleline(name);
-                    }
                     Activity::IfCondition { condition } | Activity::While { condition } => {
                         ui.text_edit_singleline(condition);
                     }

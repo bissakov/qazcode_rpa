@@ -62,7 +62,6 @@ impl ActivityMetadata {
             Activity::Log { .. } => &LOG_METADATA,
             Activity::Delay { .. } => &DELAY_METADATA,
             Activity::SetVariable { .. } => &SET_VARIABLE_METADATA,
-            Activity::GetVariable { .. } => &GET_VARIABLE_METADATA,
             Activity::Evaluate { .. } => &EVALUATE_METADATA,
             Activity::IfCondition { .. } => &IF_CONDITION_METADATA,
             Activity::Loop { .. } => &LOOP_METADATA,
@@ -204,12 +203,6 @@ impl ActivityMetadata {
                             name: String::new(),
                             value: String::new(),
                             var_type: VariableType::String,
-                        },
-                    ),
-                    (
-                        &GET_VARIABLE_METADATA,
-                        Activity::GetVariable {
-                            name: String::new(),
                         },
                     ),
                     (
@@ -399,23 +392,6 @@ static SET_VARIABLE_METADATA: ActivityMetadata = ActivityMetadata {
             property_type: PropertyType::TextSingleLine,
         },
     ],
-};
-
-static GET_VARIABLE_METADATA: ActivityMetadata = ActivityMetadata {
-    name_key: "activity_names.get_variable",
-    button_key: "activity_buttons.get_variable",
-    category: ActivityCategory::BasicActivities,
-    color_category: ColorCategory::Variables,
-    pin_config: PinConfig {
-        output_count: 1,
-        pin_labels: &["Default"],
-    },
-    can_have_error_output: false,
-    properties: &[PropertyDef {
-        label_key: "properties.variable_name",
-        tooltip_key: Some("tooltips.get_variable_help"),
-        property_type: PropertyType::TextSingleLine,
-    }],
 };
 
 static EVALUATE_METADATA: ActivityMetadata = ActivityMetadata {

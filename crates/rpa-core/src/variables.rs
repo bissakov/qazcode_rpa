@@ -34,6 +34,14 @@ impl Variables {
         }
     }
 
+    pub fn snapshot(&self) -> Vec<VariableValue> {
+        self.values.clone()
+    }
+
+    pub fn values(&self) -> &[VariableValue] {
+        &self.values
+    }
+
     pub fn id(&mut self, name: &str) -> VarId {
         if let Some(&id) = self.name_to_id.get(name) {
             return id;
@@ -69,14 +77,26 @@ impl Variables {
         self.name_to_id.keys()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.id_to_name.is_empty()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&String, &VariableValue)> {
         self.name_to_id
             .iter()
             .map(move |(name, &id)| (name, &self.values[id.index()]))
+    }
+
+    pub fn clear(&mut self) {
+        self.name_to_id.clear();
+        self.id_to_name.clear();
+        self.values.clear();
     }
 }
 
 pub enum VarEvent {
     Set { name: String, value: VariableValue },
     Remove { name: String },
+    SetId { id: VarId, value: VariableValue },
+    RemoveId { id: VarId },
 }

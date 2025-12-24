@@ -1,13 +1,13 @@
 use clap::Parser;
-use indexmap::IndexMap;
-use rpa_core::{
-    LogEntry, LogLevel, Project, ProjectFile, UiConstants, UiState, VariableValue,
-    execute_project_with_typed_vars, execute_scenario_with_vars,
-};
 use rpa_core::variables::VarEvent;
+use rpa_core::{
+    IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, UiConstants,
+    VariableValue, execute_project_with_typed_vars,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::SystemTime;
 
 #[derive(Parser)]
 #[command(name = "rpa-cli")]
@@ -38,25 +38,15 @@ fn main() {
         std::process::exit(1);
     }
 
-    let (project, max_iterations) = match load_project(&cli.project_file) {
-        Ok((p, m)) => (p, m),
+    let project = match load_project(&cli.project_file) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!("Error loading project: {}", e);
             std::process::exit(1);
         }
     };
 
-    let initial_vars: IndexMap<String, VariableValue> = project
-        .variables
-        .iter()
-        .filter_map(|(name, value)| {
-            if !matches!(value, VariableValue::Undefined) {
-                Some((name.clone(), value.clone()))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let mut variables = project.variables.clone();
 
     let _cli_vars = parse_variables(&cli.var);
 
@@ -85,51 +75,67 @@ fn main() {
     let (log_sender, log_receiver) = std::sync::mpsc::channel();
     let (var_sender, var_receiver) = std::sync::mpsc::channel();
 
-    let project_clone = project.clone();
     let verbose = cli.verbose;
     let scenario_name = cli.scenario.clone();
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_clone = Arc::clone(&stop_flag);
 
+    let start_time = SystemTime::now();
+    let validator = ScenarioValidator::new(&project.main_scenario, &project);
+    let validation_result = validator.validate();
+
+    if !validation_result.is_valid() {
+        eprintln!("Execution aborted: {} validation errors", validation_result.errors.len());
+        for error in &validation_result.errors {
+            eprintln!("  ERROR: {:?}", error);
+        }
+        std::process::exit(1);
+    }
+
+    let ir_builder = IrBuilder::new(
+        &project.main_scenario,
+        &project,
+        &validation_result.reachable_nodes,
+        &mut variables,
+    );
+    let program = match ir_builder.build() {
+        Ok(prog) => prog,
+        Err(e) => {
+            eprintln!("IR compilation failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let project_clone = project.clone();
+    let variables_clone = variables.clone();
+
     std::thread::spawn(move || {
-        if let Some(scenario_name) = scenario_name {
-            if let Some(scenario) = project_clone
-                .scenarios
-                .iter()
-                .find(|s| s.name == scenario_name)
-            {
-                println!("Executing scenario: {}", scenario_name);
-                println!();
-                execute_scenario_with_vars(
-                    scenario,
-                    &project_clone,
-                    log_sender,
-                    var_sender,
-                    initial_vars,
-                    max_iterations,
-                    stop_flag_clone,
-                );
-            } else {
-                let _ = log_sender.send(LogEntry {
-                    timestamp: "[00:00.00]".to_string(),
-                    level: LogLevel::Error,
-                    activity: "CLI".to_string(),
-                    message: format!("Scenario '{}' not found", scenario_name),
-                });
-            }
+        if let Some(_scenario_name) = scenario_name {
+            eprintln!("Error: Specific scenario execution not supported in new IR-based architecture");
+            let _ = log_sender.send(LogEntry {
+                timestamp: "[00:00.000]".to_string(),
+                level: LogLevel::Error,
+                activity: "CLI".to_string(),
+                message: "Scenario-specific execution not supported".to_string(),
+            });
+            let _ = log_sender.send(LogEntry {
+                timestamp: "[00:00.000]".to_string(),
+                level: LogLevel::Info,
+                activity: "SYSTEM".to_string(),
+                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+            });
         } else {
             execute_project_with_typed_vars(
                 &project_clone,
                 log_sender,
                 var_sender,
-                initial_vars,
-                max_iterations,
+                start_time,
+                program,
+                variables_clone,
                 stop_flag_clone,
             );
         }
     });
-
-    let mut runtime_vars = project.variables.clone();
 
     loop {
         match log_receiver.try_recv() {
@@ -154,12 +160,18 @@ fn main() {
                 while let Ok(event) = var_receiver.try_recv() {
                     match event {
                         VarEvent::Set { name, value } => {
-                            let id = runtime_vars.id(&name);
-                            runtime_vars.set(id, value);
+                            let id = variables.id(&name);
+                            variables.set(id, value);
                         }
                         VarEvent::Remove { name } => {
-                            let id = runtime_vars.id(&name);
-                            runtime_vars.remove(id);
+                            let id = variables.id(&name);
+                            variables.remove(id);
+                        }
+                        VarEvent::SetId { id, value } => {
+                            variables.set(id, value);
+                        }
+                        VarEvent::RemoveId { id } => {
+                            variables.remove(id);
                         }
                     }
                 }
@@ -171,22 +183,28 @@ fn main() {
     while let Ok(event) = var_receiver.try_recv() {
         match event {
             VarEvent::Set { name, value } => {
-                let id = runtime_vars.id(&name);
-                runtime_vars.set(id, value);
+                let id = variables.id(&name);
+                variables.set(id, value);
             }
             VarEvent::Remove { name } => {
-                let id = runtime_vars.id(&name);
-                runtime_vars.remove(id);
+                let id = variables.id(&name);
+                variables.remove(id);
+            }
+            VarEvent::SetId { id, value } => {
+                variables.set(id, value);
+            }
+            VarEvent::RemoveId { id } => {
+                variables.remove(id);
             }
         }
     }
 
     if verbose {
-        let var_list: Vec<_> = runtime_vars
+        let var_list: Vec<(String, VariableValue)> = variables
             .iter()
             .filter_map(|(name, value)| {
                 if !matches!(value, VariableValue::Undefined) {
-                    Some((name, value))
+                    Some((name.clone(), value.clone()))
                 } else {
                     None
                 }
@@ -238,7 +256,7 @@ fn main() {
     }
 }
 
-fn load_project(path: &PathBuf) -> Result<(Project, usize), String> {
+fn load_project(path: &PathBuf) -> Result<Project, String> {
     if path.extension().and_then(|s| s.to_str()) != Some("rpa") {
         return Err(format!(
             "Invalid file extension: expected .rpa, got {:?}",
@@ -249,24 +267,12 @@ fn load_project(path: &PathBuf) -> Result<(Project, usize), String> {
     let contents =
         std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
-    let (project, max_iterations) = serde_json::from_str::<ProjectFile>(&contents)
-        .map(|pf| {
-            (
-                pf.project,
-                UiState::normalize_max_iterations(pf.ui_state.max_iterations),
-            )
-        })
-        .or_else(|_| {
-            serde_json::from_str::<Project>(&contents).map(|p| {
-                (
-                    p,
-                    UiState::normalize_max_iterations(UiConstants::LOOP_MAX_ITERATIONS),
-                )
-            })
-        })
+    let project = serde_json::from_str::<ProjectFile>(&contents)
+        .map(|pf| pf.project)
+        .or_else(|_| serde_json::from_str::<Project>(&contents))
         .map_err(|e| format!("Failed to parse project: {}", e))?;
 
-    Ok((project, max_iterations))
+    Ok(project)
 }
 
 fn parse_variables(var_args: &[String]) -> indexmap::IndexMap<String, String> {
