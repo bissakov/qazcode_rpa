@@ -173,9 +173,8 @@ impl Lexer {
     fn next_token(&mut self) -> Result<Option<Token>, String> {
         self.skip_whitespace();
 
-        let ch = match self.current() {
-            Some(c) => c,
-            None => return Ok(None),
+        let Some(ch) = self.current() else {
+            return Ok(None);
         };
 
         let token = match ch {
