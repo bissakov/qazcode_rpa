@@ -139,22 +139,22 @@ pub struct LogEntry {
     pub message: String,
 }
 
-const MAX_LOG_ENTRIES: usize = 100;
-
 #[derive(Default, Debug, Clone)]
 pub struct LogStorage {
     values: VecDeque<LogEntry>,
+    pub max_entry_count: usize,
 }
 
 impl LogStorage {
     pub fn new() -> Self {
         Self {
             values: VecDeque::new(),
+            max_entry_count: UiConstants::DEFAULT_LOG_ENTRIES,
         }
     }
 
     pub fn push(&mut self, entry: LogEntry) {
-        if self.values.len() == MAX_LOG_ENTRIES {
+        if self.values.len() == self.max_entry_count {
             self.values.pop_front();
         }
         self.values.push_back(entry);
@@ -256,7 +256,6 @@ impl Project {
             main_scenario: Scenario::new("Main"),
             scenarios: Vec::new(),
             execution_log: LogStorage::new(),
-            // initial_variables: indexmap::IndexMap::new(),
             variables,
         }
     }

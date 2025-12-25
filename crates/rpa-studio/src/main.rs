@@ -4,7 +4,7 @@ mod dialogs;
 mod loglevel_ext;
 mod ui;
 
-use egui::{DragValue, IconData};
+use egui::{DragValue, IconData, Slider};
 use egui_extras::{Column, TableBuilder};
 use loglevel_ext::LogLevelExt;
 
@@ -32,6 +32,7 @@ pub struct AppSettings {
     show_minimap: bool,
     allow_node_resize: bool,
     language: String,
+    current_max_entry_size: usize,
 }
 
 impl Default for AppSettings {
@@ -41,6 +42,7 @@ impl Default for AppSettings {
             show_minimap: true,
             allow_node_resize: false,
             language: "en".to_string(),
+            current_max_entry_size: UiConstants::DEFAULT_LOG_ENTRIES,
         }
     }
 }
@@ -433,6 +435,16 @@ impl RpaApp {
                             &mut temp.allow_node_resize,
                             t!("settings_dialog.allow_node_resize").as_ref(),
                         );
+
+                        ui.separator();
+
+                        ui.label(t!("settings_dialog.log_entry_count").as_ref());
+                        ui.add(Slider::new(
+                            &mut temp.current_max_entry_size,
+                            10..=UiConstants::MAX_LOG_ENTRIES,
+                        ));
+
+                        self.project.execution_log.max_entry_count = temp.current_max_entry_size;
 
                         ui.separator();
 
