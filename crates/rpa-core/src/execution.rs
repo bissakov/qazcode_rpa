@@ -163,11 +163,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         timestamp,
                         level: LogLevel::Info,
                         activity: "START".to_string(),
-                        message: format!("Starting scenario: {}", scenario.name),
+                        message: format!("Starting scenario: {}", &scenario.name),
                     });
                     Ok(pc + 1)
                 } else {
-                    let error_msg = format!("Scenario with ID {} not found", scenario_id);
+                    let error_msg = format!("Scenario with ID {scenario_id} not found");
                     self.log.log(LogEntry {
                         timestamp,
                         level: LogLevel::Error,
@@ -197,11 +197,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         timestamp,
                         level: LogLevel::Info,
                         activity: "END".to_string(),
-                        message: format!("Ending scenario: {}", scenario.name),
+                        message: format!("Ending scenario: {}", &scenario.name),
                     });
                     Ok(pc + 1)
                 } else {
-                    let error_msg = format!("Scenario with ID {} not found", scenario_id);
+                    let error_msg = format!("Scenario with ID {scenario_id} not found");
                     self.log.log(LogEntry {
                         timestamp,
                         level: LogLevel::Error,
@@ -227,7 +227,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     timestamp,
                     level: LogLevel::Info,
                     activity: "DELAY".to_string(),
-                    message: format!("Waiting for {} ms", milliseconds),
+                    message: format!("Waiting for {milliseconds} ms"),
                 });
 
                 match utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
@@ -251,7 +251,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     timestamp,
                     level: LogLevel::Info,
                     activity: "SET VAR".to_string(),
-                    message: format!("{:?} = {}", var, value),
+                    message: format!("{var:?} = {value}"),
                 });
                 Ok(pc + 1)
             }
@@ -275,7 +275,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     timestamp,
                     level: LogLevel::Info,
                     activity: "EVALUATE".to_string(),
-                    message: format!("Expression evaluated to {}", result),
+                    message: format!("Expression evaluated to {result}"),
                 });
 
                 Ok(pc + 1)
@@ -302,7 +302,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             LogLevel::Error,
                         ),
                         Err(err) => (
-                            format!("Condition failed with error: {}", err),
+                            format!("Condition failed with error: {err}"),
                             pc + 1,
                             LogLevel::Error,
                         ),
@@ -338,7 +338,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             LogLevel::Error,
                         ),
                         Err(err) => (
-                            format!("Condition failed with error: {}", err),
+                            format!("Condition failed with error: {err}"),
                             *target,
                             LogLevel::Error,
                         ),
@@ -373,7 +373,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     timestamp: get_timestamp(self.context.start_time),
                     level: LogLevel::Info,
                     activity: "LOOP".to_string(),
-                    message: format!("Starting loop: from {} to {} step {}", start, end, step),
+                    message: format!("Starting loop: from {start} to {end} step {step}"),
                 });
 
                 Ok(pc + 1)
@@ -452,7 +452,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             timestamp,
                             level: LogLevel::Info,
                             activity: "WHILE".to_string(),
-                            message: format!("Iteration {}: condition is true", *iter_count),
+                            message: format!("Iteration {iter_count}: condition is true"),
                         });
                         Ok(*body_target)
                     }
@@ -462,7 +462,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             timestamp,
                             level: LogLevel::Info,
                             activity: "WHILE".to_string(),
-                            message: format!("Completed {} iterations", iter_count),
+                            message: format!("Completed {iter_count} iterations"),
                         });
                         self.iteration_counts.remove(&pc);
                         Ok(*end_target)
@@ -527,7 +527,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     Ok(pc + 1)
                 } else {
                     self.scenario_call_depth -= 1;
-                    Err(format!("Scenario with ID {} not found", scenario_id))
+                    Err(format!("Scenario with ID {scenario_id} not found"))
                 }
             }
             Instruction::RunPowershell { code: _ } => {
@@ -563,7 +563,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 timestamp,
                 level: LogLevel::Warning,
                 activity: "TRY-CATCH".to_string(),
-                message: format!("Error caught: {}", error),
+                message: format!("Error caught: {error}"),
             });
 
             let mut pc = catch_target;
@@ -586,7 +586,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 timestamp,
                 level: LogLevel::Error,
                 activity: "ERROR".to_string(),
-                message: format!("Unhandled error: {}. No error handler connected.", error),
+                message: format!("Unhandled error: {error}. No error handler connected."),
             });
             Err(error)
         }
@@ -643,12 +643,12 @@ pub fn execute_project_with_vars(
     let program = match ir_builder.build() {
         Ok(prog) => prog,
         Err(e) => {
-            let _ = log_sender.send(LogEntry {
-                timestamp: get_timestamp(context.start_time),
-                level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
-                message: format!("IR compilation failed: {}", e),
-            });
+         let _ = log_sender.send(LogEntry {
+             timestamp: get_timestamp(context.start_time),
+             level: LogLevel::Error,
+             activity: "SYSTEM".to_string(),
+             message: format!("Execution error: {e}"),
+         });
             let _ = log_sender.send(LogEntry {
                 timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Info,
@@ -693,6 +693,7 @@ pub fn execute_project_with_typed_vars(
     stop_flag: Arc<AtomicBool>,
 ) {
     let mut context = ExecutionContext::new(start_time, var_sender.clone(), variables, stop_flag);
+
     let mut log = log_sender.clone();
 
     let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
@@ -701,7 +702,7 @@ pub fn execute_project_with_typed_vars(
             timestamp: get_timestamp(context.start_time),
             level: LogLevel::Error,
             activity: "SYSTEM".to_string(),
-            message: format!("Execution error: {}", e),
+            message: format!("Execution error: {e}"),
         });
     }
 

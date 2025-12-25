@@ -37,7 +37,7 @@ impl ValueExt for VariableValue {
     fn to_bool(&self) -> Result<bool, String> {
         match self {
             VariableValue::Boolean(b) => Ok(*b),
-            _ => Err(format!("Cannot convert {:?} to boolean", self)),
+            _ => Err(format!("Cannot convert {self:?} to boolean")),
         }
     }
 
@@ -47,7 +47,7 @@ impl ValueExt for VariableValue {
             VariableValue::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
             VariableValue::String(s) => s
                 .parse::<f64>()
-                .map_err(|_| format!("Cannot convert string '{}' to number", s)),
+                .map_err(|_| format!("Cannot convert string '{s}' to number")),
             VariableValue::Undefined => Err("Cannot convert undefined value to number".to_string()),
         }
     }
@@ -124,7 +124,7 @@ impl Lexer {
         let num_str: String = self.input[start..self.pos].iter().collect();
         num_str
             .parse::<f64>()
-            .map_err(|_| format!("Invalid number: {}", num_str))
+            .map_err(|_| format!("Invalid number: {num_str}"))
     }
 
     fn read_identifier(&mut self) -> String {
@@ -281,10 +281,10 @@ impl Lexer {
                     "AND" => Token::And,
                     "OR" => Token::Or,
                     "NOT" => Token::Not,
-                    _ => return Err(format!("Unknown identifier: {}", ident)),
+                    _ => return Err(format!("Unknown identifier: {ident}")),
                 }
             }
-            _ => return Err(format!("Unexpected character: {}", ch)),
+            _ => return Err(format!("Unexpected character: {ch}")),
         };
 
         Ok(Some(token))
@@ -336,9 +336,9 @@ impl Parser {
 
     fn parse(&mut self, variables: &mut Variables) -> Result<Expr, String> {
         let result = self.parse_or(variables)?;
-        if self.current().is_some() {
-            return Err(format!("Unexpected token: {:?}", self.current()));
-        }
+         if self.current().is_some() {
+             return Err(format!("Unexpected token: {:#?}", self.current()));
+         }
         Ok(result)
     }
 
@@ -493,7 +493,7 @@ impl Parser {
                 self.expect(&Token::RightParen)?;
                 Ok(value)
             }
-            Some(token) => Err(format!("Unexpected token: {:?}", token)),
+             Some(token) => Err(format!("Unexpected token: {token:?}")),
             None => Err("Unexpected end of expression".to_string()),
         }
     }
