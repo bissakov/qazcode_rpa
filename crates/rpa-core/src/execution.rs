@@ -230,9 +230,10 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     message: format!("Waiting for {milliseconds} ms"),
                 });
 
-                match utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
-                    true => Ok(pc + 1),
-                    false => Err("Aborted".into()),
+                if utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
+                    Ok(pc + 1)
+                } else {
+                    Err("Aborted".into())
                 }
             }
             Instruction::SetVar { var, value } => {
