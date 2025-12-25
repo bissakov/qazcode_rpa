@@ -12,7 +12,10 @@
       "Bash(cargo fix:*)",
       "Bash(cargo clippy:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(bd onboard:*)",
+      "Bash(bd create:*)",
+      "Bash(bd update:*)"
     ]
   },
   "outputStyle": "default",
