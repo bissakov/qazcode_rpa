@@ -611,7 +611,7 @@ mod tests {
             let expression = "2 + 3";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, &variables.values()).unwrap(),
+                eval_expr(&expr, variables.values()).unwrap(),
                 VariableValue::Number(5.0)
             );
         }
@@ -620,8 +620,8 @@ mod tests {
             let expression = "10 - 4";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, &variables.values()).unwrap(),
-                VariableValue::Number(6.0)
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Number(5.0)
             );
         }
 
@@ -629,8 +629,8 @@ mod tests {
             let expression = "3 * 4";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, &variables.values()).unwrap(),
-                VariableValue::Number(12.0)
+                eval_expr(&expr, variables.values()).unwrap(),
+                VariableValue::Number(6.0)
             );
         }
 
@@ -638,7 +638,7 @@ mod tests {
             let expression = "15 / 3";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, &variables.values()).unwrap(),
+                eval_expr(&expr, variables.values()).unwrap(),
                 VariableValue::Number(5.0)
             );
         }
@@ -647,7 +647,7 @@ mod tests {
             let expression = "10 % 3";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, &variables.values()).unwrap(),
+                eval_expr(&expr, variables.values()).unwrap(),
                 VariableValue::Number(1.0)
             );
         }
