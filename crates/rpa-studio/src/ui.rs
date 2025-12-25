@@ -1781,6 +1781,9 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
                     });
                 }
             }
+            _ => {
+                ui.label(&label);
+            }
         }
     }
 

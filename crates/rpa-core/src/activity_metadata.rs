@@ -2,6 +2,7 @@ use crate::Activity;
 use crate::LogLevel;
 use crate::VariableType;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityCategory {
     BasicActivities,
@@ -11,6 +12,7 @@ pub enum ActivityCategory {
     Documentation,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorCategory {
     FlowControlStart,
@@ -22,11 +24,13 @@ pub enum ColorCategory {
     Note,
 }
 
+#[non_exhaustive]
 pub struct PinConfig {
     pub output_count: usize,
     pub pin_labels: &'static [&'static str],
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyType {
     Description,
@@ -38,12 +42,14 @@ pub enum PropertyType {
     CodeEditor,
 }
 
+#[non_exhaustive]
 pub struct PropertyDef {
     pub label_key: &'static str,
     pub tooltip_key: Option<&'static str>,
     pub property_type: PropertyType,
 }
 
+#[non_exhaustive]
 pub struct ActivityMetadata {
     pub name_key: &'static str,
     pub button_key: &'static str,

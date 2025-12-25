@@ -40,6 +40,7 @@ impl ColorPalette {
             ColorCategory::ControlFlow => Self::CONTROL_FLOW,
             ColorCategory::Execution => Self::EXECUTION,
             ColorCategory::Note => Self::NOTE,
+            _ => Self::BASIC_OPS,
         }
     }
 }
