@@ -15,7 +15,7 @@ use std::time::SystemTime;
 pub struct ExecutionContext {
     start_time: SystemTime,
     variable_sender: Option<Sender<VarEvent>>,
-    variables: variables::Variables,
+    pub variables: variables::Variables,
     stop_flag: Arc<AtomicBool>,
 }
 
@@ -75,6 +75,19 @@ impl ExecutionContext {
             start_time: SystemTime::now(),
             variable_sender: Some(sender),
             variables: variables::Variables::new(),
+            stop_flag,
+        }
+    }
+
+    pub fn new_without_sender(
+        start_time: SystemTime,
+        variables: variables::Variables,
+        stop_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            start_time,
+            variable_sender: None,
+            variables,
             stop_flag,
         }
     }
@@ -257,7 +270,6 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         return Err(err);
                     }
                 };
-                println!("Evaluated result: {}", result);
 
                 self.log.log(LogEntry {
                     timestamp,

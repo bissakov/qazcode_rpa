@@ -1,8 +1,7 @@
 use clap::Parser;
-use rpa_core::variables::VarEvent;
+use rpa_core::execution::{ExecutionContext, IrExecutor, LogOutput};
 use rpa_core::{
-    IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, UiConstants,
-    VariableValue, execute_project_with_typed_vars,
+    IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, VariableValue,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,6 +27,26 @@ struct Cli {
         value_name = "VAR=VAL"
     )]
     var: Vec<String>,
+}
+
+struct CliLogOutput {
+    verbose: bool,
+    entries: Vec<LogEntry>,
+}
+
+impl LogOutput for CliLogOutput {
+    fn log(&mut self, entry: LogEntry) {
+        if self.verbose || entry.level != LogLevel::Info {
+            println!(
+                "{} [{}] {}: {}",
+                entry.timestamp,
+                entry.level.as_str(),
+                entry.activity,
+                entry.message
+            );
+        }
+        self.entries.push(entry);
+    }
 }
 
 fn main() {
@@ -68,16 +87,8 @@ fn main() {
     println!("Project: {}", project.name);
     println!();
 
-    let mut log_entries = Vec::new();
-
-    let (log_sender, log_receiver) = std::sync::mpsc::channel();
-    let (var_sender, var_receiver) = std::sync::mpsc::channel();
-
     let verbose = cli.verbose;
-    let scenario_name = cli.scenario.clone();
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let stop_flag_clone = Arc::clone(&stop_flag);
-
     let start_time = SystemTime::now();
     let validator = ScenarioValidator::new(&project.main_scenario, &project);
     let validation_result = validator.validate();
@@ -107,103 +118,27 @@ fn main() {
         }
     };
 
-    let project_clone = project.clone();
-    let variables_clone = variables.clone();
-
-    std::thread::spawn(move || {
-        if let Some(_scenario_name) = scenario_name {
-            eprintln!(
-                "Error: Specific scenario execution not supported in new IR-based architecture"
-            );
-            let _ = log_sender.send(LogEntry {
-                timestamp: "[00:00.00]".to_string(),
-                level: LogLevel::Error,
-                activity: "CLI".to_string(),
-                message: "Scenario-specific execution not supported".to_string(),
-            });
-            let _ = log_sender.send(LogEntry {
-                timestamp: "[00:00.00]".to_string(),
-                level: LogLevel::Info,
-                activity: "SYSTEM".to_string(),
-                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-            });
-        } else {
-            execute_project_with_typed_vars(
-                &project_clone,
-                log_sender,
-                var_sender,
-                start_time,
-                program,
-                variables_clone,
-                stop_flag_clone,
-            );
-        }
-    });
-
-    loop {
-        match log_receiver.try_recv() {
-            Ok(entry) => {
-                if entry.message == UiConstants::EXECUTION_COMPLETE_MARKER {
-                    break;
-                }
-
-                if verbose || entry.level != LogLevel::Info {
-                    println!(
-                        "{} [{}] {}: {}",
-                        entry.timestamp,
-                        entry.level.as_str(),
-                        entry.activity,
-                        entry.message
-                    );
-                }
-
-                log_entries.push(entry);
-            }
-            Err(_) => {
-                while let Ok(event) = var_receiver.try_recv() {
-                    match event {
-                        VarEvent::Set { name, value } => {
-                            let id = variables.id(&name);
-                            variables.set(id, value);
-                        }
-                        VarEvent::Remove { name } => {
-                            let id = variables.id(&name);
-                            variables.remove(id);
-                        }
-                        VarEvent::SetId { id, value } => {
-                            variables.set(id, value);
-                        }
-                        VarEvent::RemoveId { id } => {
-                            variables.remove(id);
-                        }
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
+    if let Some(_scenario_name) = &cli.scenario {
+        eprintln!("Error: Specific scenario execution not supported in new IR-based architecture");
+        std::process::exit(1);
     }
 
-    while let Ok(event) = var_receiver.try_recv() {
-        match event {
-            VarEvent::Set { name, value } => {
-                let id = variables.id(&name);
-                variables.set(id, value);
-            }
-            VarEvent::Remove { name } => {
-                let id = variables.id(&name);
-                variables.remove(id);
-            }
-            VarEvent::SetId { id, value } => {
-                variables.set(id, value);
-            }
-            VarEvent::RemoveId { id } => {
-                variables.remove(id);
-            }
-        }
+    let mut context = ExecutionContext::new_without_sender(start_time, variables, stop_flag);
+
+    let mut log_output = CliLogOutput {
+        verbose,
+        entries: Vec::new(),
+    };
+
+    let mut executor = IrExecutor::new(&program, &project, &mut context, &mut log_output);
+    if let Err(e) = executor.execute() {
+        eprintln!("Execution error: {}", e);
+        std::process::exit(1);
     }
 
     if verbose {
-        let var_list: Vec<(String, VariableValue)> = variables
+        let var_list: Vec<(String, VariableValue)> = context
+            .variables
             .iter()
             .filter_map(|(name, value)| {
                 if !matches!(value, VariableValue::Undefined) {
@@ -237,15 +172,18 @@ fn main() {
     println!("Execution Summary:");
     println!("==================");
 
-    let info_count = log_entries
+    let info_count = log_output
+        .entries
         .iter()
         .filter(|e| matches!(e.level, LogLevel::Info))
         .count();
-    let warning_count = log_entries
+    let warning_count = log_output
+        .entries
         .iter()
         .filter(|e| matches!(e.level, LogLevel::Warning))
         .count();
-    let error_count = log_entries
+    let error_count = log_output
+        .entries
         .iter()
         .filter(|e| matches!(e.level, LogLevel::Error))
         .count();
