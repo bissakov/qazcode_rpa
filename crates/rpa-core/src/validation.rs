@@ -929,20 +929,20 @@ impl ValidationCache {
 fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
     match activity {
         Activity::Start { scenario_id } => {
-            0u8.hash(hasher);
+            0_u8.hash(hasher);
             scenario_id.hash(hasher);
         }
         Activity::End { scenario_id } => {
-            1u8.hash(hasher);
+            1_u8.hash(hasher);
             scenario_id.hash(hasher);
         }
         Activity::Log { level, message } => {
-            2u8.hash(hasher);
+            2_u8.hash(hasher);
             level.as_str().hash(hasher);
             message.hash(hasher);
         }
         Activity::Delay { milliseconds } => {
-            3u8.hash(hasher);
+            3_u8.hash(hasher);
             milliseconds.hash(hasher);
         }
         Activity::SetVariable {
@@ -950,17 +950,17 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             value,
             var_type,
         } => {
-            4u8.hash(hasher);
+            4_u8.hash(hasher);
             name.hash(hasher);
             value.hash(hasher);
             var_type.hash(hasher);
         }
         Activity::Evaluate { expression } => {
-            6u8.hash(hasher);
+            6_u8.hash(hasher);
             expression.hash(hasher);
         }
         Activity::IfCondition { condition } => {
-            7u8.hash(hasher);
+            7_u8.hash(hasher);
             condition.hash(hasher);
         }
         Activity::Loop {
@@ -969,22 +969,22 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             step,
             index,
         } => {
-            8u8.hash(hasher);
+            8_u8.hash(hasher);
             start.hash(hasher);
             end.hash(hasher);
             step.hash(hasher);
             index.hash(hasher);
         }
         Activity::While { condition } => {
-            9u8.hash(hasher);
+            9_u8.hash(hasher);
             condition.hash(hasher);
         }
         Activity::CallScenario { scenario_id } => {
-            10u8.hash(hasher);
+            10_u8.hash(hasher);
             scenario_id.hash(hasher);
         }
         Activity::RunPowershell { code } => {
-            11u8.hash(hasher);
+            11_u8.hash(hasher);
             code.hash(hasher);
         }
         Activity::Note {
@@ -992,23 +992,23 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             width,
             height,
         } => {
-            12u8.hash(hasher);
+            12_u8.hash(hasher);
             text.hash(hasher);
             width.to_bits().hash(hasher);
             height.to_bits().hash(hasher);
         }
-        Activity::TryCatch => 13u8.hash(hasher),
+        Activity::TryCatch => 13_u8.hash(hasher),
     }
 }
 
 fn hash_branch_type(branch_type: &BranchType, hasher: &mut DefaultHasher) {
     match branch_type {
-        BranchType::Default => 0u8.hash(hasher),
-        BranchType::TrueBranch => 1u8.hash(hasher),
-        BranchType::FalseBranch => 2u8.hash(hasher),
-        BranchType::LoopBody => 3u8.hash(hasher),
-        BranchType::ErrorBranch => 4u8.hash(hasher),
-        BranchType::TryBranch => 5u8.hash(hasher),
-        BranchType::CatchBranch => 6u8.hash(hasher),
+        BranchType::Default => 0_u8.hash(hasher),
+        BranchType::TrueBranch => 1_u8.hash(hasher),
+        BranchType::FalseBranch => 2_u8.hash(hasher),
+        BranchType::LoopBody => 3_u8.hash(hasher),
+        BranchType::ErrorBranch => 4_u8.hash(hasher),
+        BranchType::TryBranch => 5_u8.hash(hasher),
+        BranchType::CatchBranch => 6_u8.hash(hasher),
     }
 }
