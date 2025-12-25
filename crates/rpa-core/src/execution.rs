@@ -400,8 +400,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     .variables
                     .get(*index)
                     .as_number()
-                    .map(|n| n as i64)
-                    .unwrap_or(*end);
+                    .map_or(*end, |n| n as i64);
 
                 let should_continue = if *step > 0 {
                     current < *end
