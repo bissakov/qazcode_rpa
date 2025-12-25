@@ -1360,7 +1360,7 @@ impl RpaApp {
         let stop_flag = Arc::clone(&self.stop_flag);
         std::thread::spawn(move || {
             execute_project_with_typed_vars(
-                &project, log_sender, var_sender, start_time, program, variables, stop_flag,
+                &project, &log_sender, &var_sender, start_time, &program, variables, stop_flag,
             );
         });
     }

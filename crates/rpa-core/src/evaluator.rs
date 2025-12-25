@@ -321,8 +321,8 @@ impl Parser {
         self.pos += 1;
     }
 
-    fn expect(&mut self, expected: Token) -> Result<(), String> {
-        if self.current() == Some(&expected) {
+    fn expect(&mut self, expected: &Token) -> Result<(), String> {
+        if self.current() == Some(expected) {
             self.advance();
             Ok(())
         } else {
@@ -490,7 +490,7 @@ impl Parser {
             Some(Token::LeftParen) => {
                 self.advance();
                 let value = self.parse_or(variables)?;
-                self.expect(Token::RightParen)?;
+                self.expect(&Token::RightParen)?;
                 Ok(value)
             }
             Some(token) => Err(format!("Unexpected token: {:?}", token)),

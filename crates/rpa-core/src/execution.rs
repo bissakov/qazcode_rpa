@@ -595,12 +595,12 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
 pub fn execute_project_with_vars(
     project: &Project,
-    log_sender: Sender<LogEntry>,
-    var_sender: Sender<VarEvent>,
+    log_sender: &Sender<LogEntry>,
+    var_sender: &Sender<VarEvent>,
     initial_vars: IndexMap<String, VariableValue>,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let mut context = ExecutionContext::new_with_sender(var_sender, stop_flag);
+    let mut context = ExecutionContext::new_with_sender(var_sender.clone(), stop_flag);
 
     for (name, value) in initial_vars {
         let id = context.variables.id(&name);
@@ -685,17 +685,17 @@ pub fn execute_project_with_vars(
 
 pub fn execute_project_with_typed_vars(
     project: &Project,
-    log_sender: Sender<LogEntry>,
-    var_sender: Sender<VarEvent>,
+    log_sender: &Sender<LogEntry>,
+    var_sender: &Sender<VarEvent>,
     start_time: SystemTime,
-    program: IrProgram,
+    program: &IrProgram,
     variables: variables::Variables,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let mut context = ExecutionContext::new(start_time, var_sender, variables, stop_flag);
+    let mut context = ExecutionContext::new(start_time, var_sender.clone(), variables, stop_flag);
     let mut log = log_sender.clone();
 
-    let mut executor = IrExecutor::new(&program, project, &mut context, &mut log);
+    let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
     if let Err(e) = executor.execute() {
         let _ = log_sender.send(LogEntry {
             timestamp: get_timestamp(context.start_time),
@@ -721,18 +721,18 @@ pub fn execute_project_with_typed_vars(
 
 pub fn execute_scenario_with_vars(
     project: &Project,
-    log_sender: Sender<LogEntry>,
-    var_sender: Sender<VarEvent>,
+    log_sender: &Sender<LogEntry>,
+    var_sender: &Sender<VarEvent>,
     start_time: SystemTime,
-    program: IrProgram,
+    program: &IrProgram,
     variables: variables::Variables,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let mut context = ExecutionContext::new(start_time, var_sender, variables, stop_flag);
+    let mut context = ExecutionContext::new(start_time, var_sender.clone(), variables, stop_flag);
 
     let mut log = log_sender.clone();
 
-    let mut executor = IrExecutor::new(&program, project, &mut context, &mut log);
+    let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
     if let Err(e) = executor.execute() {
         let _ = log_sender.send(LogEntry {
             timestamp: get_timestamp(context.start_time),
