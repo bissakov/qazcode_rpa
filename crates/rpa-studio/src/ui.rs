@@ -146,12 +146,18 @@ fn find_connection_near_point(
                 FlowDirection::Horizontal => {
                     let distance = (end.x - start.x).abs();
                     let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (start + Vec2::new(control_offset, 0.0), end - Vec2::new(control_offset, 0.0))
+                    (
+                        start + Vec2::new(control_offset, 0.0),
+                        end - Vec2::new(control_offset, 0.0),
+                    )
                 }
                 FlowDirection::Vertical => {
                     let distance = (end.y - start.y).abs();
                     let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (start + Vec2::new(0.0, control_offset), end - Vec2::new(0.0, control_offset))
+                    (
+                        start + Vec2::new(0.0, control_offset),
+                        end - Vec2::new(0.0, control_offset),
+                    )
                 }
             };
 
@@ -218,12 +224,18 @@ fn find_intersecting_connections(
                 FlowDirection::Horizontal => {
                     let distance = (end.x - start.x).abs();
                     let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (start + Vec2::new(control_offset, 0.0), end - Vec2::new(control_offset, 0.0))
+                    (
+                        start + Vec2::new(control_offset, 0.0),
+                        end - Vec2::new(control_offset, 0.0),
+                    )
                 }
                 FlowDirection::Vertical => {
                     let distance = (end.y - start.y).abs();
                     let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (start + Vec2::new(0.0, control_offset), end - Vec2::new(0.0, control_offset))
+                    (
+                        start + Vec2::new(0.0, control_offset),
+                        end - Vec2::new(0.0, control_offset),
+                    )
                 }
             };
 
@@ -238,7 +250,8 @@ fn find_intersecting_connections(
                     let bezier_end = bezier_points[j + 1];
 
                     if line_segments_intersect(cut_start, cut_end, bezier_start, bezier_end) {
-                        intersecting.push((connection.from_node.clone(), connection.to_node.clone()));
+                        intersecting
+                            .push((connection.from_node.clone(), connection.to_node.clone()));
                         break;
                     }
                 }
@@ -773,8 +786,7 @@ pub fn render_node_graph(
             any_node_hovered = true;
         }
 
-        let is_hovering_connection = node_hovering_connection.as_deref()
-            == Some(node.id.as_str());
+        let is_hovering_connection = node_hovering_connection.as_deref() == Some(node.id.as_str());
         let is_being_resized = state
             .resizing_node
             .as_ref()
@@ -1018,17 +1030,33 @@ pub fn render_node_graph(
             let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
             let end = pointer_pos;
 
-            use rpa_core::constants::{FlowDirection, UiConstants};
-            let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-                FlowDirection::Horizontal => {
-                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
-                    (start + Vec2::new(control_offset, 0.0), end - Vec2::new(control_offset, 0.0))
-                }
-                FlowDirection::Vertical => {
-                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
-                    (start + Vec2::new(0.0, control_offset), end - Vec2::new(0.0, control_offset))
-                }
-            };
+             use rpa_core::constants::{FlowDirection, UiConstants};
+             
+             let is_error_branch = from_node.activity.can_have_error_output() && *pin_index == 1;
+             
+             let (control1, control2) = match UiConstants::FLOW_DIRECTION {
+                 FlowDirection::Horizontal => {
+                     let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
+                     (
+                         start + Vec2::new(control_offset, 0.0),
+                         end - Vec2::new(control_offset, 0.0),
+                     )
+                 }
+                 FlowDirection::Vertical => {
+                     let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
+                     if is_error_branch {
+                         (
+                             start + Vec2::new(control_offset, 0.0),
+                             end - Vec2::new(control_offset, 0.0),
+                         )
+                     } else {
+                         (
+                             start + Vec2::new(0.0, control_offset),
+                             end - Vec2::new(0.0, control_offset),
+                         )
+                     }
+                 }
+             };
 
             let preview_color = match &from_node.activity {
                 Activity::IfCondition { .. } => {
@@ -1306,8 +1334,12 @@ fn draw_node_transformed<F>(
                     );
 
                     let (true_label_offset, true_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                        FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
                     };
                     painter.text(
                         true_pin + true_label_offset,
@@ -1328,9 +1360,14 @@ fn draw_node_transformed<F>(
                         Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
                     );
 
-                    let (false_label_offset, false_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                        FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
+                    let (false_label_offset, false_label_align) = match UiConstants::FLOW_DIRECTION
+                    {
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
                     };
                     painter.text(
                         false_pin + false_label_offset,
@@ -1356,8 +1393,12 @@ fn draw_node_transformed<F>(
                     );
 
                     let (body_label_offset, body_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                        FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
                     };
                     painter.text(
                         body_pin + body_label_offset,
@@ -1379,8 +1420,12 @@ fn draw_node_transformed<F>(
                     );
 
                     let (next_label_offset, next_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                        FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
                     };
                     painter.text(
                         next_pin + next_label_offset,
@@ -1406,8 +1451,12 @@ fn draw_node_transformed<F>(
                     );
 
                     let (try_label_offset, try_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                        FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
                     };
                     painter.text(
                         try_pin + try_label_offset,
@@ -1428,9 +1477,14 @@ fn draw_node_transformed<F>(
                         Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
                     );
 
-                    let (catch_label_offset, catch_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                        FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
+                    let (catch_label_offset, catch_label_align) = match UiConstants::FLOW_DIRECTION
+                    {
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
                     };
                     painter.text(
                         catch_pin + catch_label_offset,
@@ -1456,10 +1510,15 @@ fn draw_node_transformed<F>(
                             Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
                         );
 
-                        let (success_label_offset, success_label_align) = match UiConstants::FLOW_DIRECTION {
-                            FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                            FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
-                        };
+                        let (success_label_offset, success_label_align) =
+                            match UiConstants::FLOW_DIRECTION {
+                                FlowDirection::Horizontal => {
+                                    (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                                }
+                                FlowDirection::Vertical => {
+                                    (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                                }
+                            };
                         painter.text(
                             success_pin + success_label_offset,
                             success_label_align,
@@ -1479,10 +1538,15 @@ fn draw_node_transformed<F>(
                             Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
                         );
 
-                        let (error_label_offset, error_label_align) = match UiConstants::FLOW_DIRECTION {
-                            FlowDirection::Horizontal => (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER),
-                            FlowDirection::Vertical => (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM),
-                        };
+                        let (error_label_offset, error_label_align) =
+                            match UiConstants::FLOW_DIRECTION {
+                                FlowDirection::Horizontal => {
+                                    (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                                }
+                                FlowDirection::Vertical => {
+                                    (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                                }
+                            };
                         painter.text(
                             error_pin + error_label_offset,
                             error_label_align,
@@ -1543,19 +1607,34 @@ fn draw_connection_transformed<F>(
     };
     let end = to_screen(to_node.get_input_pin_pos());
 
-    use rpa_core::constants::{FlowDirection, UiConstants};
-    let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-        FlowDirection::Horizontal => {
-            let distance = (end.x - start.x).abs();
-            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-            (start + Vec2::new(control_offset, 0.0), end - Vec2::new(control_offset, 0.0))
-        }
-        FlowDirection::Vertical => {
-            let distance = (end.y - start.y).abs();
-            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-            (start + Vec2::new(0.0, control_offset), end - Vec2::new(0.0, control_offset))
-        }
-    };
+     use rpa_core::constants::{FlowDirection, UiConstants};
+     let (control1, control2) = match UiConstants::FLOW_DIRECTION {
+         FlowDirection::Horizontal => {
+             let distance = (end.x - start.x).abs();
+             let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+             (
+                 start + Vec2::new(control_offset, 0.0),
+                 end - Vec2::new(control_offset, 0.0),
+             )
+         }
+         FlowDirection::Vertical => {
+             if *branch_type == BranchType::ErrorBranch {
+                 let distance = (end.x - start.x).abs();
+                 let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+                 (
+                     start + Vec2::new(control_offset, 0.0),
+                     end - Vec2::new(control_offset, 0.0),
+                 )
+             } else {
+                 let distance = (end.y - start.y).abs();
+                 let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+                 (
+                     start + Vec2::new(0.0, control_offset),
+                     end - Vec2::new(0.0, control_offset),
+                 )
+             }
+         }
+     };
 
     let color = match branch_type {
         BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
@@ -1849,7 +1928,11 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
                             .selected_text(current_name)
                             .show_ui(ui, |ui| {
                                 for scenario in scenarios {
-                                    ui.selectable_value(scenario_id, scenario.id.clone(), &scenario.name);
+                                    ui.selectable_value(
+                                        scenario_id,
+                                        scenario.id.clone(),
+                                        &scenario.name,
+                                    );
                                 }
                             });
                     }
