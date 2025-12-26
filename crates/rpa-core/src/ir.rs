@@ -793,16 +793,41 @@ impl<'a> IrBuilder<'a> {
 
                 let expr = parse_expr(condition, self.variables)?;
 
-                self.program.add_instruction(Instruction::JumpIf {
+                let jump_if_not_idx = self.program.add_instruction(Instruction::JumpIfNot {
                     condition: expr,
                     target: 0,
                 });
 
-                if let Some(false_id) = false_next {
-                    self.compile_from_called_scenario(scenario, &false_id)?;
+                if let Some(node) = true_next {
+                    self.compile_from_called_scenario(scenario, &node)?;
                 }
-                if let Some(true_id) = true_next {
-                    self.compile_from_called_scenario(scenario, &true_id)?;
+
+                let jump_over_false_idx = if false_next.is_some() {
+                    Some(
+                        self.program
+                            .add_instruction(Instruction::Jump { target: 0 }),
+                    )
+                } else {
+                    None
+                };
+
+                let false_start = self.program.instructions.len();
+                if let Some(node) = false_next {
+                    self.compile_from_called_scenario(scenario, &node)?;
+                }
+
+                let after_if = self.program.instructions.len();
+
+                if let Instruction::JumpIfNot { target, .. } =
+                    &mut self.program.instructions[jump_if_not_idx]
+                {
+                    *target = false_start;
+                }
+
+                if let Some(idx) = jump_over_false_idx
+                    && let Instruction::Jump { target } = &mut self.program.instructions[idx]
+                {
+                    *target = after_if;
                 }
             }
             Activity::CallScenario { scenario_id, parameters } => {

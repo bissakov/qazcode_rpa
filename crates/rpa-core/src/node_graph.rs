@@ -284,17 +284,20 @@ impl Scenario {
             parameters: Vec::new(),
         };
 
+        const START_X: f32 = 1000.0;
+        const START_Y: f32 = 550.0;
+
         scenario.add_node(
             Activity::Start {
                 scenario_id: scenario.id.clone(),
             },
-            egui::pos2(300.0, 250.0),
+            egui::pos2(START_X, START_Y),
         );
         scenario.add_node(
             Activity::End {
                 scenario_id: scenario.id.clone(),
             },
-            egui::pos2(300.0, 250.0 + UiConstants::NODE_HEIGHT + 50.0),
+            egui::pos2(START_X, START_Y + UiConstants::NODE_HEIGHT + 50.0),
         );
 
         if scenario.nodes.len() >= 2 {
