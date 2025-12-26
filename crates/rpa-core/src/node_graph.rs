@@ -373,11 +373,19 @@ impl Node {
     }
 
     pub fn get_input_pin_pos(&self) -> egui::Pos2 {
-        self.position + egui::vec2(0.0, self.height / 2.0)
+        use crate::constants::{FlowDirection, UiConstants};
+        match UiConstants::FLOW_DIRECTION {
+            FlowDirection::Horizontal => self.position + egui::vec2(0.0, self.height / 2.0),
+            FlowDirection::Vertical => self.position + egui::vec2(self.width / 2.0, 0.0),
+        }
     }
 
     pub fn get_output_pin_pos(&self) -> egui::Pos2 {
-        self.position + egui::vec2(self.width, self.height / 2.0)
+        use crate::constants::{FlowDirection, UiConstants};
+        match UiConstants::FLOW_DIRECTION {
+            FlowDirection::Horizontal => self.position + egui::vec2(self.width, self.height / 2.0),
+            FlowDirection::Vertical => self.position + egui::vec2(self.width / 2.0, self.height),
+        }
     }
 
     pub fn has_input_pin(&self) -> bool {
@@ -409,30 +417,65 @@ impl Node {
     }
 
     pub fn get_output_pin_pos_by_index(&self, index: usize) -> egui::Pos2 {
-        let pin_offset_top = self.height / 4.0;
-        let pin_offset_bottom = self.height * 3.0 / 4.0;
-        let pin_offset_center = self.height / 2.0;
+        use crate::constants::{FlowDirection, UiConstants};
 
-        match &self.activity {
-            Activity::IfCondition { .. }
-            | Activity::Loop { .. }
-            | Activity::While { .. }
-            | Activity::TryCatch => {
-                if index == 0 {
-                    self.position + egui::vec2(self.width, pin_offset_top)
-                } else {
-                    self.position + egui::vec2(self.width, pin_offset_bottom)
+        match UiConstants::FLOW_DIRECTION {
+            FlowDirection::Horizontal => {
+                let pin_offset_top = self.height / 4.0;
+                let pin_offset_bottom = self.height * 3.0 / 4.0;
+                let pin_offset_center = self.height / 2.0;
+
+                match &self.activity {
+                    Activity::IfCondition { .. }
+                    | Activity::Loop { .. }
+                    | Activity::While { .. }
+                    | Activity::TryCatch => {
+                        if index == 0 {
+                            self.position + egui::vec2(self.width, pin_offset_top)
+                        } else {
+                            self.position + egui::vec2(self.width, pin_offset_bottom)
+                        }
+                    }
+                    _ => {
+                        if self.activity.can_have_error_output() {
+                            if index == 0 {
+                                self.position + egui::vec2(self.width, pin_offset_top)
+                            } else {
+                                self.position + egui::vec2(self.width, pin_offset_bottom)
+                            }
+                        } else {
+                            self.position + egui::vec2(self.width, pin_offset_center)
+                        }
+                    }
                 }
             }
-            _ => {
-                if self.activity.can_have_error_output() {
-                    if index == 0 {
-                        self.position + egui::vec2(self.width, pin_offset_top)
-                    } else {
-                        self.position + egui::vec2(self.width, pin_offset_bottom)
+            FlowDirection::Vertical => {
+                let pin_offset_left = self.width / 4.0;
+                let pin_offset_right = self.width * 3.0 / 4.0;
+                let pin_offset_center = self.width / 2.0;
+
+                match &self.activity {
+                    Activity::IfCondition { .. }
+                    | Activity::Loop { .. }
+                    | Activity::While { .. }
+                    | Activity::TryCatch => {
+                        if index == 0 {
+                            self.position + egui::vec2(pin_offset_left, self.height)
+                        } else {
+                            self.position + egui::vec2(pin_offset_right, self.height)
+                        }
                     }
-                } else {
-                    self.position + egui::vec2(self.width, pin_offset_center)
+                    _ => {
+                        if self.activity.can_have_error_output() {
+                            if index == 0 {
+                                self.position + egui::vec2(pin_offset_left, self.height)
+                            } else {
+                                self.position + egui::vec2(pin_offset_right, self.height)
+                            }
+                        } else {
+                            self.position + egui::vec2(pin_offset_center, self.height)
+                        }
+                    }
                 }
             }
         }
