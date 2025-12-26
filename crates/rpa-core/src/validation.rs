@@ -420,20 +420,22 @@ impl<'a> ScenarioValidator<'a> {
                 continue;
             }
 
-            if let Activity::CallScenario { scenario_id } = &node.activity {
-                let scenario_exists = self.project.scenarios.iter().any(|s| s.id == *scenario_id)
-                    || self.project.main_scenario.id == *scenario_id;
+            if let Activity::CallScenario { scenario_id, .. } = &node.activity {
+                if !scenario_id.is_empty() {
+                    let scenario_exists = self.project.scenarios.iter().any(|s| s.id == *scenario_id)
+                        || self.project.main_scenario.id == *scenario_id;
 
-                if !scenario_exists {
-                    issues.push(ValidationIssue {
-                        level: ValidationLevel::Error,
-                        node_id: Some(node.id.clone()),
-                        message: format!(
-                            "CallScenario node ({}) references non-existent scenario {}",
-                            node.id, scenario_id
-                        ),
-                        code: "E103".to_string(),
-                    });
+                    if !scenario_exists {
+                        issues.push(ValidationIssue {
+                            level: ValidationLevel::Error,
+                            node_id: Some(node.id.clone()),
+                            message: format!(
+                                "CallScenario node ({}) references non-existent scenario {}",
+                                node.id, scenario_id
+                            ),
+                            code: "E103".to_string(),
+                        });
+                    }
                 }
             }
         }
@@ -506,6 +508,7 @@ impl<'a> ScenarioValidator<'a> {
         for node in &scenario.nodes {
             if let Activity::CallScenario {
                 scenario_id: called_id,
+                ..
             } = &node.activity
                 && let Some(cycle) =
                     self.find_scenario_call_chain(called_id, visited, call_stack, depth_limit)
@@ -978,7 +981,7 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             9_u8.hash(hasher);
             condition.hash(hasher);
         }
-        Activity::CallScenario { scenario_id } => {
+        Activity::CallScenario { scenario_id, .. } => {
             10_u8.hash(hasher);
             scenario_id.hash(hasher);
         }
@@ -1010,4 +1013,116 @@ fn hash_branch_type(branch_type: &BranchType, hasher: &mut DefaultHasher) {
         BranchType::TryBranch => 5_u8.hash(hasher),
         BranchType::CatchBranch => 6_u8.hash(hasher),
     }
+}
+
+pub fn compute_call_graph(
+    project: &Project,
+) -> (HashMap<String, HashSet<String>>, HashSet<String>) {
+    let mut call_graph: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut visited = HashSet::new();
+    let mut in_progress = HashSet::new();
+    let mut recursive_scenarios = HashSet::new();
+
+    fn dfs(
+        scenario_id: &str,
+        project: &Project,
+        call_graph: &mut HashMap<String, HashSet<String>>,
+        visited: &mut HashSet<String>,
+        in_progress: &mut HashSet<String>,
+        recursive_scenarios: &mut HashSet<String>,
+    ) {
+        if visited.contains(scenario_id) {
+            return;
+        }
+
+        if in_progress.contains(scenario_id) {
+            recursive_scenarios.insert(scenario_id.to_string());
+            return;
+        }
+
+        in_progress.insert(scenario_id.to_string());
+
+        let scenario = if project.main_scenario.id == scenario_id {
+            &project.main_scenario
+        } else {
+            match project.scenarios.iter().find(|s| s.id == scenario_id) {
+                Some(s) => s,
+                None => {
+                    in_progress.remove(scenario_id);
+                    visited.insert(scenario_id.to_string());
+                    return;
+                }
+            }
+        };
+
+        let mut called_scenarios = HashSet::new();
+        for node in &scenario.nodes {
+            if let Activity::CallScenario { scenario_id: called_id, .. } = &node.activity {
+                called_scenarios.insert(called_id.clone());
+            }
+        }
+
+        call_graph.insert(scenario_id.to_string(), called_scenarios.clone());
+
+        for called_id in called_scenarios {
+            dfs(
+                &called_id,
+                project,
+                call_graph,
+                visited,
+                in_progress,
+                recursive_scenarios,
+            );
+        }
+
+        in_progress.remove(scenario_id);
+        visited.insert(scenario_id.to_string());
+    }
+
+    dfs(
+        &project.main_scenario.id,
+        project,
+        &mut call_graph,
+        &mut visited,
+        &mut in_progress,
+        &mut recursive_scenarios,
+    );
+
+    (call_graph, recursive_scenarios)
+}
+
+pub fn validate_variable_uniqueness(project: &Project) -> Result<(), String> {
+    let mut all_variable_names = HashSet::new();
+
+    let scenarios: Vec<&Scenario> = std::iter::once(&project.main_scenario)
+        .chain(project.scenarios.iter())
+        .collect();
+
+    for scenario in scenarios {
+        let mut scenario_vars = HashSet::new();
+
+        for node in &scenario.nodes {
+            match &node.activity {
+                Activity::SetVariable { name, .. } => {
+                    scenario_vars.insert(name.clone());
+                }
+                Activity::Loop { index, .. } => {
+                    scenario_vars.insert(index.clone());
+                }
+                _ => {}
+            }
+        }
+
+        for var_name in scenario_vars {
+            if all_variable_names.contains(&var_name) {
+                return Err(format!(
+                    "Variable '{}' is defined in multiple scenarios. Variables must be unique across all reachable scenarios.",
+                    var_name
+                ));
+            }
+            all_variable_names.insert(var_name);
+        }
+    }
+
+    Ok(())
 }

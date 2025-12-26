@@ -1710,7 +1710,7 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
             PropertyType::ScenarioSelector => {
                 ui.label(&label);
 
-                if let Activity::CallScenario { scenario_id } = &mut node.activity {
+                if let Activity::CallScenario { scenario_id, .. } = &mut node.activity {
                     if scenarios.is_empty() {
                         ui.label(t!("status.no_scenarios").as_ref());
                     } else {

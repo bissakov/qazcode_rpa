@@ -140,6 +140,7 @@ impl ActivityMetadata {
                 &CALL_SCENARIO_METADATA,
                 Activity::CallScenario {
                     scenario_id: String::new(),
+                    parameters: Vec::new(),
                 },
             ),
             (
@@ -186,6 +187,7 @@ impl ActivityMetadata {
                         &CALL_SCENARIO_METADATA,
                         Activity::CallScenario {
                             scenario_id: String::new(),
+                            parameters: Vec::new(),
                         },
                     ),
                 ],

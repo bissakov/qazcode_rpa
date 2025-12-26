@@ -1010,7 +1010,7 @@ impl RpaApp {
                                         if !self.project.scenarios.is_empty() {
                                             let scenario_id = self.project.scenarios[0].id.clone();
                                             node_to_add =
-                                                Some(Activity::CallScenario { scenario_id });
+                                                Some(Activity::CallScenario { scenario_id, parameters: Vec::new() });
                                         } else {
                                             self.project.execution_log.push(LogEntry {
                                                 timestamp: "".to_string(),

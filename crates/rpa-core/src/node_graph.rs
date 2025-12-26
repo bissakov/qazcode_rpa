@@ -270,6 +270,8 @@ pub struct Scenario {
     pub name: String,
     pub nodes: Vec<Node>,
     pub connections: Vec<Connection>,
+    #[serde(default)]
+    pub parameters: Vec<ScenarioParameter>,
 }
 
 impl Scenario {
@@ -279,6 +281,7 @@ impl Scenario {
             name: name.to_string(),
             nodes: Vec::new(),
             connections: Vec::new(),
+            parameters: Vec::new(),
         };
 
         scenario.add_node(
@@ -591,6 +594,8 @@ pub enum Activity {
     },
     CallScenario {
         scenario_id: String,
+        #[serde(default)]
+        parameters: Vec<ParameterBinding>,
     },
     RunPowershell {
         code: String,
@@ -610,6 +615,27 @@ impl Activity {
             Activity::CallScenario { .. } | Activity::RunPowershell { .. }
         )
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum ParameterDirection {
+    In,
+    Out,
+    InOut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParameterBinding {
+    pub param_var_id: crate::variables::VarId,
+    pub source_var_id: crate::variables::VarId,
+    pub direction: ParameterDirection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScenarioParameter {
+    pub var_id: crate::variables::VarId,
+    pub var_name: String,
+    pub direction: ParameterDirection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

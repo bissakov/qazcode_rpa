@@ -12,6 +12,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
+pub struct CallFrame {
+    pub scenario_id: String,
+    pub return_address: usize,
+    pub parameter_bindings: Vec<crate::node_graph::ParameterBinding>,
+}
+
 pub struct ExecutionContext {
     start_time: SystemTime,
     variable_sender: Option<Sender<VarEvent>>,
@@ -26,7 +32,8 @@ pub struct IrExecutor<'a, L: LogOutput> {
     log: &'a mut L,
     error_handlers: Vec<usize>,
     iteration_counts: HashMap<usize, usize>,
-    scenario_call_depth: usize,
+    call_stack: Vec<CallFrame>,
+    current_scenario_id: String,
 }
 
 pub trait LogOutput {
@@ -111,7 +118,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             log,
             error_handlers: Vec::new(),
             iteration_counts: HashMap::new(),
-            scenario_call_depth: 0,
+            call_stack: Vec::new(),
+            current_scenario_id: project.main_scenario.id.clone(),
         }
     }
 
@@ -199,7 +207,30 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         activity: "END".to_string(),
                         message: format!("Ending scenario: {}", &scenario.name),
                     });
-                    Ok(pc + 1)
+
+                    if let Some(frame) = self.call_stack.pop() {
+                        for binding in &frame.parameter_bindings {
+                            match binding.direction {
+                                crate::node_graph::ParameterDirection::Out
+                                | crate::node_graph::ParameterDirection::InOut => {
+                                    let param_value = self.context.variables.get(binding.param_var_id).clone();
+                                    self.context.variables.set(binding.source_var_id, param_value.clone());
+                                    if let Some(ref sender) = self.context.variable_sender {
+                                        let _ = sender.send(VarEvent::SetId {
+                                            id: binding.source_var_id,
+                                            value: param_value,
+                                        });
+                                    }
+                                }
+                                crate::node_graph::ParameterDirection::In => {}
+                            }
+                        }
+                        self.current_scenario_id = frame.scenario_id.clone();
+                        Ok(frame.return_address)
+                    } else {
+                        // Main scenario (no call frame): terminate execution
+                        Ok(self.program.instructions.len())
+                    }
                 } else {
                     let error_msg = format!("Scenario with ID {scenario_id} not found");
                     self.log.log(LogEntry {
@@ -493,10 +524,12 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 });
                 Ok(pc + 1)
             }
-            Instruction::CallScenario { scenario_id } => {
-                self.scenario_call_depth += 1;
+            Instruction::CallScenario { scenario_id, parameters } => {
+                if scenario_id.is_empty() {
+                    return Ok(pc + 1);
+                }
 
-                if self.scenario_call_depth > 100 {
+                if self.call_stack.len() >= 100 {
                     return Err("Maximum scenario call depth exceeded (100)".to_string());
                 }
 
@@ -513,21 +546,56 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         }
                     });
 
-                if let Some(_scenario) = scenario {
+                if let Some(scenario) = scenario {
                     let timestamp = get_timestamp(self.context.start_time);
                     self.log.log(LogEntry {
                         timestamp,
-                        level: LogLevel::Warning,
+                        level: LogLevel::Info,
                         activity: "CALL".to_string(),
-                        message: "[TODO] CallScenario not yet implemented in new IR system"
-                            .to_string(),
+                        message: format!("Entering scenario: {}", scenario.name),
                     });
 
-                    self.scenario_call_depth -= 1;
-                    Ok(pc + 1)
+                    for binding in parameters {
+                        match binding.direction {
+                            crate::node_graph::ParameterDirection::In
+                            | crate::node_graph::ParameterDirection::InOut => {
+                                let source_value = self.context.variables.get(binding.source_var_id).clone();
+                                self.context.variables.set(binding.param_var_id, source_value.clone());
+                                if let Some(ref sender) = self.context.variable_sender {
+                                    let _ = sender.send(VarEvent::SetId {
+                                        id: binding.param_var_id,
+                                        value: source_value,
+                                    });
+                                }
+                            }
+                            crate::node_graph::ParameterDirection::Out => {
+                                self.context.variables.set(binding.param_var_id, VariableValue::Undefined);
+                                if let Some(ref sender) = self.context.variable_sender {
+                                    let _ = sender.send(VarEvent::SetId {
+                                        id: binding.param_var_id,
+                                        value: VariableValue::Undefined,
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    let return_address = pc + 1;
+                    self.call_stack.push(CallFrame {
+                        scenario_id: self.current_scenario_id.clone(),
+                        return_address,
+                        parameter_bindings: parameters.clone(),
+                    });
+                    self.current_scenario_id = scenario_id.clone();
+
+                    if let Some(&start_index) = self.program.scenario_start_index.get(scenario_id) {
+                        Ok(start_index)
+                    } else {
+                        self.call_stack.pop();
+                        Err(format!("Scenario {} not found in IR program", scenario_id))
+                    }
                 } else {
-                    self.scenario_call_depth -= 1;
-                    Err(format!("Scenario with ID {scenario_id} not found"))
+                    Err(format!("Scenario with ID {scenario_id} not found in project"))
                 }
             }
             Instruction::RunPowershell { code: _ } => {

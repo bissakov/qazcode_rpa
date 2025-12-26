@@ -74,6 +74,7 @@ pub enum Instruction {
     PopErrorHandler,
     CallScenario {
         scenario_id: String,
+        parameters: Vec<crate::node_graph::ParameterBinding>,
     },
     RunPowershell {
         code: String,
@@ -88,7 +89,9 @@ pub enum Instruction {
 pub struct IrProgram {
     pub instructions: Vec<Instruction>,
     pub entry_point: usize,
-    // pub node_to_instruction: HashMap<Uuid, usize>,
+    pub scenario_start_index: HashMap<String, usize>,
+    pub scenario_call_graph: HashMap<String, HashSet<String>>,
+    pub recursive_scenarios: HashSet<String>,
 }
 
 impl Default for IrProgram {
@@ -102,7 +105,9 @@ impl IrProgram {
         Self {
             instructions: Vec::new(),
             entry_point: 0,
-            // node_to_instruction: HashMap::new(),
+            scenario_start_index: HashMap::new(),
+            scenario_call_graph: HashMap::new(),
+            recursive_scenarios: HashSet::new(),
         }
     }
 
@@ -144,8 +149,10 @@ pub struct IrBuilder<'a> {
     reachable_nodes: &'a HashSet<String>,
     compiled_nodes: HashSet<String>,
     node_start_index: HashMap<String, usize>,
-    // pending_jumps: Vec<PendingJump>,
     variables: &'a mut Variables,
+    compiled_scenarios: HashSet<String>,
+    call_graph: HashMap<String, HashSet<String>>,
+    recursive_scenarios: HashSet<String>,
 }
 
 // #[derive(Debug)]
@@ -177,6 +184,7 @@ impl<'a> IrBuilder<'a> {
         reachable_nodes: &'a HashSet<String>,
         variables: &'a mut Variables,
     ) -> Self {
+        let (call_graph, recursive_scenarios) = crate::validation::compute_call_graph(project);
         Self {
             scenario,
             project,
@@ -185,6 +193,9 @@ impl<'a> IrBuilder<'a> {
             compiled_nodes: HashSet::new(),
             node_start_index: HashMap::new(),
             variables,
+            compiled_scenarios: HashSet::new(),
+            call_graph,
+            recursive_scenarios,
         }
     }
 
@@ -270,6 +281,9 @@ impl<'a> IrBuilder<'a> {
     // }
 
     pub fn build(mut self) -> Result<IrProgram, String> {
+        self.program.scenario_call_graph = self.call_graph.clone();
+        self.program.recursive_scenarios = self.recursive_scenarios.clone();
+
         let start_node = self
             .scenario
             .nodes
@@ -277,11 +291,42 @@ impl<'a> IrBuilder<'a> {
             .find(|n| matches!(n.activity, Activity::Start { .. }))
             .ok_or("No Start node found")?;
 
+        self.program.entry_point = self.program.instructions.len();
+        self.program.scenario_start_index.insert(
+            self.scenario.id.clone(),
+            self.program.entry_point,
+        );
+        self.compiled_scenarios.insert(self.scenario.id.clone());
+
         self.compile_from_node(&start_node.id)?;
 
-        // self.resolve_pending_jumps()?;
+        // Compile all reachable scenarios that were referenced but not yet compiled
+        self.compile_all_called_scenarios()?;
 
         Ok(self.program)
+    }
+
+    fn compile_all_called_scenarios(&mut self) -> Result<(), String> {
+        let mut scenarios_to_compile = Vec::new();
+
+        // Collect all scenarios that need to be compiled
+        for scenario in std::iter::once(&self.project.main_scenario)
+            .chain(self.project.scenarios.iter())
+        {
+            if !self.compiled_scenarios.contains(&scenario.id) {
+                // Check if this scenario is reachable
+                if self.call_graph.contains_key(&scenario.id) {
+                    scenarios_to_compile.push(scenario.id.clone());
+                }
+            }
+        }
+
+        // Compile each scenario
+        for scenario_id in scenarios_to_compile {
+            self.compile_called_scenario(&scenario_id)?;
+        }
+
+        Ok(())
     }
 
     fn first_next_node(&self, node_id: &str, branch: BranchType) -> Option<String> {
@@ -395,9 +440,10 @@ impl<'a> IrBuilder<'a> {
             Activity::TryCatch => {
                 self.compile_try_catch_node(node_id)?;
             }
-            Activity::CallScenario { scenario_id } => {
+            Activity::CallScenario { scenario_id, parameters } => {
                 self.program.add_instruction(Instruction::CallScenario {
                     scenario_id: scenario_id.clone(),
+                    parameters: parameters.clone(),
                 });
                 self.compile_default_next(node_id)?;
             }
@@ -652,4 +698,140 @@ impl<'a> IrBuilder<'a> {
     //
     //     Ok(())
     // }
+
+    fn compile_called_scenario(&mut self, scenario_id: &str) -> Result<(), String> {
+        let scenario = self.project.scenarios
+            .iter()
+            .find(|s| s.id == scenario_id)
+            .ok_or_else(|| format!("Scenario {} not found", scenario_id))?
+            .clone();
+
+        let start_node = scenario
+            .nodes
+            .iter()
+            .find(|n| matches!(n.activity, Activity::Start { .. }))
+            .ok_or(format!("No Start node found in scenario {}", scenario_id))?
+            .clone();
+
+        self.program.scenario_start_index.insert(
+            scenario_id.to_string(),
+            self.program.instructions.len(),
+        );
+        self.compiled_scenarios.insert(scenario_id.to_string());
+
+        self.program.add_instruction(Instruction::Start {
+            scenario_id: scenario_id.to_string(),
+        });
+
+        self.compile_from_called_scenario(&scenario, &start_node.id)?;
+
+        Ok(())
+    }
+
+    fn compile_from_called_scenario(&mut self, scenario: &Scenario, node_id: &str) -> Result<(), String> {
+        if self.compiled_nodes.contains(node_id) {
+            return Ok(());
+        }
+
+        let node = scenario
+            .get_node(node_id)
+            .ok_or_else(|| format!("Node {} not found", node_id))?;
+
+        let start_index = self.program.instructions.len();
+        self.node_start_index.insert(node_id.to_string(), start_index);
+        self.compiled_nodes.insert(node_id.to_string());
+
+        self.program.add_instruction(Instruction::DebugMarker {
+            node_id: node_id.to_string(),
+            description: format!("{:?}", node.activity),
+        });
+
+        match &node.activity {
+            Activity::Start { .. } => {
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+            Activity::End { .. } => {
+                self.program.add_instruction(Instruction::End {
+                    scenario_id: scenario.id.clone(),
+                });
+            }
+            Activity::Log { level, message } => {
+                let resolved = self.resolve_value(message);
+                self.program.add_instruction(Instruction::Log {
+                    level: level.clone(),
+                    message: resolved,
+                });
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+            Activity::Delay { milliseconds } => {
+                self.program.add_instruction(Instruction::Delay {
+                    milliseconds: *milliseconds,
+                });
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+            Activity::SetVariable { name, value, var_type } => {
+                let var_value = match VariableValue::from_string(value, var_type) {
+                    Ok(v) => v,
+                    Err(_) => VariableValue::String(value.to_string()),
+                };
+
+                let var_id = self.variables.id(name);
+                self.program.add_instruction(Instruction::SetVar {
+                    var: var_id,
+                    value: var_value,
+                });
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+            Activity::Evaluate { expression } => {
+                let expr = parse_expr(expression, self.variables)?;
+                self.program.add_instruction(Instruction::Evaluate { expr });
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+            Activity::IfCondition { condition } => {
+                let true_next = self.first_next_node_called(scenario, node_id, BranchType::TrueBranch);
+                let false_next = self.first_next_node_called(scenario, node_id, BranchType::FalseBranch);
+
+                let expr = parse_expr(condition, self.variables)?;
+
+                self.program.add_instruction(Instruction::JumpIf {
+                    condition: expr,
+                    target: 0,
+                });
+
+                if let Some(false_id) = false_next {
+                    self.compile_from_called_scenario(scenario, &false_id)?;
+                }
+                if let Some(true_id) = true_next {
+                    self.compile_from_called_scenario(scenario, &true_id)?;
+                }
+            }
+            Activity::CallScenario { scenario_id, parameters } => {
+                self.program.add_instruction(Instruction::CallScenario {
+                    scenario_id: scenario_id.clone(),
+                    parameters: parameters.clone(),
+                });
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+            _ => {
+                self.compile_default_next_called(scenario, node_id)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn first_next_node_called(&self, scenario: &Scenario, node_id: &str, branch: BranchType) -> Option<String> {
+        scenario
+            .connections
+            .iter()
+            .find(|c| c.from_node == node_id && c.branch_type == branch)
+            .map(|c| c.to_node.clone())
+    }
+
+    fn compile_default_next_called(&mut self, scenario: &Scenario, node_id: &str) -> Result<(), String> {
+        if let Some(next) = self.first_next_node_called(scenario, node_id, BranchType::Default) {
+            self.compile_from_called_scenario(scenario, &next)?;
+        }
+        Ok(())
+    }
 }
