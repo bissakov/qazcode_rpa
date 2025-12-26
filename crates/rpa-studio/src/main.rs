@@ -117,9 +117,6 @@ struct RpaApp {
     resizing_node: Option<(String, ui::ResizeHandle)>,
     stop_flag: Arc<AtomicBool>,
     dialogs: DialogState,
-    dragging_activity: Option<Activity>,
-    drag_start_pos: Option<egui::Pos2>,
-    is_over_canvas: bool,
 }
 
 impl Default for RpaApp {
@@ -143,9 +140,6 @@ impl Default for RpaApp {
             resizing_node: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
             dialogs: DialogState::default(),
-            dragging_activity: None,
-            drag_start_pos: None,
-            is_over_canvas: false,
         }
     }
 }
@@ -210,7 +204,7 @@ impl RpaApp {
     }
 
     fn render_canvas_panel(&mut self, ctx: &egui::Context) -> (ui::ContextMenuAction, egui::Vec2) {
-        let action_and_pos = egui::CentralPanel::default()
+        egui::CentralPanel::default()
             .show(ctx, |ui| {
                 let scenario_name = self.get_current_scenario().name.clone();
                 ui.heading(&scenario_name);
@@ -238,14 +232,25 @@ impl RpaApp {
                     resizing_node: &mut self.resizing_node,
                     allow_node_resize,
                 };
-                ui::render_node_graph(ui, scenario, &mut render_state)
+
+                let (canvas_result, dropped_activity) = ui.dnd_drop_zone::<Activity, _>(
+                    egui::Frame::default(),
+                    |ui| {
+                        ui::render_node_graph(ui, scenario, &mut render_state)
+                    },
+                );
+
+                if let Some(activity) = dropped_activity {
+                    let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+                    if let Some(pointer_pos) = pointer_pos {
+                        let world_pos = ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
+                        self.get_current_scenario_mut().add_node((*activity).clone(), world_pos);
+                    }
+                }
+
+                canvas_result.inner
             })
-            .inner;
-
-        let canvas_rect = ctx.available_rect();
-        self.handle_activity_drag_drop(ctx, canvas_rect);
-
-        action_and_pos
+            .inner
     }
 
     fn handle_context_menu_action(
@@ -992,9 +997,15 @@ impl RpaApp {
                         .default_open(default_open)
                         .show(ui, |ui| {
                             for (metadata, activity) in activities {
-                                let button_response = ui.button(t!(metadata.button_key).as_ref());
-                                
-                                if button_response.clicked() {
+                                let response = ui.dnd_drag_source(
+                                    egui::Id::new(format!("activity_{:?}", activity)),
+                                    activity.clone(),
+                                    |ui| {
+                                        let _ = ui.button(t!(metadata.button_key).as_ref());
+                                    },
+                                );
+
+                                if response.response.clicked() {
                                     if matches!(activity, Activity::CallScenario { .. }) {
                                         if !self.project.scenarios.is_empty() {
                                             let scenario_id = self.project.scenarios[0].id.clone();
@@ -1012,26 +1023,6 @@ impl RpaApp {
                                     } else {
                                         node_to_add = Some(activity.clone());
                                     }
-                                }
-                                
-                                if button_response.drag_started() {
-                                    if matches!(activity, Activity::CallScenario { .. }) {
-                                        if !self.project.scenarios.is_empty() {
-                                            let scenario_id = self.project.scenarios[0].id.clone();
-                                            self.dragging_activity = Some(Activity::CallScenario { scenario_id });
-                                        } else {
-                                            self.project.execution_log.push(LogEntry {
-                                                timestamp: "".to_string(),
-                                                level: LogLevel::Warning,
-                                                activity: "SYSTEM".to_string(),
-                                                message: t!("system_messages.no_scenarios_warning")
-                                                    .to_string(),
-                                            });
-                                        }
-                                    } else {
-                                        self.dragging_activity = Some(activity.clone());
-                                    }
-                                    self.drag_start_pos = ctx.input(|i| i.pointer.interact_pos());
                                 }
                             }
                         });
@@ -1519,71 +1510,5 @@ impl RpaApp {
             }
         }
     }
-
-    fn handle_activity_drag_drop(&mut self, ctx: &egui::Context, canvas_rect: egui::Rect) {
-        if self.dragging_activity.is_none() {
-            return;
-        }
-
-        let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
-        let is_primary_down = ctx.input(|i| i.pointer.primary_down());
-
-        if let Some(pointer_pos) = pointer_pos {
-            let is_over = canvas_rect.contains(pointer_pos);
-            self.is_over_canvas = is_over;
-
-            if is_over {
-                ctx.set_cursor_icon(egui::CursorIcon::Grab);
-            } else {
-                ctx.set_cursor_icon(egui::CursorIcon::NoDrop);
-            }
-
-            if let Some(activity) = &self.dragging_activity {
-                let world_pos = ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
-                self.draw_ghost_node_preview(ctx, activity.clone(), world_pos);
-            }
-        }
-
-        if !is_primary_down && self.dragging_activity.is_some() {
-            if let Some(activity) = self.dragging_activity.take()
-                && let Some(pointer_pos) = pointer_pos
-                    && self.is_over_canvas {
-                        let world_pos = ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
-                        self.get_current_scenario_mut().add_node(activity, world_pos);
-                    }
-            self.drag_start_pos = None;
-            self.is_over_canvas = false;
-        }
-    }
-
-    fn draw_ghost_node_preview(&self, ctx: &egui::Context, activity: Activity, world_pos: egui::Pos2) {
-        let node = Node {
-            id: nanoid!(),
-            activity,
-            position: world_pos,
-            width: 100.0,
-            height: 80.0,
-        };
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("activity_drag_preview")));
-
-        let to_screen = |pos: egui::Pos2| (pos.to_vec2() * self.zoom + self.pan_offset).to_pos2();
-
-        ui::draw_node_transformed(
-            &painter,
-            &node,
-            false,
-            false,
-            false,
-            to_screen,
-            self.zoom,
-        );
-
-        let node_rect = node.get_rect();
-        let node_screen_rect = egui::Rect::from_min_max(
-            to_screen(node_rect.min),
-            to_screen(node_rect.max),
-        );
-
-        painter.rect_filled(node_screen_rect, 0.0, egui::Color32::from_black_alpha(128));
-    }
 }
+
