@@ -272,7 +272,7 @@ pub struct Scenario {
 impl Scenario {
     pub fn new(name: &str) -> Self {
         let mut scenario = Self {
-            id: nanoid!(10),
+            id: nanoid!(8),
             name: name.to_string(),
             nodes: Vec::new(),
             connections: Vec::new(),
@@ -306,7 +306,7 @@ impl Scenario {
             _ => (UiConstants::NODE_WIDTH, UiConstants::NODE_HEIGHT),
         };
         let node = Node {
-            id: nanoid!(10),
+            id: nanoid!(8),
             activity,
             position,
             width,
@@ -339,7 +339,7 @@ impl Scenario {
         }
 
         self.connections.push(Connection {
-            id: nanoid!(10),
+            id: nanoid!(8),
             from_node: from.to_string(),
             to_node: to.to_string(),
             branch_type,
@@ -470,7 +470,7 @@ impl Node {
                             if index == 0 {
                                 self.position + egui::vec2(pin_offset_left, self.height)
                             } else {
-                                self.position + egui::vec2(pin_offset_right, self.height)
+                                self.position + egui::vec2(self.width, pin_offset_center)
                             }
                         } else {
                             self.position + egui::vec2(pin_offset_center, self.height)
