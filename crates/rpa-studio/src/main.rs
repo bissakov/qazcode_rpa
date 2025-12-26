@@ -15,7 +15,7 @@ use eframe::egui;
 use dialogs::DialogState;
 use nanoid::nanoid;
 use rpa_core::{
-    Activity, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
+    Activity, Connection, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
     ScenarioValidator, UiConstants, VarEvent, VariableType, VariableValue, Variables,
     execute_project_with_typed_vars, get_timestamp,
 };
@@ -33,6 +33,12 @@ pub struct AppSettings {
     allow_node_resize: bool,
     language: String,
     current_max_entry_size: usize,
+}
+
+#[derive(Clone, Default)]
+struct ClipboardData {
+    nodes: Vec<Node>,
+    connections: Vec<Connection>,
 }
 
 impl Default for AppSettings {
@@ -109,7 +115,7 @@ struct RpaApp {
     zoom: f32,
     settings: AppSettings,
     log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
-    clipboard: Vec<Node>,
+    clipboard: ClipboardData,
     variables: Variables,
     variable_receiver: Option<std::sync::mpsc::Receiver<VarEvent>>,
     knife_tool_active: bool,
@@ -132,7 +138,7 @@ impl Default for RpaApp {
             zoom: 1.0,
             settings: AppSettings::default(),
             log_receiver: None,
-            clipboard: Vec::new(),
+            clipboard: ClipboardData::default(),
             variables: Variables::new(),
             variable_receiver: None,
             knife_tool_active: false,
@@ -210,7 +216,7 @@ impl RpaApp {
                 ui.heading(&scenario_name);
                 ui.separator();
 
-                let clipboard_empty = self.clipboard.is_empty();
+                let clipboard_empty = self.clipboard.nodes.is_empty();
                 let show_minimap = self.settings.show_minimap;
                 let allow_node_resize = self.settings.allow_node_resize;
 
@@ -791,7 +797,7 @@ impl RpaApp {
             handled = true;
         }
 
-        let has_clipboard = !self.clipboard.is_empty();
+        let has_clipboard = !self.clipboard.nodes.is_empty();
 
         if paste_event && has_clipboard && no_settings && no_rename {
             let mouse_world_pos = ctx
@@ -1224,19 +1230,35 @@ impl RpaApp {
     }
 
     fn copy_selected_nodes(&mut self) {
-        let nodes_to_copy: Vec<_> = self
-            .get_current_scenario()
+        let scenario = self.get_current_scenario();
+        let nodes_to_copy: Vec<_> = scenario
             .nodes
             .iter()
             .filter(|n| self.selected_nodes.contains(&n.id))
             .cloned()
             .collect();
-        self.clipboard.clear();
-        self.clipboard.extend(nodes_to_copy);
+
+        let clipboard_node_ids: std::collections::HashSet<String> =
+            nodes_to_copy.iter().map(|n| n.id.clone()).collect();
+
+        let connections_to_copy: Vec<_> = scenario
+            .connections
+            .iter()
+            .filter(|conn| {
+                clipboard_node_ids.contains(&conn.from_node)
+                    && clipboard_node_ids.contains(&conn.to_node)
+            })
+            .cloned()
+            .collect();
+
+        self.clipboard = ClipboardData {
+            nodes: nodes_to_copy,
+            connections: connections_to_copy,
+        };
     }
 
     fn paste_clipboard_nodes(&mut self, mouse_world_pos: egui::Vec2) {
-        if self.clipboard.is_empty() {
+        if self.clipboard.nodes.is_empty() {
             return;
         }
 
@@ -1245,7 +1267,7 @@ impl RpaApp {
         let mut max_x = f32::MIN;
         let mut max_y = f32::MIN;
 
-        for node in &self.clipboard {
+        for node in &self.clipboard.nodes {
             min_x = min_x.min(node.position.x);
             min_y = min_y.min(node.position.y);
             max_x = max_x.max(node.position.x);
@@ -1260,10 +1282,7 @@ impl RpaApp {
         let mut old_to_new_id: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
 
-        let clipboard_node_ids: std::collections::HashSet<String> =
-            self.clipboard.iter().map(|n| n.id.clone()).collect();
-
-        for node in &self.clipboard {
+        for node in &self.clipboard.nodes {
             let mut new_node = node.clone();
             let new_id = nanoid!(8);
             old_to_new_id.insert(new_node.id.clone(), new_id.clone());
@@ -1278,26 +1297,22 @@ impl RpaApp {
             self.selected_nodes.insert(node_id);
         }
 
+        let connections_to_add: Vec<_> = self
+            .clipboard
+            .connections
+            .iter()
+            .filter_map(|conn| {
+                let new_from = old_to_new_id.get(&conn.from_node)?;
+                let new_to = old_to_new_id.get(&conn.to_node)?;
+                Some((new_from.clone(), new_to.clone(), conn.branch_type.clone()))
+            })
+            .collect();
+
         let scenario = self.get_current_scenario_mut();
         scenario.nodes.extend(nodes_to_paste);
 
-        let connections_to_copy: Vec<_> = scenario
-            .connections
-            .iter()
-            .filter(|conn| {
-                clipboard_node_ids.contains(&conn.from_node)
-                    && clipboard_node_ids.contains(&conn.to_node)
-            })
-            .cloned()
-            .collect();
-
-        for conn in connections_to_copy {
-            if let (Some(new_from), Some(new_to)) = (
-                old_to_new_id.get(&conn.from_node),
-                old_to_new_id.get(&conn.to_node),
-            ) {
-                scenario.add_connection_with_branch(new_from, new_to, conn.branch_type);
-            }
+        for (new_from, new_to, branch_type) in connections_to_add {
+            scenario.add_connection_with_branch(&new_from, &new_to, branch_type);
         }
     }
 
