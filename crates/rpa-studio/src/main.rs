@@ -831,6 +831,10 @@ impl RpaApp {
                             Variables::new(),
                         );
                         self.current_file = None;
+                        self.current_scenario_index = None;
+                        self.pan_offset = egui::Vec2::ZERO;
+                        self.zoom = 1.0;
+                        self.selected_nodes.clear();
                         ui.close();
                     }
                     if ui.button(t!("menu.open").as_ref()).clicked() {
