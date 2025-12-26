@@ -4,7 +4,10 @@ use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
-use rpa_core::{Activity, BranchType, LogLevel, Node, Scenario, UiConstants, VariableType};
+use rpa_core::{
+    Activity, BranchType, LogLevel, Node, Scenario, UiConstants, VariableType,
+    constants::FlowDirection,
+};
 use rust_i18n::t;
 use std::collections::HashSet;
 
@@ -1030,33 +1033,33 @@ pub fn render_node_graph(
             let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
             let end = pointer_pos;
 
-             use rpa_core::constants::{FlowDirection, UiConstants};
-             
-             let is_error_branch = from_node.activity.can_have_error_output() && *pin_index == 1;
-             
-             let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-                 FlowDirection::Horizontal => {
-                     let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
-                     (
-                         start + Vec2::new(control_offset, 0.0),
-                         end - Vec2::new(control_offset, 0.0),
-                     )
-                 }
-                 FlowDirection::Vertical => {
-                     let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
-                     if is_error_branch {
-                         (
-                             start + Vec2::new(control_offset, 0.0),
-                             end - Vec2::new(control_offset, 0.0),
-                         )
-                     } else {
-                         (
-                             start + Vec2::new(0.0, control_offset),
-                             end - Vec2::new(0.0, control_offset),
-                         )
-                     }
-                 }
-             };
+            use rpa_core::constants::{FlowDirection, UiConstants};
+
+            let is_error_branch = from_node.activity.can_have_error_output() && *pin_index == 1;
+
+            let (control1, control2) = match UiConstants::FLOW_DIRECTION {
+                FlowDirection::Horizontal => {
+                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
+                    (
+                        start + Vec2::new(control_offset, 0.0),
+                        end - Vec2::new(control_offset, 0.0),
+                    )
+                }
+                FlowDirection::Vertical => {
+                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * *state.zoom;
+                    if is_error_branch {
+                        (
+                            start + Vec2::new(control_offset, 0.0),
+                            end - Vec2::new(control_offset, 0.0),
+                        )
+                    } else {
+                        (
+                            start + Vec2::new(0.0, control_offset),
+                            end - Vec2::new(0.0, control_offset),
+                        )
+                    }
+                }
+            };
 
             let preview_color = match &from_node.activity {
                 Activity::IfCondition { .. } => {
@@ -1314,261 +1317,56 @@ fn draw_node_transformed<F>(
 
     if node.has_output_pin() {
         use rpa_core::constants::{FlowDirection, UiConstants};
-        let pin_count = node.get_output_pin_count();
 
-        if pin_count == 2 {
-            match &node.activity {
-                Activity::IfCondition { .. } => {
-                    let true_pin = to_screen(node.get_output_pin_pos_by_index(0));
-                    let false_pin = to_screen(node.get_output_pin_pos_by_index(1));
+        let positions = node.get_output_pin_positions();
+        for (pin_index, &pos) in positions.iter().enumerate() {
+            let pin_screen = to_screen(pos);
+            let branch_type = node.get_branch_type_for_pin(pin_index);
 
-                    painter.circle_filled(
-                        true_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        ColorPalette::PIN_TRUE,
-                    );
-                    painter.circle_stroke(
-                        true_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
-                    );
-
-                    let (true_label_offset, true_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
-                    painter.text(
-                        true_pin + true_label_offset,
-                        true_label_align,
-                        "T",
-                        egui::FontId::proportional(10.0 * zoom),
-                        ColorPalette::PIN_TRUE,
-                    );
-
-                    painter.circle_filled(
-                        false_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        ColorPalette::PIN_FALSE,
-                    );
-                    painter.circle_stroke(
-                        false_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
-                    );
-
-                    let (false_label_offset, false_label_align) = match UiConstants::FLOW_DIRECTION
-                    {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
-                    painter.text(
-                        false_pin + false_label_offset,
-                        false_label_align,
-                        "F",
-                        egui::FontId::proportional(10.0 * zoom),
-                        ColorPalette::PIN_FALSE,
-                    );
-                }
-                Activity::Loop { .. } | Activity::While { .. } => {
-                    let body_pin = to_screen(node.get_output_pin_pos_by_index(0));
-                    let next_pin = to_screen(node.get_output_pin_pos_by_index(1));
-
-                    painter.circle_filled(
-                        body_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        ColorPalette::PIN_LOOP_BODY,
-                    );
-                    painter.circle_stroke(
-                        body_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        Stroke::new(1.0 * zoom, Color32::from_rgb(200, 120, 0)),
-                    );
-
-                    let (body_label_offset, body_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
-                    painter.text(
-                        body_pin + body_label_offset,
-                        body_label_align,
-                        "B",
-                        egui::FontId::proportional(10.0 * zoom),
-                        ColorPalette::PIN_LOOP_BODY,
-                    );
-
-                    painter.circle_filled(
-                        next_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        ColorPalette::PIN_LOOP_NEXT,
-                    );
-                    painter.circle_stroke(
-                        next_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
-                    );
-
-                    let (next_label_offset, next_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
-                    painter.text(
-                        next_pin + next_label_offset,
-                        next_label_align,
-                        "N",
-                        egui::FontId::proportional(10.0 * zoom),
-                        ColorPalette::PIN_LOOP_NEXT,
-                    );
-                }
-                Activity::TryCatch => {
-                    let try_pin = to_screen(node.get_output_pin_pos_by_index(0));
-                    let catch_pin = to_screen(node.get_output_pin_pos_by_index(1));
-
-                    painter.circle_filled(
-                        try_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        ColorPalette::PIN_SUCCESS,
-                    );
-                    painter.circle_stroke(
-                        try_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
-                    );
-
-                    let (try_label_offset, try_label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
-                    painter.text(
-                        try_pin + try_label_offset,
-                        try_label_align,
-                        "T",
-                        egui::FontId::proportional(10.0 * zoom),
-                        ColorPalette::PIN_SUCCESS,
-                    );
-
-                    painter.circle_filled(
-                        catch_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        ColorPalette::PIN_ERROR,
-                    );
-                    painter.circle_stroke(
-                        catch_pin,
-                        UiConstants::PIN_RADIUS * zoom,
-                        Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
-                    );
-
-                    let (catch_label_offset, catch_label_align) = match UiConstants::FLOW_DIRECTION
-                    {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
-                    painter.text(
-                        catch_pin + catch_label_offset,
-                        catch_label_align,
-                        "C",
-                        egui::FontId::proportional(10.0 * zoom),
-                        ColorPalette::PIN_ERROR,
-                    );
-                }
-                _ => {
-                    if node.activity.can_have_error_output() {
-                        let success_pin = to_screen(node.get_output_pin_pos_by_index(0));
-                        let error_pin = to_screen(node.get_output_pin_pos_by_index(1));
-
-                        painter.circle_filled(
-                            success_pin,
-                            UiConstants::PIN_RADIUS * zoom,
-                            ColorPalette::PIN_SUCCESS,
-                        );
-                        painter.circle_stroke(
-                            success_pin,
-                            UiConstants::PIN_RADIUS * zoom,
-                            Stroke::new(1.0 * zoom, Color32::from_rgb(60, 120, 60)),
-                        );
-
-                        let (success_label_offset, success_label_align) =
-                            match UiConstants::FLOW_DIRECTION {
-                                FlowDirection::Horizontal => {
-                                    (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                                }
-                                FlowDirection::Vertical => {
-                                    (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                                }
-                            };
-                        painter.text(
-                            success_pin + success_label_offset,
-                            success_label_align,
-                            "S",
-                            egui::FontId::proportional(10.0 * zoom),
-                            ColorPalette::PIN_SUCCESS,
-                        );
-
-                        painter.circle_filled(
-                            error_pin,
-                            UiConstants::PIN_RADIUS * zoom,
-                            ColorPalette::PIN_ERROR,
-                        );
-                        painter.circle_stroke(
-                            error_pin,
-                            UiConstants::PIN_RADIUS * zoom,
-                            Stroke::new(1.0 * zoom, Color32::from_rgb(120, 60, 60)),
-                        );
-
-                        let (error_label_offset, error_label_align) =
-                            match UiConstants::FLOW_DIRECTION {
-                                FlowDirection::Horizontal => {
-                                    (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                                }
-                                FlowDirection::Vertical => {
-                                    (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                                }
-                            };
-                        painter.text(
-                            error_pin + error_label_offset,
-                            error_label_align,
-                            "E",
-                            egui::FontId::proportional(10.0 * zoom),
-                            ColorPalette::PIN_ERROR,
-                        );
+            let (color, stroke_color, label) = match branch_type {
+                BranchType::TrueBranch => (ColorPalette::PIN_TRUE, Color32::from_rgb(60, 120, 60), "T"),
+                BranchType::FalseBranch => (ColorPalette::PIN_FALSE, Color32::from_rgb(120, 60, 60), "F"),
+                BranchType::LoopBody => (ColorPalette::PIN_LOOP_BODY, Color32::from_rgb(200, 120, 0), "B"),
+                BranchType::ErrorBranch => (ColorPalette::PIN_ERROR, Color32::from_rgb(120, 60, 60), "E"),
+                BranchType::TryBranch => (ColorPalette::PIN_SUCCESS, Color32::from_rgb(60, 120, 60), "T"),
+                BranchType::CatchBranch => (ColorPalette::PIN_ERROR, Color32::from_rgb(120, 60, 60), "C"),
+                BranchType::Default => {
+                    if node.get_output_pin_count() > 1 {
+                        (ColorPalette::PIN_LOOP_NEXT, Color32::from_rgb(80, 80, 80), "N")
+                    } else {
+                        (ColorPalette::PIN_DEFAULT, Color32::from_rgb(80, 80, 80), "")
                     }
                 }
-            }
-        } else {
-            let output_pin = to_screen(node.get_output_pin_pos());
+            };
+
             painter.circle_filled(
-                output_pin,
+                pin_screen,
                 UiConstants::PIN_RADIUS * zoom,
-                ColorPalette::PIN_DEFAULT,
+                color,
             );
             painter.circle_stroke(
-                output_pin,
+                pin_screen,
                 UiConstants::PIN_RADIUS * zoom,
-                Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
+                Stroke::new(1.0 * zoom, stroke_color),
             );
+
+            if !label.is_empty() {
+                let (label_offset, label_align) = match UiConstants::FLOW_DIRECTION {
+                    FlowDirection::Horizontal => {
+                        (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                    }
+                    FlowDirection::Vertical => {
+                        (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                    }
+                };
+                painter.text(
+                    pin_screen + label_offset,
+                    label_align,
+                    label,
+                    egui::FontId::proportional(10.0 * zoom),
+                    color,
+                );
+            }
         }
     }
 }
@@ -1607,34 +1405,33 @@ fn draw_connection_transformed<F>(
     };
     let end = to_screen(to_node.get_input_pin_pos());
 
-     use rpa_core::constants::{FlowDirection, UiConstants};
-     let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-         FlowDirection::Horizontal => {
-             let distance = (end.x - start.x).abs();
-             let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-             (
-                 start + Vec2::new(control_offset, 0.0),
-                 end - Vec2::new(control_offset, 0.0),
-             )
-         }
-         FlowDirection::Vertical => {
-             if *branch_type == BranchType::ErrorBranch {
-                 let distance = (end.x - start.x).abs();
-                 let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                 (
-                     start + Vec2::new(control_offset, 0.0),
-                     end - Vec2::new(control_offset, 0.0),
-                 )
-             } else {
-                 let distance = (end.y - start.y).abs();
-                 let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                 (
-                     start + Vec2::new(0.0, control_offset),
-                     end - Vec2::new(0.0, control_offset),
-                 )
-             }
-         }
-     };
+    let (control1, control2) = match UiConstants::FLOW_DIRECTION {
+        FlowDirection::Horizontal => {
+            let distance = (end.x - start.x).abs();
+            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+            (
+                start + Vec2::new(control_offset, 0.0),
+                end - Vec2::new(control_offset, 0.0),
+            )
+        }
+        FlowDirection::Vertical => {
+            if *branch_type == BranchType::ErrorBranch {
+                let distance = (end.x - start.x).abs();
+                let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+                (
+                    start + Vec2::new(control_offset, 0.0),
+                    end - Vec2::new(control_offset, 0.0),
+                )
+            } else {
+                let distance = (end.y - start.y).abs();
+                let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+                (
+                    start + Vec2::new(0.0, control_offset),
+                    end - Vec2::new(0.0, control_offset),
+                )
+            }
+        }
+    };
 
     let color = match branch_type {
         BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,

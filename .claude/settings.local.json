@@ -15,7 +15,9 @@
       "Bash(cargo test:*)",
       "Bash(bd onboard:*)",
       "Bash(bd create:*)",
-      "Bash(bd update:*)"
+      "Bash(bd update:*)",
+      "Bash(bd show:*)",
+      "Bash(bd close:*)"
     ]
   },
   "outputStyle": "default",

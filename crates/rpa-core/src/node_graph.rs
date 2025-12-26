@@ -1,4 +1,7 @@
-use crate::{constants::UiConstants, variables::Variables};
+use crate::{
+    constants::{FlowDirection, UiConstants},
+    variables::Variables,
+};
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, fmt};
@@ -416,69 +419,66 @@ impl Node {
         }
     }
 
-    pub fn get_output_pin_pos_by_index(&self, index: usize) -> egui::Pos2 {
-        use crate::constants::{FlowDirection, UiConstants};
-
+    pub fn get_output_pin_positions(&self) -> Vec<egui::Pos2> {
         match UiConstants::FLOW_DIRECTION {
-            FlowDirection::Horizontal => {
-                let pin_offset_top = self.height / 4.0;
-                let pin_offset_bottom = self.height * 3.0 / 4.0;
-                let pin_offset_center = self.height / 2.0;
+            FlowDirection::Horizontal => self.get_output_pin_positions_horizontal(),
+            FlowDirection::Vertical => self.get_output_pin_positions_vertical(),
+        }
+    }
 
-                match &self.activity {
-                    Activity::IfCondition { .. }
-                    | Activity::Loop { .. }
-                    | Activity::While { .. }
-                    | Activity::TryCatch => {
-                        if index == 0 {
-                            self.position + egui::vec2(self.width, pin_offset_top)
-                        } else {
-                            self.position + egui::vec2(self.width, pin_offset_bottom)
-                        }
-                    }
-                    _ => {
-                        if self.activity.can_have_error_output() {
-                            if index == 0 {
-                                self.position + egui::vec2(self.width, pin_offset_top)
-                            } else {
-                                self.position + egui::vec2(self.width, pin_offset_bottom)
-                            }
-                        } else {
-                            self.position + egui::vec2(self.width, pin_offset_center)
-                        }
-                    }
-                }
+    fn get_output_pin_positions_vertical(&self) -> Vec<egui::Pos2> {
+        let pin_offset_left = self.width / 4.0;
+        let pin_offset_center = self.width / 2.0;
+        let bottom = self.height;
+        let right_middle = self.width;
+        let center_middle = self.height / 2.0;
+
+        match &self.activity {
+            Activity::End { .. } | Activity::Note { .. } => vec![],
+            Activity::IfCondition { .. }
+            | Activity::Loop { .. }
+            | Activity::While { .. }
+            | Activity::TryCatch { .. }
+            | Activity::CallScenario { .. }
+            | Activity::RunPowershell { .. } => {
+                vec![
+                    self.position + egui::vec2(pin_offset_center, bottom),
+                    self.position + egui::vec2(right_middle, center_middle),
+                ]
             }
-            FlowDirection::Vertical => {
-                let pin_offset_left = self.width / 4.0;
-                let pin_offset_right = self.width * 3.0 / 4.0;
-                let pin_offset_center = self.width / 2.0;
-
-                match &self.activity {
-                    Activity::IfCondition { .. }
-                    | Activity::Loop { .. }
-                    | Activity::While { .. }
-                    | Activity::TryCatch => {
-                        if index == 0 {
-                            self.position + egui::vec2(pin_offset_left, self.height)
-                        } else {
-                            self.position + egui::vec2(pin_offset_right, self.height)
-                        }
-                    }
-                    _ => {
-                        if self.activity.can_have_error_output() {
-                            if index == 0 {
-                                self.position + egui::vec2(pin_offset_left, self.height)
-                            } else {
-                                self.position + egui::vec2(self.width, pin_offset_center)
-                            }
-                        } else {
-                            self.position + egui::vec2(pin_offset_center, self.height)
-                        }
-                    }
+            _ => {
+                if self.activity.can_have_error_output() {
+                    vec![
+                        self.position + egui::vec2(pin_offset_left, bottom),
+                        self.position + egui::vec2(right_middle, center_middle),
+                    ]
+                } else {
+                    vec![self.position + egui::vec2(pin_offset_center, bottom)]
                 }
             }
         }
+    }
+
+    fn get_output_pin_positions_horizontal(&self) -> Vec<egui::Pos2> {
+        let pin_count = self.get_output_pin_count();
+        if pin_count == 0 {
+            return vec![];
+        }
+
+        let right = self.width;
+        let spacing = self.height / (pin_count as f32 + 1.0);
+
+        (0..pin_count)
+            .map(|i| {
+                let y_offset = spacing * ((i as f32) + 1.0);
+                self.position + egui::vec2(right, y_offset)
+            })
+            .collect()
+    }
+
+    pub fn get_output_pin_pos_by_index(&self, index: usize) -> egui::Pos2 {
+        let positions = self.get_output_pin_positions();
+        positions.get(index).copied().unwrap_or(egui::Pos2::ZERO)
     }
 
     pub fn get_pin_index_for_branch(&self, branch_type: &BranchType) -> usize {

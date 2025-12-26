@@ -13,6 +13,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 use eframe::egui;
 
 use dialogs::DialogState;
+use nanoid::nanoid;
 use rpa_core::{
     Activity, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
     ScenarioValidator, UiConstants, VarEvent, VariableType, VariableValue, Variables,
@@ -24,7 +25,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::time::SystemTime;
-use nanoid::nanoid;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
@@ -1237,7 +1237,7 @@ impl RpaApp {
 
         for node in &self.clipboard {
             let mut new_node = node.clone();
-            let new_id = nanoid!(10);
+            let new_id = nanoid!(8);
             old_to_new_id.insert(new_node.id.clone(), new_id.clone());
             new_node.id = new_id;
             new_node.position = (new_node.position.to_vec2() + offset).to_pos2();
