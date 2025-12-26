@@ -7,7 +7,6 @@ use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::{Activity, BranchType, LogLevel, Node, Scenario, UiConstants, VariableType};
 use rust_i18n::t;
 use std::collections::HashSet;
-use uuid::Uuid;
 
 pub enum ContextMenuAction {
     None,
@@ -18,15 +17,15 @@ pub enum ContextMenuAction {
 }
 
 pub struct RenderState<'a> {
-    pub selected_nodes: &'a mut HashSet<Uuid>,
-    pub connection_from: &'a mut Option<(Uuid, usize)>,
+    pub selected_nodes: &'a mut HashSet<String>,
+    pub connection_from: &'a mut Option<(String, usize)>,
     pub pan_offset: &'a mut Vec2,
     pub zoom: &'a mut f32,
     pub clipboard_empty: bool,
     pub show_minimap: bool,
     pub knife_tool_active: &'a mut bool,
     pub knife_path: &'a mut Vec<Pos2>,
-    pub resizing_node: &'a mut Option<(Uuid, ResizeHandle)>,
+    pub resizing_node: &'a mut Option<(String, ResizeHandle)>,
     pub allow_node_resize: bool,
 }
 
@@ -107,13 +106,13 @@ fn find_connection_near_point(
     pan_offset: Vec2,
     zoom: f32,
     threshold: f32,
-) -> Option<(Uuid, Uuid)> {
+) -> Option<(String, String)> {
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(connection.from_node),
-            scenario.get_node(connection.to_node),
+            scenario.get_node(&connection.from_node),
+            scenario.get_node(&connection.to_node),
         ) {
             use rpa_core::BranchType;
 
@@ -160,7 +159,7 @@ fn find_connection_near_point(
             let dist = point_to_bezier_distance(point, &bezier_points);
 
             if dist < threshold {
-                return Some((connection.from_node, connection.to_node));
+                return Some((connection.from_node.clone(), connection.to_node.clone()));
             }
         }
     }
@@ -173,7 +172,7 @@ fn find_intersecting_connections(
     cut_path: &[Pos2],
     pan_offset: Vec2,
     zoom: f32,
-) -> Vec<(Uuid, Uuid)> {
+) -> Vec<(String, String)> {
     let mut intersecting = Vec::new();
 
     if cut_path.len() < 2 {
@@ -184,8 +183,8 @@ fn find_intersecting_connections(
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(connection.from_node),
-            scenario.get_node(connection.to_node),
+            scenario.get_node(&connection.from_node),
+            scenario.get_node(&connection.to_node),
         ) {
             use rpa_core::BranchType;
 
@@ -239,7 +238,7 @@ fn find_intersecting_connections(
                     let bezier_end = bezier_points[j + 1];
 
                     if line_segments_intersect(cut_start, cut_end, bezier_start, bezier_end) {
-                        intersecting.push((connection.from_node, connection.to_node));
+                        intersecting.push((connection.from_node.clone(), connection.to_node.clone()));
                         break;
                     }
                 }
@@ -382,8 +381,8 @@ pub fn render_node_graph(
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(connection.from_node),
-            scenario.get_node(connection.to_node),
+            scenario.get_node(&connection.from_node),
+            scenario.get_node(&connection.to_node),
         ) {
             draw_connection_transformed(
                 &painter,
@@ -395,9 +394,9 @@ pub fn render_node_graph(
         }
     }
 
-    let mut clicked_node: Option<Uuid> = None;
+    let mut clicked_node: Option<String> = None;
     let mut any_node_hovered = false;
-    let mut new_connection: Option<(Uuid, usize, Uuid)> = None;
+    let mut new_connection: Option<(String, usize, String)> = None;
     let shift_held = ui.input(|i| i.modifiers.shift);
 
     let box_select_start =
@@ -449,7 +448,7 @@ pub fn render_node_graph(
                     to_screen(node.get_rect().max),
                 );
                 if select_rect.intersects(node_rect) {
-                    state.selected_nodes.insert(node.id);
+                    state.selected_nodes.insert(node.id.clone());
                 }
             }
         }
@@ -459,12 +458,12 @@ pub fn render_node_graph(
     }
 
     let mut drag_delta_to_apply: Option<Vec2> = None;
-    let mut node_being_dragged: Option<Uuid> = None;
-    let mut node_drag_released: Option<Uuid> = None;
+    let mut node_being_dragged: Option<String> = None;
+    let mut node_drag_released: Option<String> = None;
 
     let node_hovering_connection = if state.selected_nodes.len() == 1
-        && let Some(selected_id) = state.selected_nodes.iter().next().copied()
-        && let Some(selected_node) = scenario.get_node(selected_id)
+        && let Some(selected_id) = state.selected_nodes.iter().next().cloned()
+        && let Some(selected_node) = scenario.get_node(&selected_id)
         && ui.input(|i| i.pointer.primary_down())
         && state.connection_from.is_none()
     {
@@ -486,8 +485,8 @@ pub fn render_node_graph(
         None
     };
 
-    if let Some((resizing_id, handle)) = *state.resizing_node
-        && let Some(node) = scenario.nodes.iter_mut().find(|n| n.id == resizing_id)
+    if let Some((resizing_id, handle)) = state.resizing_node.as_ref()
+        && let Some(node) = scenario.nodes.iter_mut().find(|n| n.id == *resizing_id)
     {
         if ui.input(|i| i.pointer.any_released()) {
             *state.resizing_node = None;
@@ -564,7 +563,7 @@ pub fn render_node_graph(
 
         let node_response = ui.interact(
             node_rect_screen,
-            ui.id().with(node.id),
+            ui.id().with(node.id.clone()),
             egui::Sense::click_and_drag(),
         );
 
@@ -621,42 +620,42 @@ pub fn render_node_graph(
 
             let br_response = ui.interact(
                 corner_br,
-                ui.id().with(("resize_br", node.id)),
+                ui.id().with(("resize_br", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let bl_response = ui.interact(
                 corner_bl,
-                ui.id().with(("resize_bl", node.id)),
+                ui.id().with(("resize_bl", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let tr_response = ui.interact(
                 corner_tr,
-                ui.id().with(("resize_tr", node.id)),
+                ui.id().with(("resize_tr", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let tl_response = ui.interact(
                 corner_tl,
-                ui.id().with(("resize_tl", node.id)),
+                ui.id().with(("resize_tl", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let r_response = ui.interact(
                 edge_right,
-                ui.id().with(("resize_r", node.id)),
+                ui.id().with(("resize_r", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let l_response = ui.interact(
                 edge_left,
-                ui.id().with(("resize_l", node.id)),
+                ui.id().with(("resize_l", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let b_response = ui.interact(
                 edge_bottom,
-                ui.id().with(("resize_b", node.id)),
+                ui.id().with(("resize_b", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
             let t_response = ui.interact(
                 edge_top,
-                ui.id().with(("resize_t", node.id)),
+                ui.id().with(("resize_t", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
 
@@ -695,21 +694,21 @@ pub fn render_node_graph(
             }
 
             if br_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::BottomRight));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::BottomRight));
             } else if bl_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::BottomLeft));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::BottomLeft));
             } else if tr_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::TopRight));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::TopRight));
             } else if tl_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::TopLeft));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::TopLeft));
             } else if r_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::Right));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::Right));
             } else if l_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::Left));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::Left));
             } else if b_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::Bottom));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::Bottom));
             } else if t_response.drag_started() {
-                *state.resizing_node = Some((node.id, ResizeHandle::Top));
+                *state.resizing_node = Some((node.id.clone(), ResizeHandle::Top));
             }
         }
 
@@ -721,7 +720,7 @@ pub fn render_node_graph(
             && !*state.knife_tool_active
         {
             if !is_selected {
-                node_being_dragged = Some(node.id);
+                node_being_dragged = Some(node.id.clone());
             }
 
             drag_delta_to_apply = Some(node_response.drag_delta() / *state.zoom);
@@ -733,7 +732,7 @@ pub fn render_node_graph(
             && is_selected
             && state.selected_nodes.len() == 1
         {
-            node_drag_released = Some(node.id);
+            node_drag_released = Some(node.id.clone());
         }
 
         if node_response.clicked()
@@ -741,7 +740,7 @@ pub fn render_node_graph(
             && state.connection_from.is_none()
             && !*state.knife_tool_active
         {
-            clicked_node = Some(node.id);
+            clicked_node = Some(node.id.clone());
         }
 
         if !*state.knife_tool_active {
@@ -750,7 +749,7 @@ pub fn render_node_graph(
                 .show(|ui| {
                     if !state.selected_nodes.contains(&node.id) {
                         state.selected_nodes.clear();
-                        state.selected_nodes.insert(node.id);
+                        state.selected_nodes.insert(node.id.clone());
                     }
 
                     ui.set_min_width(150.0);
@@ -774,10 +773,12 @@ pub fn render_node_graph(
             any_node_hovered = true;
         }
 
-        let is_hovering_connection = node_hovering_connection == Some(node.id);
+        let is_hovering_connection = node_hovering_connection.as_deref()
+            == Some(node.id.as_str());
         let is_being_resized = state
             .resizing_node
-            .map(|(id, _)| id == node.id)
+            .as_ref()
+            .map(|(id, _)| id.as_str() == node.id.as_str())
             .unwrap_or(false);
 
         draw_node_transformed(
@@ -807,7 +808,7 @@ pub fn render_node_graph(
     }
 
     if let Some(released_node_id) = node_drag_released
-        && let Some(released_node) = scenario.get_node(released_node_id)
+        && let Some(released_node) = scenario.get_node(&released_node_id)
     {
         let node_center_screen = to_screen(released_node.get_rect().center());
 
@@ -911,8 +912,8 @@ pub fn render_node_graph(
                 }
             }
 
-            scenario.add_connection_with_branch(from_id, released_node_id, branch_type);
-            scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
+            scenario.add_connection_with_branch(&from_id, &released_node_id, branch_type);
+            scenario.add_connection_with_branch(&released_node_id, &to_id, BranchType::Default);
         }
     }
 
@@ -933,12 +934,12 @@ pub fn render_node_graph(
                 );
                 let output_response = ui.interact(
                     output_pin_rect,
-                    ui.id().with(("output", node.id, pin_index)),
+                    ui.id().with(("output", node.id.clone(), pin_index)),
                     egui::Sense::click_and_drag(),
                 );
 
                 if output_response.drag_started() && !*state.knife_tool_active {
-                    *state.connection_from = Some((node.id, pin_index));
+                    *state.connection_from = Some((node.id.clone(), pin_index));
 
                     let branch_type = node.get_branch_type_for_pin(pin_index);
 
@@ -964,7 +965,7 @@ pub fn render_node_graph(
             );
             let input_response = ui.interact(
                 input_pin_rect,
-                ui.id().with(("input", node.id)),
+                ui.id().with(("input", node.id.clone())),
                 egui::Sense::click_and_drag(),
             );
 
@@ -975,7 +976,7 @@ pub fn render_node_graph(
             );
             let node_body_response = ui.interact(
                 node_rect_screen,
-                ui.id().with(("input_body", node.id)),
+                ui.id().with(("input_body", node.id.clone())),
                 egui::Sense::hover(),
             );
 
@@ -987,9 +988,9 @@ pub fn render_node_graph(
                     .find(|c| c.to_node == node.id)
                     .cloned()
             {
-                if let Some(from_node) = scenario.get_node(conn.from_node) {
+                if let Some(from_node) = scenario.get_node(&conn.from_node) {
                     let pin_index = from_node.get_pin_index_for_branch(&conn.branch_type);
-                    *state.connection_from = Some((conn.from_node, pin_index));
+                    *state.connection_from = Some((conn.from_node.clone(), pin_index));
                 }
 
                 scenario
@@ -997,24 +998,24 @@ pub fn render_node_graph(
                     .retain(|c| c.from_node == conn.from_node && c.to_node == node.id);
             }
 
-            if let Some((from_id, pin_index)) = *state.connection_from
+            if let Some((from_id, pin_index)) = state.connection_from.as_ref()
                 && (input_response.hovered() || node_body_response.hovered())
                 && ui.input(|i| i.pointer.any_released())
                 && !*state.knife_tool_active
             {
-                if from_id != node.id {
-                    new_connection = Some((from_id, pin_index, node.id));
+                if from_id != &node.id {
+                    new_connection = Some((from_id.clone(), *pin_index, node.id.clone()));
                 }
                 *state.connection_from = None;
             }
         }
     }
 
-    if let Some((from_id, pin_index)) = *state.connection_from {
+    if let Some((from_id, pin_index)) = state.connection_from.as_ref() {
         if let Some(from_node) = scenario.get_node(from_id)
             && let Some(pointer_pos) = ui.ctx().pointer_latest_pos()
         {
-            let start = to_screen(from_node.get_output_pin_pos_by_index(pin_index));
+            let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
             let end = pointer_pos;
 
             use rpa_core::constants::{FlowDirection, UiConstants};
@@ -1031,21 +1032,21 @@ pub fn render_node_graph(
 
             let preview_color = match &from_node.activity {
                 Activity::IfCondition { .. } => {
-                    if pin_index == 0 {
+                    if *pin_index == 0 {
                         ColorPalette::CONNECTION_TRUE
                     } else {
                         ColorPalette::CONNECTION_FALSE
                     }
                 }
                 Activity::Loop { .. } | Activity::While { .. } => {
-                    if pin_index == 0 {
+                    if *pin_index == 0 {
                         ColorPalette::CONNECTION_LOOP_BODY
                     } else {
                         ColorPalette::CONNECTION_DEFAULT
                     }
                 }
                 Activity::TryCatch => {
-                    if pin_index == 0 {
+                    if *pin_index == 0 {
                         ColorPalette::CONNECTION_DEFAULT
                     } else {
                         ColorPalette::CONNECTION_ERROR
@@ -1053,7 +1054,7 @@ pub fn render_node_graph(
                 }
                 _ => {
                     if from_node.activity.can_have_error_output() {
-                        if pin_index == 0 {
+                        if *pin_index == 0 {
                             ColorPalette::CONNECTION_DEFAULT
                         } else {
                             ColorPalette::CONNECTION_ERROR
@@ -1084,7 +1085,7 @@ pub fn render_node_graph(
     }
 
     if let Some((from, pin_index, to)) = new_connection {
-        let from_node = scenario.get_node(from).unwrap();
+        let from_node = scenario.get_node(&from).unwrap();
         let branch_type = from_node.get_branch_type_for_pin(pin_index);
 
         if from_node.get_output_pin_count() > 1 {
@@ -1095,7 +1096,7 @@ pub fn render_node_graph(
             scenario.connections.retain(|c| c.from_node != from);
         }
 
-        scenario.add_connection_with_branch(from, to, branch_type);
+        scenario.add_connection_with_branch(&from, &to, branch_type);
     }
 
     if let Some(clicked) = clicked_node {
@@ -1672,8 +1673,8 @@ fn render_minimap_internal(
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(connection.from_node),
-            scenario.get_node(connection.to_node),
+            scenario.get_node(&connection.from_node),
+            scenario.get_node(&connection.to_node),
         ) {
             let from_pos = to_minimap(from_node.get_output_pin_pos());
             let to_pos = to_minimap(to_node.get_input_pin_pos());
@@ -1848,7 +1849,7 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
                             .selected_text(current_name)
                             .show_ui(ui, |ui| {
                                 for scenario in scenarios {
-                                    ui.selectable_value(scenario_id, scenario.id, &scenario.name);
+                                    ui.selectable_value(scenario_id, scenario.id.clone(), &scenario.name);
                                 }
                             });
                     }

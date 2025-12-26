@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::time::SystemTime;
-use uuid::Uuid;
+use nanoid::nanoid;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
@@ -101,10 +101,10 @@ fn main() -> eframe::Result<()> {
 struct RpaApp {
     project: Project,
     is_executing: bool,
-    selected_nodes: HashSet<Uuid>,
+    selected_nodes: HashSet<String>,
     current_file: Option<std::path::PathBuf>,
     current_scenario_index: Option<usize>,
-    connection_from: Option<(Uuid, usize)>,
+    connection_from: Option<(String, usize)>,
     pan_offset: egui::Vec2,
     zoom: f32,
     settings: AppSettings,
@@ -114,7 +114,7 @@ struct RpaApp {
     variable_receiver: Option<std::sync::mpsc::Receiver<VarEvent>>,
     knife_tool_active: bool,
     knife_path: Vec<egui::Pos2>,
-    resizing_node: Option<(Uuid, ui::ResizeHandle)>,
+    resizing_node: Option<(String, ui::ResizeHandle)>,
     stop_flag: Arc<AtomicBool>,
     dialogs: DialogState,
 }
@@ -251,10 +251,10 @@ impl RpaApp {
             }
             ui::ContextMenuAction::Delete => {
                 if !self.selected_nodes.is_empty() {
-                    let nodes_to_remove: Vec<_> = self.selected_nodes.iter().copied().collect();
+                    let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
                     let scenario = self.get_current_scenario_mut();
                     for node_id in nodes_to_remove {
-                        scenario.remove_node(node_id);
+                        scenario.remove_node(&node_id);
                     }
                     self.selected_nodes.clear();
                 }
@@ -264,7 +264,7 @@ impl RpaApp {
                     .get_current_scenario()
                     .nodes
                     .iter()
-                    .map(|n| n.id)
+                    .map(|n| n.id.clone())
                     .collect();
                 self.selected_nodes.clear();
                 for node_id in node_ids {
@@ -662,7 +662,7 @@ impl RpaApp {
                                 }
                                 Err(err) => {
                                     self.project.execution_log.push(LogEntry {
-                                        timestamp: "[00:00.00]".to_string(),
+                                        timestamp: "".to_string(),
                                         level: LogLevel::Error,
                                         activity: "SYSTEM".to_string(),
                                         message: t!(
@@ -796,7 +796,7 @@ impl RpaApp {
                     .get_current_scenario()
                     .nodes
                     .iter()
-                    .map(|n| n.id)
+                    .map(|n| n.id.clone())
                     .collect();
                 self.selected_nodes.clear();
                 for node_id in node_ids {
@@ -806,10 +806,10 @@ impl RpaApp {
             }
 
             if ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !self.selected_nodes.is_empty() {
-                let nodes_to_remove: Vec<_> = self.selected_nodes.iter().copied().collect();
+                let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
                 let scenario = self.get_current_scenario_mut();
                 for node_id in nodes_to_remove {
-                    scenario.remove_node(node_id);
+                    scenario.remove_node(&node_id);
                 }
                 self.selected_nodes.clear();
                 handled = true;
@@ -980,12 +980,12 @@ impl RpaApp {
                                 if ui.button(t!(metadata.button_key).as_ref()).clicked() {
                                     if matches!(activity, Activity::CallScenario { .. }) {
                                         if !self.project.scenarios.is_empty() {
-                                            let scenario_id = self.project.scenarios[0].id;
+                                            let scenario_id = self.project.scenarios[0].id.clone();
                                             node_to_add =
                                                 Some(Activity::CallScenario { scenario_id });
                                         } else {
                                             self.project.execution_log.push(LogEntry {
-                                                timestamp: "[00:00.00]".to_string(),
+                                                timestamp: "".to_string(),
                                                 level: LogLevel::Warning,
                                                 activity: "SYSTEM".to_string(),
                                                 message: t!("system_messages.no_scenarios_warning")
@@ -1037,10 +1037,10 @@ impl RpaApp {
             .max_height(max_height - 40.0)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                if let Some(&node_id) = self.selected_nodes.iter().next() {
+                if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
                     let scenarios: Vec<_> = self.project.scenarios.to_vec();
                     let scenario = self.get_current_scenario_mut();
-                    if let Some(node) = scenario.get_node_mut(node_id) {
+                    if let Some(node) = scenario.get_node_mut(&node_id) {
                         ui::render_node_properties(ui, node, &scenarios);
                     }
                     if self.selected_nodes.len() > 1 {
@@ -1229,19 +1229,19 @@ impl RpaApp {
 
         let mut nodes_to_paste = Vec::new();
         let mut new_node_ids = Vec::new();
-        let mut old_to_new_id: std::collections::HashMap<uuid::Uuid, uuid::Uuid> =
+        let mut old_to_new_id: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
 
-        let clipboard_node_ids: std::collections::HashSet<uuid::Uuid> =
-            self.clipboard.iter().map(|n| n.id).collect();
+        let clipboard_node_ids: std::collections::HashSet<String> =
+            self.clipboard.iter().map(|n| n.id.clone()).collect();
 
         for node in &self.clipboard {
             let mut new_node = node.clone();
-            let new_id = uuid::Uuid::new_v4();
-            old_to_new_id.insert(new_node.id, new_id);
+            let new_id = nanoid!(10);
+            old_to_new_id.insert(new_node.id.clone(), new_id.clone());
             new_node.id = new_id;
             new_node.position = (new_node.position.to_vec2() + offset).to_pos2();
-            new_node_ids.push(new_node.id);
+            new_node_ids.push(new_node.id.clone());
             nodes_to_paste.push(new_node);
         }
 
@@ -1264,7 +1264,7 @@ impl RpaApp {
             .collect();
 
         for conn in connections_to_copy {
-            if let (Some(&new_from), Some(&new_to)) = (
+            if let (Some(new_from), Some(new_to)) = (
                 old_to_new_id.get(&conn.from_node),
                 old_to_new_id.get(&conn.to_node),
             ) {
@@ -1360,7 +1360,13 @@ impl RpaApp {
         let stop_flag = Arc::clone(&self.stop_flag);
         std::thread::spawn(move || {
             execute_project_with_typed_vars(
-                &project, &log_sender, &var_sender, start_time, &program, variables, stop_flag,
+                &project,
+                &log_sender,
+                &var_sender,
+                start_time,
+                &program,
+                variables,
+                stop_flag,
             );
         });
     }
@@ -1435,7 +1441,7 @@ impl RpaApp {
                         Ok(mut project_file) => {
                             project_file.project.execution_log.clear();
                             project_file.project.execution_log.push(LogEntry {
-                                timestamp: "[00:00.00]".to_string(),
+                                timestamp: "".to_string(),
                                 level: LogLevel::Info,
                                 activity: "SYSTEM".to_string(),
                                 message: t!(
@@ -1457,7 +1463,7 @@ impl RpaApp {
                         }
                         Err(e) => {
                             self.project.execution_log.push(LogEntry {
-                                timestamp: "[00:00.00]".to_string(),
+                                timestamp: "".to_string(),
                                 level: LogLevel::Error,
                                 activity: "SYSTEM".to_string(),
                                 message: t!("system_messages.failed_parse", error = e).to_string(),

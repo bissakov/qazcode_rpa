@@ -643,12 +643,12 @@ pub fn execute_project_with_vars(
     let program = match ir_builder.build() {
         Ok(prog) => prog,
         Err(e) => {
-         let _ = log_sender.send(LogEntry {
-             timestamp: get_timestamp(context.start_time),
-             level: LogLevel::Error,
-             activity: "SYSTEM".to_string(),
-             message: format!("Execution error: {e}"),
-         });
+            let _ = log_sender.send(LogEntry {
+                timestamp: get_timestamp(context.start_time),
+                level: LogLevel::Error,
+                activity: "SYSTEM".to_string(),
+                message: format!("Execution error: {e}"),
+            });
             let _ = log_sender.send(LogEntry {
                 timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Info,

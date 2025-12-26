@@ -4,6 +4,8 @@
 dhat-heap.json
 *.svg
 *.txt
+BEZIER_CURVES_ANALYSIS.md
+EXPLORATION_SUMMARY.md
 
 # bv (beads viewer) local config and caches
 .bv/

@@ -60,6 +60,8 @@ impl UiConstants {
 
     pub const DEFAULT_LOG_ENTRIES: usize = 100;
     pub const MAX_LOG_ENTRIES: usize = 10_000;
+
+    pub const NANOID_LENGTH: usize = 10;
 }
 
 pub struct ActivityCategories;

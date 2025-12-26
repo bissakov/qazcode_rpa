@@ -6,6 +6,6 @@ edition.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
 indexmap.workspace = true
 egui = "0.33.3"
+nanoid.workspace = true

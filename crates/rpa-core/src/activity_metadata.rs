@@ -84,13 +84,13 @@ impl ActivityMetadata {
             (
                 &START_METADATA,
                 Activity::Start {
-                    scenario_id: uuid::Uuid::nil(),
+                    scenario_id: String::new(),
                 },
             ),
             (
                 &END_METADATA,
                 Activity::End {
-                    scenario_id: uuid::Uuid::nil(),
+                    scenario_id: String::new(),
                 },
             ),
             (
@@ -140,7 +140,7 @@ impl ActivityMetadata {
             (
                 &CALL_SCENARIO_METADATA,
                 Activity::CallScenario {
-                    scenario_id: uuid::Uuid::nil(),
+                    scenario_id: String::new(),
                 },
             ),
             (
@@ -174,19 +174,19 @@ impl ActivityMetadata {
                     (
                         &START_METADATA,
                         Activity::Start {
-                            scenario_id: uuid::Uuid::nil(),
+                            scenario_id: String::new(),
                         },
                     ),
                     (
                         &END_METADATA,
                         Activity::End {
-                            scenario_id: uuid::Uuid::nil(),
+                            scenario_id: String::new(),
                         },
                     ),
                     (
                         &CALL_SCENARIO_METADATA,
                         Activity::CallScenario {
-                            scenario_id: uuid::Uuid::nil(),
+                            scenario_id: String::new(),
                         },
                     ),
                 ],

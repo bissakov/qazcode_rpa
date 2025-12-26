@@ -1,7 +1,7 @@
 use crate::{constants::UiConstants, variables::Variables};
+use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, fmt};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
 pub enum VariableType {
@@ -263,7 +263,7 @@ impl Project {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scenario {
-    pub id: Uuid,
+    pub id: String,
     pub name: String,
     pub nodes: Vec<Node>,
     pub connections: Vec<Connection>,
@@ -272,7 +272,7 @@ pub struct Scenario {
 impl Scenario {
     pub fn new(name: &str) -> Self {
         let mut scenario = Self {
-            id: Uuid::new_v4(),
+            id: nanoid!(10),
             name: name.to_string(),
             nodes: Vec::new(),
             connections: Vec::new(),
@@ -280,21 +280,21 @@ impl Scenario {
 
         scenario.add_node(
             Activity::Start {
-                scenario_id: scenario.id,
+                scenario_id: scenario.id.clone(),
             },
             egui::pos2(300.0, 250.0),
         );
         scenario.add_node(
             Activity::End {
-                scenario_id: scenario.id,
+                scenario_id: scenario.id.clone(),
             },
             egui::pos2(600.0, 250.0),
         );
 
         if scenario.nodes.len() >= 2 {
-            let start_id = scenario.nodes[0].id;
-            let end_id = scenario.nodes[1].id;
-            scenario.add_connection_with_branch(start_id, end_id, BranchType::Default);
+            let start_id = scenario.nodes[0].id.clone();
+            let end_id = scenario.nodes[1].id.clone();
+            scenario.add_connection_with_branch(&start_id, &end_id, BranchType::Default);
         }
 
         scenario
@@ -306,7 +306,7 @@ impl Scenario {
             _ => (UiConstants::NODE_WIDTH, UiConstants::NODE_HEIGHT),
         };
         let node = Node {
-            id: Uuid::new_v4(),
+            id: nanoid!(10),
             activity,
             position,
             width,
@@ -315,21 +315,21 @@ impl Scenario {
         self.nodes.push(node);
     }
 
-    pub fn get_node_mut(&mut self, id: Uuid) -> Option<&mut Node> {
+    pub fn get_node_mut(&mut self, id: &str) -> Option<&mut Node> {
         self.nodes.iter_mut().find(|n| n.id == id)
     }
 
-    pub fn get_node(&self, id: Uuid) -> Option<&Node> {
+    pub fn get_node(&self, id: &str) -> Option<&Node> {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    pub fn remove_node(&mut self, id: Uuid) {
+    pub fn remove_node(&mut self, id: &str) {
         self.nodes.retain(|n| n.id != id);
         self.connections
             .retain(|c| c.from_node != id && c.to_node != id);
     }
 
-    pub fn add_connection_with_branch(&mut self, from: Uuid, to: Uuid, branch_type: BranchType) {
+    pub fn add_connection_with_branch(&mut self, from: &str, to: &str, branch_type: BranchType) {
         if self
             .connections
             .iter()
@@ -339,9 +339,9 @@ impl Scenario {
         }
 
         self.connections.push(Connection {
-            id: Uuid::new_v4(),
-            from_node: from,
-            to_node: to,
+            id: nanoid!(10),
+            from_node: from.to_string(),
+            to_node: to.to_string(),
             branch_type,
         });
     }
@@ -349,7 +349,7 @@ impl Scenario {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
-    pub id: Uuid,
+    pub id: String,
     pub activity: Activity,
     #[serde(with = "pos2_serde")]
     pub position: egui::Pos2,
@@ -557,10 +557,10 @@ impl Node {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Activity {
     Start {
-        scenario_id: Uuid,
+        scenario_id: String,
     },
     End {
-        scenario_id: Uuid,
+        scenario_id: String,
     },
     Log {
         level: LogLevel,
@@ -590,7 +590,7 @@ pub enum Activity {
         condition: String,
     },
     CallScenario {
-        scenario_id: Uuid,
+        scenario_id: String,
     },
     RunPowershell {
         code: String,
@@ -614,9 +614,9 @@ impl Activity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
-    pub id: Uuid,
-    pub from_node: Uuid,
-    pub to_node: Uuid,
+    pub id: String,
+    pub from_node: String,
+    pub to_node: String,
     #[serde(default)]
     pub branch_type: BranchType,
 }
