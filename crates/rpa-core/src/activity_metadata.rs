@@ -9,7 +9,6 @@ pub enum ActivityCategory {
     ControlFlow,
     Scenarios,
     Scripting,
-    Documentation,
 }
 
 #[non_exhaustive]
@@ -217,6 +216,14 @@ impl ActivityMetadata {
                             expression: String::new(),
                         },
                     ),
+                    (
+                        &NOTE_METADATA,
+                        Activity::Note {
+                            text: String::new(),
+                            width: 200.0,
+                            height: 100.0,
+                        },
+                    ),
                 ],
                 false,
             ),
@@ -258,18 +265,6 @@ impl ActivityMetadata {
                 )],
                 false,
             ),
-            (
-                Documentation,
-                vec![(
-                    &NOTE_METADATA,
-                    Activity::Note {
-                        text: String::new(),
-                        width: 200.0,
-                        height: 100.0,
-                    },
-                )],
-                false,
-            ),
         ]
     }
 }
@@ -281,7 +276,6 @@ impl ActivityCategory {
             Self::BasicActivities => "activity_groups.basic",
             Self::ControlFlow => "activity_groups.control_flow",
             Self::Scripting => "activity_groups.scripting",
-            Self::Documentation => "activity_groups.documentation",
         }
     }
 }
@@ -417,6 +411,30 @@ static EVALUATE_METADATA: ActivityMetadata = ActivityMetadata {
     }],
 };
 
+static NOTE_METADATA: ActivityMetadata = ActivityMetadata {
+    name_key: "activity_names.note",
+    button_key: "activity_buttons.note",
+    category: ActivityCategory::BasicActivities,
+    color_category: ColorCategory::Note,
+    pin_config: PinConfig {
+        output_count: 0,
+        pin_labels: &[],
+    },
+    can_have_error_output: false,
+    properties: &[
+        PropertyDef {
+            label_key: "properties.note_text",
+            tooltip_key: None,
+            property_type: PropertyType::TextMultiLine,
+        },
+        PropertyDef {
+            label_key: "tooltips.note_resize",
+            tooltip_key: None,
+            property_type: PropertyType::Description,
+        },
+    ],
+};
+
 static IF_CONDITION_METADATA: ActivityMetadata = ActivityMetadata {
     name_key: "activity_names.if_condition",
     button_key: "activity_buttons.if_condition",
@@ -517,28 +535,4 @@ static RUN_POWERSHELL_METADATA: ActivityMetadata = ActivityMetadata {
         tooltip_key: None,
         property_type: PropertyType::CodeEditor,
     }],
-};
-
-static NOTE_METADATA: ActivityMetadata = ActivityMetadata {
-    name_key: "activity_names.note",
-    button_key: "activity_buttons.note",
-    category: ActivityCategory::Documentation,
-    color_category: ColorCategory::Note,
-    pin_config: PinConfig {
-        output_count: 0,
-        pin_labels: &[],
-    },
-    can_have_error_output: false,
-    properties: &[
-        PropertyDef {
-            label_key: "properties.note_text",
-            tooltip_key: None,
-            property_type: PropertyType::TextMultiLine,
-        },
-        PropertyDef {
-            label_key: "tooltips.note_resize",
-            tooltip_key: None,
-            property_type: PropertyType::Description,
-        },
-    ],
 };
