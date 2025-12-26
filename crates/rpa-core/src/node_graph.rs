@@ -291,7 +291,7 @@ impl Scenario {
             Activity::End {
                 scenario_id: scenario.id.clone(),
             },
-            egui::pos2(600.0, 250.0),
+            egui::pos2(300.0, 250.0 + UiConstants::NODE_HEIGHT + 50.0),
         );
 
         if scenario.nodes.len() >= 2 {
