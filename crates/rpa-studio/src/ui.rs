@@ -1210,7 +1210,7 @@ fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, 
     }
 }
 
-fn draw_node_transformed<F>(
+pub fn draw_node_transformed<F>(
     painter: &egui::Painter,
     node: &Node,
     is_selected: bool,
