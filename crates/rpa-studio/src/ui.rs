@@ -1638,8 +1638,10 @@ fn render_minimap_internal(
     );
 }
 
-pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::Scenario]) {
+pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::Scenario]) -> bool {
     use rpa_core::{ActivityMetadata, PropertyType};
+
+    let original_activity = node.activity.clone();
 
     ui.horizontal(|ui| {
         ui.strong(node.activity.get_name());
@@ -1821,4 +1823,6 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
         .as_ref(),
     );
     ui.label(t!("properties.node_id", node_id = node.id,).as_ref());
+
+    node.activity != original_activity
 }

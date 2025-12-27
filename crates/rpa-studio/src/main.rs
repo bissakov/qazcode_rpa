@@ -163,6 +163,13 @@ impl Default for RpaApp {
 impl eframe::App for RpaApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_execution_updates(ctx);
+
+        let old_debounce = self.property_edit_debounce;
+        self.property_edit_debounce -= ctx.input(|i| i.stable_dt);
+        if old_debounce > 0.0 && self.property_edit_debounce <= 0.0 {
+            self.snapshot_undo_state();
+        }
+
         self.render_menu_bar(ctx);
         self.render_left_sidebar(ctx);
         self.render_right_panel(ctx);
@@ -1200,7 +1207,10 @@ impl RpaApp {
                     let scenarios: Vec<_> = self.project.scenarios.to_vec();
                     let scenario = self.get_current_scenario_mut();
                     if let Some(node) = scenario.get_node_mut(&node_id) {
-                        ui::render_node_properties(ui, node, &scenarios);
+                        let changed = ui::render_node_properties(ui, node, &scenarios);
+                        if changed {
+                            self.property_edit_debounce = 0.0;
+                        }
                     }
                     if self.selected_nodes.len() > 1 {
                         ui.separator();
