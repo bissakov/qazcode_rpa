@@ -20,6 +20,12 @@ pub enum ContextMenuAction {
     SelectAll,
 }
 
+pub enum ParameterBindingAction {
+    None,
+    Add,
+    Edit(usize),
+}
+
 pub struct RenderState<'a> {
     pub selected_nodes: &'a mut HashSet<String>,
     pub connection_from: &'a mut Option<(String, usize)>,
@@ -1643,7 +1649,8 @@ pub fn render_node_properties(
     node: &mut Node,
     scenarios: &[crate::Scenario],
     _current_scenario: &crate::Scenario,
-) -> bool {
+    variables: &rpa_core::Variables,
+) -> (bool, ParameterBindingAction) {
     use rpa_core::{ActivityMetadata, PropertyType};
 
     let original_activity = node.activity.clone();
@@ -1656,6 +1663,7 @@ pub fn render_node_properties(
     ui.separator();
 
     let metadata = ActivityMetadata::for_activity(&node.activity);
+    let mut param_action = ParameterBindingAction::None;
 
     for (prop_idx, prop_def) in metadata.properties.iter().enumerate() {
         let label = t!(prop_def.label_key).to_string();
@@ -1799,15 +1807,15 @@ pub fn render_node_properties(
                             });
 
                         ui.separator();
-                        ui.label(t!("parameter_binding.title").as_ref());
+                        ui.label(t!("variable_binding.title").as_ref());
 
                         let mut to_delete = None;
                         let mut to_edit = None;
 
                         ui.horizontal(|ui| {
-                            ui.label(t!("parameter_binding.parameter").as_ref());
-                            ui.label(t!("parameter_binding.source_variable").as_ref());
-                            ui.label(t!("parameter_binding.direction").as_ref());
+                            ui.label(t!("variable_binding.parameter").as_ref());
+                            ui.label(t!("variable_binding.source_variable").as_ref());
+                            ui.label(t!("variable_binding.direction").as_ref());
                             ui.label(""); // Actions column
                         });
 
@@ -1819,30 +1827,32 @@ pub fn render_node_properties(
                                     .and_then(|s| {
                                         s.parameters
                                             .iter()
-                                            .find(|p| p.var_id == binding.param_var_id)
+                                            .find(|p| p.var_id == binding.target_var_id)
                                     })
                                     .map(|p| p.var_name.clone())
                                     .unwrap_or_else(|| "???".to_string());
 
+                                let source_var_name = variables.name(binding.source_var_id);
+
                                 ui.label(&param_name);
                                 ui.label("→");
-                                ui.label(format!("{:?}", binding.source_var_id));
+                                ui.label(source_var_name);
 
                                 let direction_text = match binding.direction {
-                                    rpa_core::node_graph::ParameterDirection::In => "In",
-                                    rpa_core::node_graph::ParameterDirection::Out => "Out",
-                                    rpa_core::node_graph::ParameterDirection::InOut => "InOut",
+                                    rpa_core::node_graph::VariableDirection::In => "In",
+                                    rpa_core::node_graph::VariableDirection::Out => "Out",
+                                    rpa_core::node_graph::VariableDirection::InOut => "InOut",
                                 };
                                 ui.label(direction_text);
 
                                 if ui
-                                    .button(t!("parameter_binding.edit_parameter").as_ref())
+                                    .button(t!("variable_binding.edit_parameter").as_ref())
                                     .clicked()
                                 {
                                     to_edit = Some(idx);
                                 }
                                 if ui
-                                    .button(t!("parameter_binding.delete_parameter").as_ref())
+                                    .button(t!("variable_binding.delete_parameter").as_ref())
                                     .clicked()
                                 {
                                     to_delete = Some(idx);
@@ -1855,16 +1865,14 @@ pub fn render_node_properties(
                         }
 
                         if let Some(idx) = to_edit {
-                            if let Some(_binding) = parameters.get(idx) {
-                                // Emit a signal to edit - for now, just show in logs
-                            }
+                            param_action = ParameterBindingAction::Edit(idx);
                         }
 
                         if ui
-                            .button(t!("parameter_binding.add_parameter").as_ref())
+                            .button(t!("variable_binding.add_parameter").as_ref())
                             .clicked()
                         {
-                            // Emit a signal to add - for now, just show in logs
+                            param_action = ParameterBindingAction::Add;
                         }
                     }
                 }
@@ -1885,6 +1893,22 @@ pub fn render_node_properties(
                     });
                 }
             }
+            PropertyType::Combobox => match &mut node.activity {
+                Activity::SetVariable { is_global, .. } if prop_idx == 3 => {
+                    ui.label(t!("properties.scope",).as_ref());
+
+                    let selected_scope = if *is_global { "Global" } else { "Scenario" };
+                    egui::ComboBox::from_id_salt("set_var_scope_combo")
+                        .selected_text(selected_scope)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(is_global, false, "Scenario");
+                            ui.selectable_value(is_global, true, "Global");
+                        });
+                }
+                _ => {
+                    ui.label(&label);
+                }
+            },
             _ => {
                 ui.label(&label);
             }
@@ -1902,5 +1926,5 @@ pub fn render_node_properties(
     );
     ui.label(t!("properties.node_id", node_id = node.id,).as_ref());
 
-    node.activity != original_activity
+    (node.activity != original_activity, param_action)
 }

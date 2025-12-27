@@ -39,6 +39,7 @@ pub enum PropertyType {
     DragInt,
     ScenarioSelector,
     CodeEditor,
+    Combobox,
 }
 
 #[non_exhaustive]
@@ -106,6 +107,7 @@ impl ActivityMetadata {
                     name: String::new(),
                     value: String::new(),
                     var_type: VariableType::String,
+                    is_global: false,
                 },
             ),
             (
@@ -210,6 +212,7 @@ impl ActivityMetadata {
                             name: String::new(),
                             value: String::new(),
                             var_type: VariableType::String,
+                            is_global: false,
                         },
                     ),
                     (
@@ -392,6 +395,11 @@ static SET_VARIABLE_METADATA: ActivityMetadata = ActivityMetadata {
             label_key: "properties.value",
             tooltip_key: Some("tooltips.value_help"),
             property_type: PropertyType::TextSingleLine,
+        },
+        PropertyDef {
+            label_key: "properties.scope",
+            tooltip_key: Some("tooltips.scope_help"),
+            property_type: PropertyType::Combobox,
         },
     ],
 };

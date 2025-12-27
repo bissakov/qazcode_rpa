@@ -1,6 +1,6 @@
 use crate::{
     constants::{FlowDirection, UiConstants},
-    variables::Variables,
+    variables::{VarId, Variables},
 };
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
@@ -272,6 +272,8 @@ pub struct Scenario {
     pub connections: Vec<Connection>,
     #[serde(default)]
     pub parameters: Vec<ScenarioParameter>,
+    #[serde(default)]
+    pub variables: Variables,
 }
 
 impl Scenario {
@@ -282,6 +284,7 @@ impl Scenario {
             nodes: Vec::new(),
             connections: Vec::new(),
             parameters: Vec::new(),
+            variables: Variables::new(),
         };
 
         const START_X: f32 = 1000.0;
@@ -579,6 +582,8 @@ pub enum Activity {
         name: String,
         value: String,
         var_type: VariableType,
+        #[serde(default)]
+        is_global: bool,
     },
     Evaluate {
         expression: String,
@@ -598,7 +603,7 @@ pub enum Activity {
     CallScenario {
         scenario_id: String,
         #[serde(default)]
-        parameters: Vec<ParameterBinding>,
+        parameters: Vec<VariablesBinding>,
     },
     RunPowershell {
         code: String,
@@ -621,24 +626,26 @@ impl Activity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ParameterDirection {
+pub enum VariableDirection {
     In,
     Out,
     InOut,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ParameterBinding {
-    pub param_var_id: crate::variables::VarId,
-    pub source_var_id: crate::variables::VarId,
-    pub direction: ParameterDirection,
+pub struct VariablesBinding {
+    pub target_var_id: VarId,
+    pub source_var_id: VarId,
+    pub direction: VariableDirection,
+    #[serde(default)]
+    pub source_scope: Option<crate::variables::VariableScope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScenarioParameter {
-    pub var_id: crate::variables::VarId,
+    pub var_id: VarId,
     pub var_name: String,
-    pub direction: ParameterDirection,
+    pub direction: VariableDirection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

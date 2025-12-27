@@ -123,7 +123,15 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut context = ExecutionContext::new_without_sender(start_time, variables, stop_flag);
+    let scenario_variables = rpa_core::variables::Variables::new();
+    let current_scenario_id = project.main_scenario.id.clone();
+    let mut context = ExecutionContext::new_without_sender(
+        start_time,
+        variables,
+        scenario_variables,
+        current_scenario_id,
+        stop_flag,
+    );
 
     let mut log_output = CliLogOutput {
         verbose,
@@ -138,7 +146,7 @@ fn main() {
 
     if verbose {
         let var_list: Vec<(String, VariableValue)> = context
-            .variables
+            .global_variables
             .iter()
             .filter_map(|(name, value)| {
                 if !matches!(value, VariableValue::Undefined) {

@@ -19,7 +19,7 @@ use nanoid::nanoid;
 use rpa_core::{
     Activity, Connection, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
     ScenarioValidator, UiConstants, VarEvent, VariableType, VariableValue, Variables,
-    execute_project_with_typed_vars, get_timestamp,
+    execute_project_with_typed_vars, get_timestamp, node_graph::VariableDirection,
 };
 use rust_i18n::t;
 use std::collections::HashSet;
@@ -714,6 +714,27 @@ impl RpaApp {
                             }
                         });
 
+                    ui.label(t!("add_variable_dialog.scope").as_ref());
+                    let selected_scope = if self.dialogs.add_variable.is_global {
+                        "Global"
+                    } else {
+                        "Scenario"
+                    };
+                    egui::ComboBox::from_id_salt("var_scope_combo")
+                        .selected_text(selected_scope)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.dialogs.add_variable.is_global,
+                                false,
+                                "Scenario",
+                            );
+                            ui.selectable_value(
+                                &mut self.dialogs.add_variable.is_global,
+                                true,
+                                "Global",
+                            );
+                        });
+
                     ui.label(t!("add_variable_dialog.value").as_ref());
 
                     let value_response = match self.dialogs.add_variable.var_type {
@@ -767,11 +788,19 @@ impl RpaApp {
                             ) {
                                 Ok(value) => {
                                     let var_name = self.dialogs.add_variable.name.trim();
-                                    let id = self.project.variables.id(var_name);
+                                    let id = if self.dialogs.add_variable.is_global {
+                                        self.project.variables.id_with_scope(
+                                            var_name,
+                                            rpa_core::variables::VariableScope::Global,
+                                        )
+                                    } else {
+                                        self.project.variables.id(var_name)
+                                    };
                                     self.project.variables.set(id, value);
                                     self.dialogs.add_variable.name.clear();
                                     self.dialogs.add_variable.value.clear();
                                     self.dialogs.add_variable.var_type = VariableType::String;
+                                    self.dialogs.add_variable.is_global = false;
                                     close_window = true;
                                 }
                                 Err(err) => {
@@ -795,6 +824,7 @@ impl RpaApp {
                             self.dialogs.add_variable.name.clear();
                             self.dialogs.add_variable.value.clear();
                             self.dialogs.add_variable.var_type = VariableType::String;
+                            self.dialogs.add_variable.is_global = false;
                             close_window = true;
                         }
                     });
@@ -873,65 +903,67 @@ impl RpaApp {
             }
         }
 
-        self.render_parameter_binding_dialog(ctx);
+        self.render_variable_binding_dialog(ctx);
     }
 
-    fn render_parameter_binding_dialog(&mut self, ctx: &egui::Context) {
-        if !self.dialogs.parameter_binding_dialog.show {
+    fn render_variable_binding_dialog(&mut self, ctx: &egui::Context) {
+        if !self.dialogs.var_binding_dialog.show {
             return;
         }
 
         let mut close_window = false;
 
-        let mut dialog_state = self.dialogs.parameter_binding_dialog.clone();
+        let mut dialog_state = self.dialogs.var_binding_dialog.clone();
         let mut error_message = dialog_state.error_message.clone();
 
-        egui::Window::new(t!("parameter_binding.title").as_ref())
-            .id(egui::Id::new("parameter_binding_window"))
+        egui::Window::new(t!("variable_binding.title").as_ref())
+            .id(egui::Id::new("variable_binding_window"))
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(t!("parameter_binding.source_variable").as_ref());
+                ui.label(t!("variable_binding.source_variable").as_ref());
                 ui.text_edit_singleline(&mut dialog_state.source_var_name);
 
-                ui.label(t!("parameter_binding.direction").as_ref());
+                ui.label(t!("variable_binding.target_parameter").as_ref());
+                ui.text_edit_singleline(&mut dialog_state.target_var_name);
+
+                ui.label(t!("variable_binding.direction").as_ref());
                 egui::ComboBox::from_id_salt("param_direction_combo")
                     .selected_text(match dialog_state.direction {
-                        rpa_core::node_graph::ParameterDirection::In => "In",
-                        rpa_core::node_graph::ParameterDirection::Out => "Out",
-                        rpa_core::node_graph::ParameterDirection::InOut => "InOut",
+                        rpa_core::node_graph::VariableDirection::In => "In",
+                        rpa_core::node_graph::VariableDirection::Out => "Out",
+                        rpa_core::node_graph::VariableDirection::InOut => "InOut",
                     })
                     .show_ui(ui, |ui| {
                         if ui
                             .selectable_label(
                                 dialog_state.direction
-                                    == rpa_core::node_graph::ParameterDirection::In,
+                                    == rpa_core::node_graph::VariableDirection::In,
                                 "In",
                             )
                             .clicked()
                         {
-                            dialog_state.direction = rpa_core::node_graph::ParameterDirection::In;
+                            dialog_state.direction = rpa_core::node_graph::VariableDirection::In;
                         }
                         if ui
                             .selectable_label(
                                 dialog_state.direction
-                                    == rpa_core::node_graph::ParameterDirection::Out,
+                                    == rpa_core::node_graph::VariableDirection::Out,
                                 "Out",
                             )
                             .clicked()
                         {
-                            dialog_state.direction = rpa_core::node_graph::ParameterDirection::Out;
+                            dialog_state.direction = rpa_core::node_graph::VariableDirection::Out;
                         }
                         if ui
                             .selectable_label(
                                 dialog_state.direction
-                                    == rpa_core::node_graph::ParameterDirection::InOut,
+                                    == rpa_core::node_graph::VariableDirection::InOut,
                                 "InOut",
                             )
                             .clicked()
                         {
-                            dialog_state.direction =
-                                rpa_core::node_graph::ParameterDirection::InOut;
+                            dialog_state.direction = rpa_core::node_graph::VariableDirection::InOut;
                         }
                     });
 
@@ -940,18 +972,18 @@ impl RpaApp {
                 }
 
                 ui.horizontal(|ui| {
-                    if ui.button(t!("parameter_binding.ok").as_ref()).clicked() {
+                    if ui.button(t!("variable_binding.ok").as_ref()).clicked() {
                         error_message = None;
 
                         if dialog_state.source_var_name.is_empty() {
-                            error_message = Some(
-                                t!("parameter_binding.errors.source_var_required").to_string(),
-                            );
+                            error_message =
+                                Some(t!("variable_binding.errors.source_var_required").to_string());
                         }
 
-                        if error_message.is_none() && dialog_state.param_var_id.is_none() {
-                            error_message =
-                                Some(t!("parameter_binding.errors.param_required").to_string());
+                        if error_message.is_none() && dialog_state.target_var_name.is_empty() {
+                            error_message = Some(
+                                t!("variable_binding.errors.target_param_required").to_string(),
+                            );
                         }
 
                         if error_message.is_none() {
@@ -959,43 +991,97 @@ impl RpaApp {
                         }
                     }
 
-                    if ui.button(t!("parameter_binding.cancel").as_ref()).clicked() {
+                    if ui.button(t!("variable_binding.cancel").as_ref()).clicked() {
                         close_window = true;
                     }
                 });
             });
 
-        self.dialogs.parameter_binding_dialog = dialog_state.clone();
-        self.dialogs.parameter_binding_dialog.error_message = error_message;
+        self.dialogs.var_binding_dialog = dialog_state.clone();
+        self.dialogs.var_binding_dialog.error_message = error_message;
 
-        if close_window
-            && self
-                .dialogs
-                .parameter_binding_dialog
-                .error_message
-                .is_none()
-        {
+        if close_window && self.dialogs.var_binding_dialog.error_message.is_none() {
             if let Some(current_idx) = self.current_scenario_index {
                 if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
-                    if let Some(node) = self.project.scenarios[current_idx].get_node_mut(&node_id) {
-                        if let rpa_core::Activity::CallScenario { parameters, .. } =
-                            &mut node.activity
+                    let scenario_id_and_params = {
+                        if let Some(node) =
+                            self.project.scenarios[current_idx].get_node_mut(&node_id)
                         {
-                            if let Some(param_var_id) = dialog_state.param_var_id {
+                            if let rpa_core::Activity::CallScenario {
+                                scenario_id,
+                                parameters,
+                            } = &mut node.activity
+                            {
                                 let source_var_id =
                                     self.project.variables.id(&dialog_state.source_var_name);
-                                let binding = rpa_core::node_graph::ParameterBinding {
-                                    param_var_id,
-                                    source_var_id,
-                                    direction: dialog_state.direction,
-                                };
+                                let _source_var_type =
+                                    self.project.variables.get(source_var_id).get_type();
 
-                                if let Some(idx) = dialog_state.editing_index {
-                                    if idx < parameters.len() {
-                                        parameters[idx] = binding;
-                                    }
-                                } else {
-                                    parameters.push(binding);
+                                Some((scenario_id.clone(), parameters.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    };
+
+                    if let Some((scenario_id, mut parameters)) = scenario_id_and_params {
+                        let source_var_id =
+                            self.project.variables.id(&dialog_state.source_var_name);
+
+                        // Find the called scenario to add the parameter to it
+                        if let Some(called_scenario) = self
+                            .project
+                            .scenarios
+                            .iter_mut()
+                            .find(|s| s.id == scenario_id)
+                        {
+                            // Create or find the parameter in the called scenario
+                            let param_var_id = called_scenario
+                                .parameters
+                                .iter()
+                                .find(|p| p.var_name == dialog_state.target_var_name)
+                                .map(|p| p.var_id)
+                                .unwrap_or_else(|| {
+                                    // Parameter doesn't exist, create it
+                                    let new_var_id =
+                                        self.project.variables.id(&dialog_state.target_var_name);
+                                    called_scenario.parameters.push(
+                                        rpa_core::node_graph::ScenarioParameter {
+                                            var_id: new_var_id,
+                                            var_name: dialog_state.target_var_name.clone(),
+                                            direction: dialog_state.direction,
+                                        },
+                                    );
+                                    new_var_id
+                                });
+
+                            let binding = rpa_core::node_graph::VariablesBinding {
+                                target_var_id: param_var_id,
+                                source_var_id,
+                                direction: dialog_state.direction,
+                                source_scope: None,
+                            };
+
+                            if let Some(idx) = dialog_state.editing_index {
+                                if idx < parameters.len() {
+                                    parameters[idx] = binding;
+                                }
+                            } else {
+                                parameters.push(binding);
+                            }
+
+                            // Now update the node activity with the modified parameters
+                            if let Some(node) =
+                                self.project.scenarios[current_idx].get_node_mut(&node_id)
+                            {
+                                if let rpa_core::Activity::CallScenario {
+                                    parameters: node_params,
+                                    ..
+                                } = &mut node.activity
+                                {
+                                    *node_params = parameters;
                                 }
                             }
                         }
@@ -1005,7 +1091,7 @@ impl RpaApp {
         }
 
         if close_window {
-            self.dialogs.parameter_binding_dialog.show = false;
+            self.dialogs.var_binding_dialog.show = false;
         }
     }
 
@@ -1342,19 +1428,99 @@ impl RpaApp {
             .show(ui, |ui| {
                 if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
                     let scenarios: Vec<_> = self.project.scenarios.to_vec();
-                    let current_scenario = self
-                        .current_scenario_index
-                        .and_then(|i| self.project.scenarios.get(i).cloned());
-                    let scenario = self.get_current_scenario_mut();
-                    if let Some(node) = scenario.get_node_mut(&node_id) {
-                        if let Some(ref current_scen) = current_scenario {
-                            let changed =
-                                ui::render_node_properties(ui, node, &scenarios, current_scen);
-                            if changed {
-                                self.property_edit_debounce = 0.0;
+                    let current_scenario = Some(self.get_current_scenario().clone());
+                    // Extract variables before taking mutable borrow of scenario
+                    let variables_copy = self.project.variables.clone();
+
+                    let (changed, param_action, activity) = {
+                        let scenario = self.get_current_scenario_mut();
+                        if let Some(node) = scenario.get_node_mut(&node_id) {
+                            if let Some(ref current_scen) = current_scenario {
+                                let (changed, param_action) = ui::render_node_properties(
+                                    ui,
+                                    node,
+                                    &scenarios,
+                                    current_scen,
+                                    &variables_copy,
+                                );
+                                (changed, param_action, Some(node.activity.clone()))
+                            } else {
+                                (false, ui::ParameterBindingAction::None, None)
                             }
+                        } else {
+                            (false, ui::ParameterBindingAction::None, None)
+                        }
+                    };
+
+                    if let Some(activity) = activity {
+                        if changed {
+                            self.property_edit_debounce = 0.0;
+                        }
+
+                        // Handle parameter binding actions
+                        match param_action {
+                            ui::ParameterBindingAction::Add => {
+                                if let Activity::CallScenario { scenario_id, .. } = &activity {
+                                    self.dialogs.var_binding_dialog.show = true;
+                                    self.dialogs.var_binding_dialog.scenario_id =
+                                        scenario_id.clone();
+                                    self.dialogs.var_binding_dialog.target_var_id = None;
+                                    self.dialogs.var_binding_dialog.source_var_name = String::new();
+                                    self.dialogs.var_binding_dialog.target_var_name = String::new();
+                                    self.dialogs.var_binding_dialog.direction =
+                                        VariableDirection::In;
+                                    self.dialogs.var_binding_dialog.editing_index = None;
+                                    self.dialogs.var_binding_dialog.error_message = None;
+                                }
+                            }
+                            ui::ParameterBindingAction::Edit(idx) => {
+                                if let Activity::CallScenario {
+                                    scenario_id,
+                                    parameters,
+                                } = &activity
+                                {
+                                    if let Some(binding) = parameters.get(idx) {
+                                        // Find the parameter name from the called scenario
+                                        let target_param_name = self
+                                            .project
+                                            .scenarios
+                                            .iter()
+                                            .find(|s| s.id == *scenario_id)
+                                            .and_then(|s| {
+                                                s.parameters
+                                                    .iter()
+                                                    .find(|p| p.var_id == binding.target_var_id)
+                                            })
+                                            .map(|p| p.var_name.clone())
+                                            .unwrap_or_default();
+
+                                        // Find source variable name from variables
+                                        let source_var_name = self
+                                            .project
+                                            .variables
+                                            .name(binding.source_var_id)
+                                            .to_string();
+
+                                        self.dialogs.var_binding_dialog.show = true;
+                                        self.dialogs.var_binding_dialog.scenario_id =
+                                            scenario_id.clone();
+                                        self.dialogs.var_binding_dialog.target_var_id =
+                                            Some(binding.target_var_id);
+                                        self.dialogs.var_binding_dialog.source_var_name =
+                                            source_var_name;
+                                        self.dialogs.var_binding_dialog.target_var_name =
+                                            target_param_name;
+                                        self.dialogs.var_binding_dialog.direction =
+                                            binding.direction;
+                                        self.dialogs.var_binding_dialog.editing_index = Some(idx);
+                                        self.dialogs.var_binding_dialog.error_message = None;
+                                    }
+                                }
+                            }
+                            ui::ParameterBindingAction::None => {}
                         }
                     }
+
                     if self.selected_nodes.len() > 1 {
                         ui.separator();
                         ui.label(

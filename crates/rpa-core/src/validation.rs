@@ -951,11 +951,13 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             name,
             value,
             var_type,
+            is_global,
         } => {
             4_u8.hash(hasher);
             name.hash(hasher);
             value.hash(hasher);
             var_type.hash(hasher);
+            is_global.hash(hasher);
         }
         Activity::Evaluate { expression } => {
             6_u8.hash(hasher);
