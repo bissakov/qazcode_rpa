@@ -1,0 +1,49 @@
+use egui::util::undoer::Undoer;
+use rpa_core::{Project, UiConstants};
+
+pub struct UndoRedoManager {
+    undoer: Undoer<Project>,
+    #[allow(dead_code)]
+    history_limit: usize,
+}
+
+impl UndoRedoManager {
+    pub fn new() -> Self {
+        Self {
+            undoer: Undoer::default(),
+            history_limit: UiConstants::UNDO_HISTORY_LIMIT,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn feed_state(&mut self, time: f64, project: &Project) {
+        self.undoer.feed_state(time, project);
+    }
+
+    pub fn undo(&mut self, project: &Project) -> Option<Project> {
+        self.undoer.undo(project).cloned()
+    }
+
+    pub fn redo(&mut self, project: &Project) -> Option<Project> {
+        self.undoer.redo(project).cloned()
+    }
+
+    pub fn has_undo(&self, project: &Project) -> bool {
+        self.undoer.has_undo(project)
+    }
+
+    pub fn has_redo(&self, project: &Project) -> bool {
+        self.undoer.has_redo(project)
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_history(&mut self) {
+        self.undoer = Undoer::default();
+    }
+}
+
+impl Default for UndoRedoManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}

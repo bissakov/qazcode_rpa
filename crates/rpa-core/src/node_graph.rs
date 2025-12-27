@@ -31,7 +31,7 @@ impl VariableType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VariableValue {
     String(String),
     Boolean(bool),
@@ -115,7 +115,7 @@ impl fmt::Display for VariableValue {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogLevel {
     Info,
     Warning,
@@ -134,7 +134,7 @@ impl LogLevel {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: String,
     pub level: LogLevel,
@@ -142,7 +142,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct LogStorage {
     values: VecDeque<LogEntry>,
     pub max_entry_count: usize,
@@ -180,7 +180,7 @@ impl LogStorage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub name: String,
     pub main_scenario: Scenario,
@@ -264,7 +264,7 @@ impl Project {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scenario {
     pub id: String,
     pub name: String,
@@ -356,7 +356,7 @@ impl Scenario {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: String,
     pub activity: Activity,
@@ -560,7 +560,7 @@ impl Node {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Activity {
     Start {
         scenario_id: String,
@@ -620,28 +620,28 @@ impl Activity {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ParameterDirection {
     In,
     Out,
     InOut,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterBinding {
     pub param_var_id: crate::variables::VarId,
     pub source_var_id: crate::variables::VarId,
     pub direction: ParameterDirection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScenarioParameter {
     pub var_id: crate::variables::VarId,
     pub var_name: String,
     pub direction: ParameterDirection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub id: String,
     pub from_node: String,

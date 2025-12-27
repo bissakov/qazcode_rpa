@@ -12,7 +12,7 @@ impl VarId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Variables {
     name_to_id: HashMap<String, VarId>,
     id_to_name: Vec<String>,

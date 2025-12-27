@@ -3,6 +3,7 @@ mod colors;
 mod dialogs;
 mod loglevel_ext;
 mod ui;
+mod undo_redo;
 
 use egui::{DragValue, IconData, Slider};
 use egui_extras::{Column, TableBuilder};
@@ -12,6 +13,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 use eframe::egui;
 
+use crate::undo_redo::UndoRedoManager;
 use dialogs::DialogState;
 use nanoid::nanoid;
 use rpa_core::{
@@ -123,6 +125,11 @@ struct RpaApp {
     resizing_node: Option<(String, ui::ResizeHandle)>,
     stop_flag: Arc<AtomicBool>,
     dialogs: DialogState,
+    undo_redo: UndoRedoManager,
+    #[allow(dead_code)]
+    property_edit_debounce: f32,
+    #[allow(dead_code)]
+    transaction_in_progress: bool,
 }
 
 impl Default for RpaApp {
@@ -146,6 +153,9 @@ impl Default for RpaApp {
             resizing_node: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
             dialogs: DialogState::default(),
+            undo_redo: UndoRedoManager::new(),
+            property_edit_debounce: 0.0,
+            transaction_in_progress: false,
         }
     }
 }
@@ -166,6 +176,48 @@ impl eframe::App for RpaApp {
 }
 
 impl RpaApp {
+    #[allow(dead_code)]
+    fn snapshot_undo_state(&mut self) {
+        let time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        self.undo_redo.feed_state(time, &self.project);
+    }
+
+    #[allow(dead_code)]
+    fn begin_undo_transaction(&mut self) {
+        self.transaction_in_progress = true;
+    }
+
+    #[allow(dead_code)]
+    fn end_undo_transaction(&mut self) {
+        self.snapshot_undo_state();
+        self.transaction_in_progress = false;
+    }
+
+    fn undo(&mut self) {
+        if let Some(restored_project) = self.undo_redo.undo(&self.project) {
+            self.project = restored_project;
+            self.selected_nodes.clear();
+            self.connection_from = None;
+            self.knife_tool_active = false;
+            self.knife_path.clear();
+            self.resizing_node = None;
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(restored_project) = self.undo_redo.redo(&self.project) {
+            self.project = restored_project;
+            self.selected_nodes.clear();
+            self.connection_from = None;
+            self.knife_tool_active = false;
+            self.knife_path.clear();
+            self.resizing_node = None;
+        }
+    }
+
     fn process_execution_updates(&mut self, ctx: &egui::Context) {
         let mut execution_complete = false;
         if let Some(receiver) = self.log_receiver.as_ref() {
@@ -845,6 +897,18 @@ impl RpaApp {
                 self.selected_nodes.clear();
                 handled = true;
             }
+
+            if !self.is_executing && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z))
+            {
+                self.undo();
+                handled = true;
+            }
+
+            if !self.is_executing && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Y))
+            {
+                self.redo();
+                handled = true;
+            }
         }
 
         if handled {
@@ -911,6 +975,26 @@ impl RpaApp {
                         self.is_executing = true;
                         self.execute_project();
                     }
+                }
+
+                if ui
+                    .add_enabled(
+                        self.undo_redo.has_undo(&self.project),
+                        egui::Button::new("⟲ Undo (Ctrl+Z)"),
+                    )
+                    .clicked()
+                {
+                    self.undo();
+                }
+
+                if ui
+                    .add_enabled(
+                        self.undo_redo.has_redo(&self.project),
+                        egui::Button::new("⟳ Redo (Ctrl+Y)"),
+                    )
+                    .clicked()
+                {
+                    self.redo();
                 }
             });
         });
