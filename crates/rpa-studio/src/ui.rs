@@ -320,9 +320,11 @@ pub fn render_node_graph(
     ui: &mut Ui,
     scenario: &mut Scenario,
     state: &mut RenderState,
-) -> (ContextMenuAction, Vec2, bool) {
+) -> (ContextMenuAction, Vec2, bool, bool, bool) {
     let mut context_action = ContextMenuAction::None;
     let mut connection_created = false;
+    let mut drag_started = false;
+    let mut drag_ended = false;
     let (response, painter) =
         ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
@@ -747,6 +749,7 @@ pub fn render_node_graph(
         {
             if !is_selected {
                 node_being_dragged = Some(node.id.clone());
+                drag_started = true;
             }
 
             drag_delta_to_apply = Some(node_response.drag_delta() / *state.zoom);
@@ -759,6 +762,7 @@ pub fn render_node_graph(
             && state.selected_nodes.len() == 1
         {
             node_drag_released = Some(node.id.clone());
+            drag_ended = true;
         }
 
         if node_response.clicked()
@@ -1196,7 +1200,13 @@ pub fn render_node_graph(
         }
     }
 
-    (context_action, mouse_world_pos, connection_created)
+    (
+        context_action,
+        mouse_world_pos,
+        connection_created,
+        drag_started,
+        drag_ended,
+    )
 }
 
 fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, zoom: f32) {

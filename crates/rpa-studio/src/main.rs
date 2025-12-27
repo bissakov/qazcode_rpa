@@ -293,10 +293,18 @@ impl RpaApp {
                         ui::render_node_graph(ui, scenario, &mut render_state)
                     });
 
-                let (context_action, mouse_world_pos, connection_created) = canvas_result.inner;
+                let (context_action, mouse_world_pos, connection_created, drag_started, drag_ended) = canvas_result.inner;
+
+                if drag_started && !self.is_executing {
+                    self.begin_undo_transaction();
+                }
 
                 if connection_created {
                     self.snapshot_undo_state();
+                }
+
+                if drag_ended && !self.is_executing {
+                    self.end_undo_transaction();
                 }
 
                 if let Some(activity) = dropped_activity {
