@@ -128,8 +128,6 @@ struct RpaApp {
     undo_redo: UndoRedoManager,
     #[allow(dead_code)]
     property_edit_debounce: f32,
-    #[allow(dead_code)]
-    transaction_in_progress: bool,
 }
 
 impl Default for RpaApp {
@@ -155,7 +153,6 @@ impl Default for RpaApp {
             dialogs: DialogState::default(),
             undo_redo: UndoRedoManager::new(),
             property_edit_debounce: 0.0,
-            transaction_in_progress: false,
         }
     }
 }
@@ -184,7 +181,7 @@ impl eframe::App for RpaApp {
 
 impl RpaApp {
     fn with_initial_snapshot(mut self) -> Self {
-        self.snapshot_undo_state();
+        self.undo_redo.add_undo(&self.project);
         self
     }
 
@@ -194,15 +191,6 @@ impl RpaApp {
             .unwrap()
             .as_secs_f64();
         self.undo_redo.feed_state(time, &self.project);
-    }
-
-    fn begin_undo_transaction(&mut self) {
-        self.transaction_in_progress = true;
-    }
-
-    fn end_undo_transaction(&mut self) {
-        self.snapshot_undo_state();
-        self.transaction_in_progress = false;
     }
 
     fn undo(&mut self) {
@@ -325,30 +313,30 @@ impl RpaApp {
                     context_action,
                     mouse_world_pos,
                     connection_created,
-                    drag_started,
+                    _drag_started,
                     drag_ended,
-                    resize_started,
+                    _resize_started,
                     resize_ended,
                 ) = canvas_result.inner;
 
-                if drag_started && !self.is_executing {
-                    self.begin_undo_transaction();
-                }
-
-                if resize_started && !self.is_executing {
-                    self.begin_undo_transaction();
-                }
-
                 if connection_created {
-                    self.snapshot_undo_state();
+                    self.undo_redo.add_undo(&self.project);
                 }
 
                 if drag_ended && !self.is_executing {
-                    self.end_undo_transaction();
+                    let time = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs_f64();
+                    self.undo_redo.force_stabilize_flux(time, &self.project);
                 }
 
                 if resize_ended && !self.is_executing {
-                    self.end_undo_transaction();
+                    let time = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs_f64();
+                    self.undo_redo.force_stabilize_flux(time, &self.project);
                 }
 
                 if let Some(activity) = dropped_activity {
@@ -358,7 +346,7 @@ impl RpaApp {
                             ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
                         self.get_current_scenario_mut()
                             .add_node((*activity).clone(), world_pos);
-                        self.snapshot_undo_state();
+                        self.undo_redo.add_undo(&self.project);
                     }
                 }
 
@@ -384,14 +372,13 @@ impl RpaApp {
             }
             ui::ContextMenuAction::Delete => {
                 if !self.selected_nodes.is_empty() {
-                    self.begin_undo_transaction();
                     let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
                     let scenario = self.get_current_scenario_mut();
                     for node_id in nodes_to_remove {
                         scenario.remove_node(&node_id);
                     }
                     self.selected_nodes.clear();
-                    self.end_undo_transaction();
+                    self.undo_redo.add_undo(&self.project);
                 }
             }
             ui::ContextMenuAction::SelectAll => {
@@ -1114,14 +1101,8 @@ impl RpaApp {
                 }
 
                 if let Some(i) = to_remove {
-                    if !self.project.scenarios[i].nodes.is_empty() {
-                        self.begin_undo_transaction();
-                        self.project.scenarios[i].nodes.clear();
-                        self.project.scenarios[i].connections.clear();
-                        self.end_undo_transaction();
-                    }
                     self.project.scenarios.remove(i);
-                    self.snapshot_undo_state();
+                    self.undo_redo.add_undo(&self.project);
                     if self.current_scenario_index == Some(i) {
                         self.current_scenario_index = None;
                     } else if let Some(current) = self.current_scenario_index
@@ -1139,7 +1120,7 @@ impl RpaApp {
             )
             .to_string();
             self.project.scenarios.push(Scenario::new(&name));
-            self.snapshot_undo_state();
+            self.undo_redo.add_undo(&self.project);
         }
     }
 
