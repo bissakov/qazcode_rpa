@@ -872,6 +872,141 @@ impl RpaApp {
                 self.dialogs.rename_scenario.scenario_index = None;
             }
         }
+
+        self.render_parameter_binding_dialog(ctx);
+    }
+
+    fn render_parameter_binding_dialog(&mut self, ctx: &egui::Context) {
+        if !self.dialogs.parameter_binding_dialog.show {
+            return;
+        }
+
+        let mut close_window = false;
+
+        let mut dialog_state = self.dialogs.parameter_binding_dialog.clone();
+        let mut error_message = dialog_state.error_message.clone();
+
+        egui::Window::new(t!("parameter_binding.title").as_ref())
+            .id(egui::Id::new("parameter_binding_window"))
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(t!("parameter_binding.source_variable").as_ref());
+                ui.text_edit_singleline(&mut dialog_state.source_var_name);
+
+                ui.label(t!("parameter_binding.direction").as_ref());
+                egui::ComboBox::from_id_salt("param_direction_combo")
+                    .selected_text(match dialog_state.direction {
+                        rpa_core::node_graph::ParameterDirection::In => "In",
+                        rpa_core::node_graph::ParameterDirection::Out => "Out",
+                        rpa_core::node_graph::ParameterDirection::InOut => "InOut",
+                    })
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(
+                                dialog_state.direction
+                                    == rpa_core::node_graph::ParameterDirection::In,
+                                "In",
+                            )
+                            .clicked()
+                        {
+                            dialog_state.direction = rpa_core::node_graph::ParameterDirection::In;
+                        }
+                        if ui
+                            .selectable_label(
+                                dialog_state.direction
+                                    == rpa_core::node_graph::ParameterDirection::Out,
+                                "Out",
+                            )
+                            .clicked()
+                        {
+                            dialog_state.direction = rpa_core::node_graph::ParameterDirection::Out;
+                        }
+                        if ui
+                            .selectable_label(
+                                dialog_state.direction
+                                    == rpa_core::node_graph::ParameterDirection::InOut,
+                                "InOut",
+                            )
+                            .clicked()
+                        {
+                            dialog_state.direction =
+                                rpa_core::node_graph::ParameterDirection::InOut;
+                        }
+                    });
+
+                if let Some(ref error) = error_message {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+
+                ui.horizontal(|ui| {
+                    if ui.button(t!("parameter_binding.ok").as_ref()).clicked() {
+                        error_message = None;
+
+                        if dialog_state.source_var_name.is_empty() {
+                            error_message = Some(
+                                t!("parameter_binding.errors.source_var_required").to_string(),
+                            );
+                        }
+
+                        if error_message.is_none() && dialog_state.param_var_id.is_none() {
+                            error_message =
+                                Some(t!("parameter_binding.errors.param_required").to_string());
+                        }
+
+                        if error_message.is_none() {
+                            close_window = true;
+                        }
+                    }
+
+                    if ui.button(t!("parameter_binding.cancel").as_ref()).clicked() {
+                        close_window = true;
+                    }
+                });
+            });
+
+        self.dialogs.parameter_binding_dialog = dialog_state.clone();
+        self.dialogs.parameter_binding_dialog.error_message = error_message;
+
+        if close_window
+            && self
+                .dialogs
+                .parameter_binding_dialog
+                .error_message
+                .is_none()
+        {
+            if let Some(current_idx) = self.current_scenario_index {
+                if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
+                    if let Some(node) = self.project.scenarios[current_idx].get_node_mut(&node_id) {
+                        if let rpa_core::Activity::CallScenario { parameters, .. } =
+                            &mut node.activity
+                        {
+                            if let Some(param_var_id) = dialog_state.param_var_id {
+                                let source_var_id =
+                                    self.project.variables.id(&dialog_state.source_var_name);
+                                let binding = rpa_core::node_graph::ParameterBinding {
+                                    param_var_id,
+                                    source_var_id,
+                                    direction: dialog_state.direction,
+                                };
+
+                                if let Some(idx) = dialog_state.editing_index {
+                                    if idx < parameters.len() {
+                                        parameters[idx] = binding;
+                                    }
+                                } else {
+                                    parameters.push(binding);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if close_window {
+            self.dialogs.parameter_binding_dialog.show = false;
+        }
     }
 
     fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
@@ -1207,11 +1342,17 @@ impl RpaApp {
             .show(ui, |ui| {
                 if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
                     let scenarios: Vec<_> = self.project.scenarios.to_vec();
+                    let current_scenario = self
+                        .current_scenario_index
+                        .and_then(|i| self.project.scenarios.get(i).cloned());
                     let scenario = self.get_current_scenario_mut();
                     if let Some(node) = scenario.get_node_mut(&node_id) {
-                        let changed = ui::render_node_properties(ui, node, &scenarios);
-                        if changed {
-                            self.property_edit_debounce = 0.0;
+                        if let Some(ref current_scen) = current_scenario {
+                            let changed =
+                                ui::render_node_properties(ui, node, &scenarios, current_scen);
+                            if changed {
+                                self.property_edit_debounce = 0.0;
+                            }
                         }
                     }
                     if self.selected_nodes.len() > 1 {

@@ -1638,7 +1638,12 @@ fn render_minimap_internal(
     );
 }
 
-pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::Scenario]) -> bool {
+pub fn render_node_properties(
+    ui: &mut Ui,
+    node: &mut Node,
+    scenarios: &[crate::Scenario],
+    _current_scenario: &crate::Scenario,
+) -> bool {
     use rpa_core::{ActivityMetadata, PropertyType};
 
     let original_activity = node.activity.clone();
@@ -1766,7 +1771,11 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
             PropertyType::ScenarioSelector => {
                 ui.label(&label);
 
-                if let Activity::CallScenario { scenario_id, .. } = &mut node.activity {
+                if let Activity::CallScenario {
+                    scenario_id,
+                    parameters,
+                } = &mut node.activity
+                {
                     if scenarios.is_empty() {
                         ui.label(t!("status.no_scenarios").as_ref());
                     } else {
@@ -1788,6 +1797,75 @@ pub fn render_node_properties(ui: &mut Ui, node: &mut Node, scenarios: &[crate::
                                     );
                                 }
                             });
+
+                        ui.separator();
+                        ui.label(t!("parameter_binding.title").as_ref());
+
+                        let mut to_delete = None;
+                        let mut to_edit = None;
+
+                        ui.horizontal(|ui| {
+                            ui.label(t!("parameter_binding.parameter").as_ref());
+                            ui.label(t!("parameter_binding.source_variable").as_ref());
+                            ui.label(t!("parameter_binding.direction").as_ref());
+                            ui.label(""); // Actions column
+                        });
+
+                        for (idx, binding) in parameters.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let param_name = scenarios
+                                    .iter()
+                                    .find(|s| s.id == *scenario_id)
+                                    .and_then(|s| {
+                                        s.parameters
+                                            .iter()
+                                            .find(|p| p.var_id == binding.param_var_id)
+                                    })
+                                    .map(|p| p.var_name.clone())
+                                    .unwrap_or_else(|| "???".to_string());
+
+                                ui.label(&param_name);
+                                ui.label("→");
+                                ui.label(format!("{:?}", binding.source_var_id));
+
+                                let direction_text = match binding.direction {
+                                    rpa_core::node_graph::ParameterDirection::In => "In",
+                                    rpa_core::node_graph::ParameterDirection::Out => "Out",
+                                    rpa_core::node_graph::ParameterDirection::InOut => "InOut",
+                                };
+                                ui.label(direction_text);
+
+                                if ui
+                                    .button(t!("parameter_binding.edit_parameter").as_ref())
+                                    .clicked()
+                                {
+                                    to_edit = Some(idx);
+                                }
+                                if ui
+                                    .button(t!("parameter_binding.delete_parameter").as_ref())
+                                    .clicked()
+                                {
+                                    to_delete = Some(idx);
+                                }
+                            });
+                        }
+
+                        if let Some(idx) = to_delete {
+                            parameters.remove(idx);
+                        }
+
+                        if let Some(idx) = to_edit {
+                            if let Some(_binding) = parameters.get(idx) {
+                                // Emit a signal to edit - for now, just show in logs
+                            }
+                        }
+
+                        if ui
+                            .button(t!("parameter_binding.add_parameter").as_ref())
+                            .clicked()
+                        {
+                            // Emit a signal to add - for now, just show in logs
+                        }
                     }
                 }
             }
