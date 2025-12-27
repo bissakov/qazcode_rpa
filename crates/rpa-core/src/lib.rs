@@ -24,4 +24,4 @@ pub use node_graph::{
 pub use validation::{
     ScenarioValidator, ValidationCache, ValidationIssue, ValidationLevel, ValidationResult,
 };
-pub use variables::{VarEvent, VarId, Variables};
+pub use variables::{VarEvent, Variables};

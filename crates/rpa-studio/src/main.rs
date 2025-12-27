@@ -12,6 +12,7 @@ use loglevel_ext::LogLevelExt;
 rust_i18n::i18n!("locales", fallback = "en");
 
 use eframe::egui;
+use rpa_core::variables::VariableScope;
 
 use crate::undo_redo::UndoRedoManager;
 use dialogs::DialogState;
@@ -249,18 +250,10 @@ impl RpaApp {
             for event in var_receiver.try_iter() {
                 match event {
                     VarEvent::Set { name, value } => {
-                        let id = self.variables.id(&name);
-                        self.variables.set(id, value);
+                        self.variables.set(&name, value);
                     }
                     VarEvent::Remove { name } => {
-                        let id = self.variables.id(&name);
-                        self.variables.remove(id);
-                    }
-                    VarEvent::SetId { id, value } => {
-                        self.variables.set(id, value);
-                    }
-                    VarEvent::RemoveId { id } => {
-                        self.variables.remove(id);
+                        self.variables.remove(&name);
                     }
                 }
             }
@@ -788,15 +781,13 @@ impl RpaApp {
                             ) {
                                 Ok(value) => {
                                     let var_name = self.dialogs.add_variable.name.trim();
-                                    let id = if self.dialogs.add_variable.is_global {
-                                        self.project.variables.id_with_scope(
-                                            var_name,
-                                            rpa_core::variables::VariableScope::Global,
-                                        )
+                                    let scope = if self.dialogs.add_variable.is_global {
+                                        rpa_core::variables::VariableScope::Global
                                     } else {
-                                        self.project.variables.id(var_name)
+                                        rpa_core::variables::VariableScope::Scenario
                                     };
-                                    self.project.variables.set(id, value);
+                                    self.project.variables.create_variable(var_name, scope);
+                                    self.project.variables.set(var_name, value);
                                     self.dialogs.add_variable.name.clear();
                                     self.dialogs.add_variable.value.clear();
                                     self.dialogs.add_variable.var_type = VariableType::String;
@@ -1012,10 +1003,11 @@ impl RpaApp {
                                 parameters,
                             } = &mut node.activity
                             {
-                                let source_var_id =
-                                    self.project.variables.id(&dialog_state.source_var_name);
-                                let _source_var_type =
-                                    self.project.variables.get(source_var_id).get_type();
+                                let _source_var_type = self
+                                    .project
+                                    .variables
+                                    .get(&dialog_state.source_var_name)
+                                    .map(|v| v.get_type());
 
                                 Some((scenario_id.clone(), parameters.clone()))
                             } else {
@@ -1027,9 +1019,6 @@ impl RpaApp {
                     };
 
                     if let Some((scenario_id, mut parameters)) = scenario_id_and_params {
-                        let source_var_id =
-                            self.project.variables.id(&dialog_state.source_var_name);
-
                         // Find the called scenario to add the parameter to it
                         if let Some(called_scenario) = self
                             .project
@@ -1038,28 +1027,24 @@ impl RpaApp {
                             .find(|s| s.id == scenario_id)
                         {
                             // Create or find the parameter in the called scenario
-                            let param_var_id = called_scenario
+                            let target_var_exists = called_scenario
                                 .parameters
                                 .iter()
-                                .find(|p| p.var_name == dialog_state.target_var_name)
-                                .map(|p| p.var_id)
-                                .unwrap_or_else(|| {
-                                    // Parameter doesn't exist, create it
-                                    let new_var_id =
-                                        self.project.variables.id(&dialog_state.target_var_name);
-                                    called_scenario.parameters.push(
-                                        rpa_core::node_graph::ScenarioParameter {
-                                            var_id: new_var_id,
-                                            var_name: dialog_state.target_var_name.clone(),
-                                            direction: dialog_state.direction,
-                                        },
-                                    );
-                                    new_var_id
-                                });
+                                .any(|p| p.var_name == dialog_state.target_var_name);
+
+                            if !target_var_exists {
+                                // Parameter doesn't exist, create it
+                                called_scenario.parameters.push(
+                                    rpa_core::node_graph::ScenarioParameter {
+                                        var_name: dialog_state.target_var_name.clone(),
+                                        direction: dialog_state.direction,
+                                    },
+                                );
+                            }
 
                             let binding = rpa_core::node_graph::VariablesBinding {
-                                target_var_id: param_var_id,
-                                source_var_id,
+                                target_var_name: dialog_state.target_var_name.clone(),
+                                source_var_name: dialog_state.source_var_name.clone(),
                                 direction: dialog_state.direction,
                                 source_scope: None,
                             };
@@ -1464,7 +1449,6 @@ impl RpaApp {
                                     self.dialogs.var_binding_dialog.show = true;
                                     self.dialogs.var_binding_dialog.scenario_id =
                                         scenario_id.clone();
-                                    self.dialogs.var_binding_dialog.target_var_id = None;
                                     self.dialogs.var_binding_dialog.source_var_name = String::new();
                                     self.dialogs.var_binding_dialog.target_var_name = String::new();
                                     self.dialogs.var_binding_dialog.direction =
@@ -1480,36 +1464,13 @@ impl RpaApp {
                                 } = &activity
                                 {
                                     if let Some(binding) = parameters.get(idx) {
-                                        // Find the parameter name from the called scenario
-                                        let target_param_name = self
-                                            .project
-                                            .scenarios
-                                            .iter()
-                                            .find(|s| s.id == *scenario_id)
-                                            .and_then(|s| {
-                                                s.parameters
-                                                    .iter()
-                                                    .find(|p| p.var_id == binding.target_var_id)
-                                            })
-                                            .map(|p| p.var_name.clone())
-                                            .unwrap_or_default();
-
-                                        // Find source variable name from variables
-                                        let source_var_name = self
-                                            .project
-                                            .variables
-                                            .name(binding.source_var_id)
-                                            .to_string();
-
                                         self.dialogs.var_binding_dialog.show = true;
                                         self.dialogs.var_binding_dialog.scenario_id =
                                             scenario_id.clone();
-                                        self.dialogs.var_binding_dialog.target_var_id =
-                                            Some(binding.target_var_id);
                                         self.dialogs.var_binding_dialog.source_var_name =
-                                            source_var_name;
+                                            binding.source_var_name.clone();
                                         self.dialogs.var_binding_dialog.target_var_name =
-                                            target_param_name;
+                                            binding.target_var_name.clone();
                                         self.dialogs.var_binding_dialog.direction =
                                             binding.direction;
                                         self.dialogs.var_binding_dialog.editing_index = Some(idx);
@@ -1559,7 +1520,7 @@ impl RpaApp {
                     .project
                     .variables
                     .iter()
-                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .map(|(name, value, _scope)| (name.to_owned(), value.clone()))
                     .collect();
 
                 if !all_vars.is_empty() {
@@ -1589,7 +1550,7 @@ impl RpaApp {
                                     ui.label(display_value);
 
                                     if ui.small_button("🗑").clicked() {
-                                        to_remove = Some(name.clone());
+                                        to_remove = Some(name.to_string());
                                     }
                                     ui.end_row();
                                 }
@@ -1597,8 +1558,7 @@ impl RpaApp {
                         });
 
                     if let Some(name) = to_remove {
-                        let id = self.project.variables.id(&name);
-                        self.project.variables.remove(id);
+                        self.project.variables.remove(&name);
                     }
                 } else {
                     ui.vertical_centered(|ui| {
@@ -1625,12 +1585,18 @@ impl RpaApp {
                             .spacing([10.0, 4.0])
                             .min_col_width(60.0)
                             .show(ui, |ui| {
+                                ui.strong(t!("variables.scope").as_ref());
                                 ui.strong(t!("variables.name").as_ref());
                                 ui.strong(t!("variables.type").as_ref());
                                 ui.strong(t!("variables.value").as_ref());
                                 ui.end_row();
 
-                                for (name, value) in self.variables.iter() {
+                                for (name, value, scope) in self.variables.iter() {
+                                    ui.label(if *scope == VariableScope::Global {
+                                        "G"
+                                    } else {
+                                        "S"
+                                    });
                                     ui.label(name);
                                     ui.label(value.get_type().as_str());
                                     let value_str = value.to_string();

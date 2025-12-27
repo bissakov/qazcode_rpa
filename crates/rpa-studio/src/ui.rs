@@ -1649,7 +1649,7 @@ pub fn render_node_properties(
     node: &mut Node,
     scenarios: &[crate::Scenario],
     _current_scenario: &crate::Scenario,
-    variables: &rpa_core::Variables,
+    _variables: &rpa_core::Variables,
 ) -> (bool, ParameterBindingAction) {
     use rpa_core::{ActivityMetadata, PropertyType};
 
@@ -1827,12 +1827,12 @@ pub fn render_node_properties(
                                     .and_then(|s| {
                                         s.parameters
                                             .iter()
-                                            .find(|p| p.var_id == binding.target_var_id)
+                                            .find(|p| p.var_name == binding.target_var_name)
                                     })
                                     .map(|p| p.var_name.clone())
                                     .unwrap_or_else(|| "???".to_string());
 
-                                let source_var_name = variables.name(binding.source_var_id);
+                                let source_var_name = binding.source_var_name.clone();
 
                                 ui.label(&param_name);
                                 ui.label("→");

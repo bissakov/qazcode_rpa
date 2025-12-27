@@ -3,7 +3,7 @@ use crate::ir::{Instruction, IrBuilder, IrProgram};
 use crate::node_graph::{LogEntry, LogLevel, Project, VariableDirection, VariableValue};
 use crate::utils;
 use crate::validation::ScenarioValidator;
-use crate::variables::VarEvent;
+use crate::variables::{VarEvent, Variables};
 use crate::{evaluator, variables};
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -198,23 +198,20 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     }
 
     fn get_variable_value(&self, name: &str) -> VariableValue {
-        if let Some(id) = self.context.scenario_variables.find_id(name) {
-            self.context.scenario_variables.get(id).clone()
-        } else if let Some(id) = self.context.global_variables.find_id(name) {
-            self.context.global_variables.get(id).clone()
+        if let Some(val) = self.context.scenario_variables.get(name) {
+            val.clone()
+        } else if let Some(val) = self.context.global_variables.get(name) {
+            val.clone()
         } else {
             VariableValue::Undefined
         }
     }
 
-    fn get_combined_variables_snapshot(&self) -> Vec<VariableValue> {
-        let mut combined = self.context.global_variables.snapshot();
-        let scenario_snapshot = self.context.scenario_variables.snapshot();
-        if scenario_snapshot.len() > combined.len() {
-            combined.resize(scenario_snapshot.len(), VariableValue::Undefined);
-        }
-        for (i, val) in scenario_snapshot.into_iter().enumerate() {
-            combined[i] = val;
+    fn get_combined_variables(&self) -> Variables {
+        let mut combined = self.context.global_variables.clone();
+        for (name, val, scope) in self.context.scenario_variables.iter() {
+            combined.set(name, val.clone());
+            combined.set_scope(name, scope.clone());
         }
         combined
     }
@@ -284,19 +281,20 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         for binding in &frame.var_bindings {
                             match binding.direction {
                                 VariableDirection::Out | VariableDirection::InOut => {
-                                    let param_value = self
+                                    if let Some(param_value) = self
                                         .context
                                         .scenario_variables
-                                        .get(binding.target_var_id)
-                                        .clone();
-                                    self.context
-                                        .global_variables
-                                        .set(binding.source_var_id, param_value.clone());
-                                    if let Some(ref sender) = self.context.variable_sender {
-                                        let _ = sender.send(VarEvent::SetId {
-                                            id: binding.source_var_id,
-                                            value: param_value,
-                                        });
+                                        .get(&binding.target_var_name)
+                                    {
+                                        self.context
+                                            .global_variables
+                                            .set(&binding.source_var_name, param_value.clone());
+                                        if let Some(ref sender) = self.context.variable_sender {
+                                            let _ = sender.send(VarEvent::Set {
+                                                name: binding.source_var_name.clone(),
+                                                value: param_value.clone(),
+                                            });
+                                        }
                                     }
                                 }
                                 VariableDirection::In => {}
@@ -349,20 +347,18 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             Instruction::SetVar { var, value, scope } => {
                 let timestamp = get_timestamp(self.context.start_time);
 
-                let var_name = match scope {
+                match scope {
                     crate::variables::VariableScope::Global => {
-                        self.context.global_variables.set(*var, value.clone());
-                        self.context.global_variables.name(*var).to_string()
+                        self.context.global_variables.set(var, value.clone());
                     }
                     crate::variables::VariableScope::Scenario => {
-                        self.context.scenario_variables.set(*var, value.clone());
-                        self.context.scenario_variables.name(*var).to_string()
+                        self.context.scenario_variables.set(var, value.clone());
                     }
-                };
+                }
 
                 if let Some(sender) = &self.context.variable_sender {
-                    let _ = sender.send(VarEvent::SetId {
-                        id: *var,
+                    let _ = sender.send(VarEvent::Set {
+                        name: var.clone(),
                         value: value.clone(),
                     });
                 }
@@ -371,15 +367,15 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     timestamp,
                     level: LogLevel::Info,
                     activity: "SET VAR".to_string(),
-                    message: format!("{var_name:?} = {value}"),
+                    message: format!("{var:?} = {value}"),
                 });
                 Ok(pc + 1)
             }
             Instruction::Evaluate { expr } => {
                 let timestamp = get_timestamp(self.context.start_time);
 
-                let values_snapshot = self.get_combined_variables_snapshot();
-                let result = match evaluator::eval_expr(expr, &values_snapshot) {
+                let combined_vars = self.get_combined_variables();
+                let result = match evaluator::eval_expr(expr, &combined_vars) {
                     Ok(value) => value,
                     Err(err) => {
                         self.log.log(LogEntry {
@@ -405,9 +401,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             Instruction::JumpIf { condition, target } => {
                 let timestamp = get_timestamp(self.context.start_time);
 
-                let values_snapshot = self.get_combined_variables_snapshot();
+                let combined_vars = self.get_combined_variables();
                 let (message, next_pc, level) =
-                    match evaluator::eval_expr(condition, &values_snapshot) {
+                    match evaluator::eval_expr(condition, &combined_vars) {
                         Ok(VariableValue::Boolean(true)) => (
                             "Condition evaluated to: true".to_string(),
                             *target,
@@ -442,9 +438,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             Instruction::JumpIfNot { condition, target } => {
                 let timestamp = get_timestamp(self.context.start_time);
 
-                let values_snapshot = self.get_combined_variables_snapshot();
+                let combined_vars = self.get_combined_variables();
                 let (message, next_pc, level) =
-                    match evaluator::eval_expr(condition, &values_snapshot) {
+                    match evaluator::eval_expr(condition, &combined_vars) {
                         Ok(VariableValue::Boolean(true)) => (
                             "Condition evaluated to: true".to_string(),
                             pc + 1,
@@ -478,15 +474,15 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             }
             Instruction::LoopInit { index, start } => {
                 if let Some(sender) = &self.context.variable_sender {
-                    let _ = sender.send(VarEvent::SetId {
-                        id: *index,
+                    let _ = sender.send(VarEvent::Set {
+                        name: index.clone(),
                         value: VariableValue::Number(*start as f64),
                     });
                 }
 
                 self.context
                     .scenario_variables
-                    .set(*index, VariableValue::Number(*start as f64));
+                    .set(index, VariableValue::Number(*start as f64));
 
                 Ok(pc + 1)
             }
@@ -525,8 +521,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let current = self
                     .context
                     .scenario_variables
-                    .get(*index)
-                    .as_number()
+                    .get(index)
+                    .and_then(|v| v.as_number())
                     .map_or(*end, |n| n as i64);
 
                 let should_continue = if *step > 0 {
@@ -549,19 +545,19 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let current = self
                     .context
                     .scenario_variables
-                    .get(*index)
-                    .as_number()
+                    .get(index)
+                    .and_then(|v| v.as_number())
                     .unwrap() as i64;
 
                 let next = current + step;
 
                 self.context
                     .scenario_variables
-                    .set(*index, VariableValue::Number(next as f64));
+                    .set(index, VariableValue::Number(next as f64));
 
                 if let Some(sender) = &self.context.variable_sender {
-                    let _ = sender.send(VarEvent::SetId {
-                        id: *index,
+                    let _ = sender.send(VarEvent::Set {
+                        name: index.clone(),
                         value: VariableValue::Number(next as f64),
                     });
                 }
@@ -574,8 +570,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 end_target,
             } => {
                 let timestamp = get_timestamp(self.context.start_time);
-                let values_snapshot = self.get_combined_variables_snapshot();
-                match evaluator::eval_expr(condition, &values_snapshot) {
+                let combined_vars = self.get_combined_variables();
+                match evaluator::eval_expr(condition, &combined_vars) {
                     Ok(VariableValue::Boolean(true)) => {
                         let iter_count = self.iteration_counts.entry(pc).or_insert(0);
                         *iter_count += 1;
@@ -667,31 +663,33 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                                 {
                                     self.context
                                         .global_variables
-                                        .get(binding.source_var_id)
-                                        .clone()
+                                        .get(&binding.source_var_name)
+                                        .cloned()
                                 } else {
                                     self.context
                                         .scenario_variables
-                                        .get(binding.source_var_id)
-                                        .clone()
+                                        .get(&binding.source_var_name)
+                                        .cloned()
                                 };
-                                self.context
-                                    .scenario_variables
-                                    .set(binding.target_var_id, source_value.clone());
-                                if let Some(ref sender) = self.context.variable_sender {
-                                    let _ = sender.send(VarEvent::SetId {
-                                        id: binding.target_var_id,
-                                        value: source_value,
-                                    });
+                                if let Some(val) = source_value {
+                                    self.context
+                                        .scenario_variables
+                                        .set(&binding.target_var_name, val.clone());
+                                    if let Some(ref sender) = self.context.variable_sender {
+                                        let _ = sender.send(VarEvent::Set {
+                                            name: binding.target_var_name.clone(),
+                                            value: val.clone(),
+                                        });
+                                    }
                                 }
                             }
                             VariableDirection::Out => {
                                 self.context
                                     .scenario_variables
-                                    .set(binding.target_var_id, VariableValue::Undefined);
+                                    .set(&binding.target_var_name, VariableValue::Undefined);
                                 if let Some(ref sender) = self.context.variable_sender {
-                                    let _ = sender.send(VarEvent::SetId {
-                                        id: binding.target_var_id,
+                                    let _ = sender.send(VarEvent::Set {
+                                        name: binding.target_var_name.clone(),
                                         value: VariableValue::Undefined,
                                     });
                                 }
@@ -739,14 +737,13 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     }
 
     fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
-        let id = self.context.global_variables.id("last_error");
         self.context
             .global_variables
-            .set(id, VariableValue::String(error.clone()));
+            .set("last_error", VariableValue::String(error.clone()));
 
         if let Some(sender) = &self.context.variable_sender {
-            let _ = sender.send(VarEvent::SetId {
-                id,
+            let _ = sender.send(VarEvent::Set {
+                name: "last_error".to_string(),
                 value: VariableValue::String(error.clone()),
             });
         }
@@ -797,8 +794,7 @@ pub fn execute_project_with_vars(
     let mut context = ExecutionContext::new_with_sender(var_sender.clone(), stop_flag);
 
     for (name, value) in initial_vars {
-        let id = context.global_variables.id(&name);
-        context.global_variables.set(id, value);
+        context.global_variables.set(&name, value);
     }
 
     let mut log = log_sender.clone();

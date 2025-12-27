@@ -2,16 +2,6 @@ use crate::VariableValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct VarId(u32);
-
-impl VarId {
-    #[inline]
-    pub fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VariableScope {
     Global,
@@ -19,11 +9,20 @@ pub enum VariableScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Variable {
+    value: VariableValue,
+    scope: VariableScope,
+}
+
+impl Variable {
+    pub fn new(value: VariableValue, scope: VariableScope) -> Self {
+        Self { value, scope }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Variables {
-    name_to_id: HashMap<String, VarId>,
-    id_to_name: Vec<String>,
-    values: Vec<VariableValue>,
-    scopes: Vec<VariableScope>,
+    values: HashMap<String, Variable>,
 }
 
 impl Default for Variables {
@@ -35,102 +34,65 @@ impl Default for Variables {
 impl Variables {
     pub fn new() -> Self {
         Self {
-            name_to_id: HashMap::new(),
-            id_to_name: Vec::new(),
-            values: Vec::new(),
-            scopes: Vec::new(),
+            values: HashMap::new(),
         }
     }
 
-    pub fn snapshot(&self) -> Vec<VariableValue> {
-        self.values.clone()
+    pub fn create_variable(&mut self, name: &str, scope: VariableScope) {
+        self.values.insert(
+            name.to_owned(),
+            Variable::new(VariableValue::Undefined, scope),
+        );
     }
 
-    pub fn values(&self) -> &[VariableValue] {
-        &self.values
+    pub fn get_scope(&self, name: &str) -> Option<&VariableScope> {
+        self.values.get(name).map(|var| &var.scope)
     }
 
-    pub fn id(&mut self, name: &str) -> VarId {
-        if let Some(&id) = self.name_to_id.get(name) {
-            return id;
+    pub fn set_scope(&mut self, name: &str, scope: VariableScope) {
+        if let Some(var) = self.values.get_mut(name) {
+            var.scope = scope;
         }
-        let id = VarId(self.id_to_name.len() as u32);
-        self.name_to_id.insert(name.to_owned(), id);
-        self.id_to_name.push(name.to_owned());
-        self.values.push(VariableValue::Undefined);
-        self.scopes.push(VariableScope::Global);
-        id
     }
 
-    pub fn id_with_scope(&mut self, name: &str, scope: VariableScope) -> VarId {
-        if let Some(&id) = self.name_to_id.get(name) {
-            return id;
+    pub fn set(&mut self, name: &str, value: VariableValue) {
+        if let Some(var) = self.values.get_mut(name) {
+            var.value = value;
         }
-        let id = VarId(self.id_to_name.len() as u32);
-        self.name_to_id.insert(name.to_owned(), id);
-        self.id_to_name.push(name.to_owned());
-        self.values.push(VariableValue::Undefined);
-        self.scopes.push(scope);
-        id
     }
 
-    pub fn get_scope(&self, id: VarId) -> &VariableScope {
-        &self.scopes[id.index()]
+    pub fn get(&self, name: &str) -> Option<&VariableValue> {
+        self.values.get(name).map(|var| &var.value)
     }
 
-    pub fn set_scope(&mut self, id: VarId, scope: VariableScope) {
-        self.scopes[id.index()] = scope;
-    }
-
-    pub fn name(&self, id: VarId) -> &str {
-        &self.id_to_name[id.index()]
-    }
-
-    pub fn set(&mut self, id: VarId, value: VariableValue) {
-        self.values[id.index()] = value;
-    }
-
-    pub fn get(&self, id: VarId) -> &VariableValue {
-        &self.values[id.index()]
-    }
-
-    pub fn remove(&mut self, id: VarId) {
-        self.values[id.index()] = VariableValue::Undefined;
+    pub fn remove(&mut self, name: &str) {
+        self.values.remove(name);
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.name_to_id.contains_key(name)
-    }
-
-    pub fn find_id(&self, name: &str) -> Option<VarId> {
-        self.name_to_id.get(name).copied()
+        self.values.contains_key(name)
     }
 
     pub fn names(&self) -> impl Iterator<Item = &String> {
-        self.name_to_id.keys()
+        self.values.keys()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.id_to_name.is_empty()
+        self.values.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &VariableValue)> {
-        self.name_to_id
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &VariableValue, &VariableScope)> {
+        self.values
             .iter()
-            .map(move |(name, &id)| (name, &self.values[id.index()]))
+            .map(|(name, var)| (name.as_str(), &var.value, &var.scope))
     }
 
     pub fn clear(&mut self) {
-        self.name_to_id.clear();
-        self.id_to_name.clear();
         self.values.clear();
-        self.scopes.clear();
     }
 }
 
 pub enum VarEvent {
     Set { name: String, value: VariableValue },
     Remove { name: String },
-    SetId { id: VarId, value: VariableValue },
-    RemoveId { id: VarId },
 }

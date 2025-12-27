@@ -1,7 +1,5 @@
-use crate::{
-    constants::{FlowDirection, UiConstants},
-    variables::{VarId, Variables},
-};
+use crate::constants::{FlowDirection, UiConstants};
+use crate::variables::Variables;
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, fmt};
@@ -634,8 +632,8 @@ pub enum VariableDirection {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VariablesBinding {
-    pub target_var_id: VarId,
-    pub source_var_id: VarId,
+    pub target_var_name: String,
+    pub source_var_name: String,
     pub direction: VariableDirection,
     #[serde(default)]
     pub source_scope: Option<crate::variables::VariableScope>,
@@ -643,7 +641,6 @@ pub struct VariablesBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScenarioParameter {
-    pub var_id: VarId,
     pub var_name: String,
     pub direction: VariableDirection,
 }

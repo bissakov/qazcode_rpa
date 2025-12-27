@@ -1,5 +1,4 @@
 use rpa_core::node_graph::{VariableDirection, VariableType};
-use rpa_core::variables::VarId;
 
 use crate::AppSettings;
 
@@ -37,7 +36,6 @@ pub struct RenameScenarioDialog {
 pub struct VariableBindingDialog {
     pub show: bool,
     pub scenario_id: String,
-    pub target_var_id: Option<VarId>,
     pub source_var_name: String,
     pub target_var_name: String,
     pub direction: VariableDirection,
@@ -50,7 +48,6 @@ impl Clone for VariableBindingDialog {
         Self {
             show: self.show,
             scenario_id: self.scenario_id.clone(),
-            target_var_id: self.target_var_id,
             source_var_name: self.source_var_name.clone(),
             target_var_name: self.target_var_name.clone(),
             direction: self.direction,
@@ -65,7 +62,6 @@ impl Default for VariableBindingDialog {
         Self {
             show: false,
             scenario_id: String::new(),
-            target_var_id: None,
             source_var_name: String::new(),
             target_var_name: String::new(),
             direction: VariableDirection::In,

@@ -1,6 +1,6 @@
 use crate::UiConstants;
 use crate::evaluator::{Expr, parse_expr};
-use crate::variables::{VarId, VariableScope};
+use crate::variables::VariableScope;
 use crate::{
     LogLevel, VariableValue,
     node_graph::{Activity, BranchType, Project, Scenario},
@@ -24,7 +24,7 @@ pub enum Instruction {
         milliseconds: u64,
     },
     SetVar {
-        var: VarId,
+        var: String,
         value: VariableValue,
         scope: VariableScope,
     },
@@ -43,24 +43,24 @@ pub enum Instruction {
         target: usize,
     },
     LoopInit {
-        index: VarId,
+        index: String,
         start: i64,
     },
     LoopLog {
-        index: VarId,
+        index: String,
         start: i64,
         end: i64,
         step: i64,
     },
     LoopCheck {
-        index: VarId,
+        index: String,
         end: i64,
         step: i64,
         body_target: usize,
         end_target: usize,
     },
     LoopNext {
-        index: VarId,
+        index: String,
         step: i64,
         check_target: usize,
     },
@@ -232,23 +232,19 @@ impl<'a> IrBuilder<'a> {
 
                 if let Some(end) = end {
                     let var_name = &value[start..end];
-                    // Check scenario scope first, then global scope
-                    let id = if let Some(id) = self.scenario_variables.find_id(var_name) {
-                        id
+                    let var_value = if self.scenario_variables.contains(var_name) {
+                        self.scenario_variables.get(var_name)
                     } else {
-                        self.global_variables.id(var_name)
-                    };
-                    let var_value = if let Some(id) = self.scenario_variables.find_id(var_name) {
-                        self.scenario_variables.get(id)
-                    } else {
-                        self.global_variables.get(id)
+                        self.global_variables.get(var_name)
                     };
 
-                    if let Some(s) = var_value.as_str() {
+                    if let Some(s) = var_value.and_then(|v| v.as_str()) {
                         out.push_str(s);
-                    } else if !matches!(var_value, VariableValue::Undefined) {
+                    } else if let Some(v) = var_value
+                        && !matches!(v, VariableValue::Undefined)
+                    {
                         use std::fmt::Write;
-                        write!(out, "{}", var_value).unwrap();
+                        write!(out, "{}", v).unwrap();
                     }
                 } else {
                     out.push(c);
@@ -405,8 +401,8 @@ impl<'a> IrBuilder<'a> {
 
         match &node.activity {
             Activity::Start { scenario_id } => {
-                let id = self.global_variables.id("last_error");
-                self.global_variables.set(id, VariableValue::Undefined);
+                self.global_variables
+                    .set("last_error", VariableValue::Undefined);
                 self.program.add_instruction(Instruction::Start {
                     scenario_id: scenario_id.clone(),
                 });
@@ -441,17 +437,13 @@ impl<'a> IrBuilder<'a> {
                     Err(_) => VariableValue::String(value.to_string()),
                 };
 
-                let (var_id, scope) = if *is_global {
-                    let id = self
-                        .global_variables
-                        .id_with_scope(name, crate::variables::VariableScope::Global);
-                    (id, crate::variables::VariableScope::Global)
+                let scope = if *is_global {
+                    crate::variables::VariableScope::Global
                 } else {
-                    let id = self.scenario_variables.id(name);
-                    (id, crate::variables::VariableScope::Scenario)
+                    crate::variables::VariableScope::Scenario
                 };
                 self.program.add_instruction(Instruction::SetVar {
-                    var: var_id,
+                    var: name.clone(),
                     value: var_value,
                     scope,
                 });
@@ -607,17 +599,17 @@ impl<'a> IrBuilder<'a> {
             return Ok(());
         }
 
-        let index_var = self.scenario_variables.id(index);
+        let index_var = index.to_string();
         self.scenario_variables
-            .set(index_var, VariableValue::Number(start as f64));
+            .set(&index_var, VariableValue::Number(start as f64));
 
         self.program.add_instruction(Instruction::LoopInit {
-            index: index_var,
+            index: index_var.clone(),
             start,
         });
 
         self.program.add_instruction(Instruction::LoopLog {
-            index: index_var,
+            index: index_var.clone(),
             start,
             end,
             step,
@@ -625,7 +617,7 @@ impl<'a> IrBuilder<'a> {
 
         let check_idx = self.program.instructions.len();
         let loop_check_idx = self.program.add_instruction(Instruction::LoopCheck {
-            index: index_var,
+            index: index_var.clone(),
             end,
             step,
             body_target: 0,
@@ -636,7 +628,7 @@ impl<'a> IrBuilder<'a> {
         self.compile_from_node(&body_node.unwrap())?;
 
         self.program.add_instruction(Instruction::LoopNext {
-            index: index_var,
+            index: index_var.clone(),
             step,
             check_target: check_idx,
         });
@@ -886,13 +878,9 @@ impl<'a> IrBuilder<'a> {
                 };
 
                 let (var_id, scope) = if *is_global {
-                    let id = self
-                        .global_variables
-                        .id_with_scope(name, crate::variables::VariableScope::Global);
-                    (id, crate::variables::VariableScope::Global)
+                    (name.clone(), crate::variables::VariableScope::Global)
                 } else {
-                    let id = self.scenario_variables.id(name);
-                    (id, crate::variables::VariableScope::Scenario)
+                    (name.clone(), crate::variables::VariableScope::Scenario)
                 };
                 self.program.add_instruction(Instruction::SetVar {
                     var: var_id,

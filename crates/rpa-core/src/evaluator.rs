@@ -1,13 +1,9 @@
-use crate::{
-    constants::UiConstants,
-    node_graph::VariableValue,
-    variables::{VarId, Variables},
-};
+use crate::{constants::UiConstants, node_graph::VariableValue, variables::Variables};
 
 #[derive(Debug, Clone)]
 pub enum Expr {
     Const(VariableValue),
-    Load(VarId),
+    Load(String),
 
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
@@ -482,9 +478,9 @@ impl Parser {
                 Ok(Expr::Const(VariableValue::String(value)))
             }
             Some(Token::Variable(name)) => {
-                let id = variables.id(name.as_str());
+                let name_cloned = name.clone();
                 self.advance();
-                Ok(Expr::Load(id))
+                Ok(Expr::Load(name_cloned))
             }
             Some(Token::LeftParen) => {
                 self.advance();
@@ -514,16 +510,15 @@ pub fn parse_expr(expression: &str, variables: &mut Variables) -> Result<Expr, S
     parser.parse(variables)
 }
 
-pub fn eval_expr(expr: &Expr, variables: &[VariableValue]) -> Result<VariableValue, String> {
+pub fn eval_expr(expr: &Expr, variables: &Variables) -> Result<VariableValue, String> {
     match expr {
         Expr::Const(v) => Ok(v.clone()),
 
-        Expr::Load(id) => {
-            let v = &variables[id.index()];
-            if matches!(v, VariableValue::Undefined) {
-                Err(format!("Undefined variable: {:?}", id))
-            } else {
-                Ok(v.clone())
+        Expr::Load(name) => {
+            let v = variables.get(name);
+            match v {
+                Some(val) if !matches!(val, VariableValue::Undefined) => Ok(val.clone()),
+                _ => Err(format!("Undefined variable: {}", name)),
             }
         }
 
@@ -611,7 +606,7 @@ mod tests {
             let expression = "2 + 3";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(5.0)
             );
         }
@@ -620,7 +615,7 @@ mod tests {
             let expression = "10 - 4";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(5.0)
             );
         }
@@ -629,7 +624,7 @@ mod tests {
             let expression = "3 * 4";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(6.0)
             );
         }
@@ -638,7 +633,7 @@ mod tests {
             let expression = "15 / 3";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(5.0)
             );
         }
@@ -647,7 +642,7 @@ mod tests {
             let expression = "10 % 3";
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(1.0)
             );
         }
@@ -660,7 +655,7 @@ mod tests {
         {
             let expr = parse_expr("(2 + 3) * 4", &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(20.0)
             );
         }
@@ -668,7 +663,7 @@ mod tests {
         {
             let expr = parse_expr("2 + (3 * 4)", &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(14.0)
             );
         }
@@ -688,7 +683,7 @@ mod tests {
         ] {
             let expr = parse_expr(expr_str, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Boolean(expected)
             );
         }
@@ -707,7 +702,7 @@ mod tests {
         ] {
             let expr = parse_expr(expr_str, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Boolean(expected)
             );
         }
@@ -724,7 +719,7 @@ mod tests {
         ] {
             let expr = parse_expr(expr_str, &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Boolean(expected)
             );
         }
@@ -734,16 +729,16 @@ mod tests {
     fn test_variables() {
         let mut variables = Variables::new();
 
-        let x = variables.id("x");
-        variables.set(x, VariableValue::Number(10.0));
+        variables.create_variable("x", crate::variables::VariableScope::Global);
+        variables.set("x", VariableValue::Number(10.0));
 
-        let y = variables.id("y");
-        variables.set(y, VariableValue::Number(5.0));
+        variables.create_variable("y", crate::variables::VariableScope::Global);
+        variables.set("y", VariableValue::Number(5.0));
 
         {
             let expr = parse_expr("{x} + {y}", &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(15.0)
             );
         }
@@ -751,7 +746,7 @@ mod tests {
         {
             let expr = parse_expr("{x} > {y}", &mut variables).unwrap();
             assert_eq!(
-                eval_expr(&expr, variables.values()).unwrap(),
+                eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Boolean(true)
             );
         }
@@ -761,15 +756,15 @@ mod tests {
     fn test_complex() {
         let mut variables = Variables::new();
 
-        let a = variables.id("a");
-        variables.set(a, VariableValue::Number(10.0));
+        variables.create_variable("a", crate::variables::VariableScope::Global);
+        variables.set("a", VariableValue::Number(10.0));
 
-        let b = variables.id("b");
-        variables.set(b, VariableValue::Number(5.0));
+        variables.create_variable("b", crate::variables::VariableScope::Global);
+        variables.set("b", VariableValue::Number(5.0));
 
         let expr = parse_expr("({a} + {b}) * 2 > 20", &mut variables).unwrap();
         assert_eq!(
-            eval_expr(&expr, variables.values()).unwrap(),
+            eval_expr(&expr, &variables).unwrap(),
             VariableValue::Boolean(true)
         );
     }
@@ -784,10 +779,10 @@ mod tests {
         assert!(parse_expr("2 + 3)", &mut variables).is_err());
 
         let expr = parse_expr("10 / 0", &mut variables).unwrap();
-        assert!(eval_expr(&expr, variables.values()).is_err());
+        assert!(eval_expr(&expr, &variables).is_err());
 
         let expr = parse_expr("{undefined}", &mut variables).unwrap();
-        assert!(eval_expr(&expr, variables.values()).is_err());
+        assert!(eval_expr(&expr, &variables).is_err());
     }
 
     #[test]

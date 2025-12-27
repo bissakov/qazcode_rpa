@@ -148,9 +148,9 @@ fn main() {
         let var_list: Vec<(String, VariableValue)> = context
             .global_variables
             .iter()
-            .filter_map(|(name, value)| {
+            .filter_map(|(name, value, _)| {
                 if !matches!(value, VariableValue::Undefined) {
-                    Some((name.clone(), value.clone()))
+                    Some((name.to_string(), value.clone()))
                 } else {
                     None
                 }
