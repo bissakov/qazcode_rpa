@@ -239,18 +239,18 @@ impl RpaApp {
                     allow_node_resize,
                 };
 
-                let (canvas_result, dropped_activity) = ui.dnd_drop_zone::<Activity, _>(
-                    egui::Frame::default(),
-                    |ui| {
+                let (canvas_result, dropped_activity) = ui
+                    .dnd_drop_zone::<Activity, _>(egui::Frame::default(), |ui| {
                         ui::render_node_graph(ui, scenario, &mut render_state)
-                    },
-                );
+                    });
 
                 if let Some(activity) = dropped_activity {
                     let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
                     if let Some(pointer_pos) = pointer_pos {
-                        let world_pos = ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
-                        self.get_current_scenario_mut().add_node((*activity).clone(), world_pos);
+                        let world_pos =
+                            ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
+                        self.get_current_scenario_mut()
+                            .add_node((*activity).clone(), world_pos);
                     }
                 }
 
@@ -1015,8 +1015,10 @@ impl RpaApp {
                                     if matches!(activity, Activity::CallScenario { .. }) {
                                         if !self.project.scenarios.is_empty() {
                                             let scenario_id = self.project.scenarios[0].id.clone();
-                                            node_to_add =
-                                                Some(Activity::CallScenario { scenario_id, parameters: Vec::new() });
+                                            node_to_add = Some(Activity::CallScenario {
+                                                scenario_id,
+                                                parameters: Vec::new(),
+                                            });
                                         } else {
                                             self.project.execution_log.push(LogEntry {
                                                 timestamp: "".to_string(),
@@ -1526,4 +1528,3 @@ impl RpaApp {
         }
     }
 }
-
