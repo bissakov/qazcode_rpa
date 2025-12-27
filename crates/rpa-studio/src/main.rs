@@ -1093,7 +1093,14 @@ impl RpaApp {
                 }
 
                 if let Some(i) = to_remove {
+                    if !self.project.scenarios[i].nodes.is_empty() {
+                        self.begin_undo_transaction();
+                        self.project.scenarios[i].nodes.clear();
+                        self.project.scenarios[i].connections.clear();
+                        self.end_undo_transaction();
+                    }
                     self.project.scenarios.remove(i);
+                    self.snapshot_undo_state();
                     if self.current_scenario_index == Some(i) {
                         self.current_scenario_index = None;
                     } else if let Some(current) = self.current_scenario_index
@@ -1111,6 +1118,7 @@ impl RpaApp {
             )
             .to_string();
             self.project.scenarios.push(Scenario::new(&name));
+            self.snapshot_undo_state();
         }
     }
 
