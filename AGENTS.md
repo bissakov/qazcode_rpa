@@ -30,8 +30,8 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` for workflow
 - `bd blocked` - Show all blocked issues
 
 ### Session Workflow
-- `bd sync` - Sync with git remote (run at session end)
-- `bd sync --status` - Check sync status without syncing
+- `bd daemon --stop` - Stop bd daemon (run at session end)
+- `bd daemon --start --auto-commit` - Restart daemon
 - `bd stats` - Project statistics
 - `bd doctor` - Check for issues
 
@@ -93,13 +93,11 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` for workflow
 **SESSION CLOSE PROTOCOL:**
 
 ```
-[ ] 0. cargo fmt               (format the entire codebase)
-[ ] 1. git status              (check what changed)
-[ ] 2. git add <files>         (stage code changes)
-[ ] 3. bd sync                 (commit beads changes)
+[ ] 1. cargo fmt               (format the entire codebase)
+[ ] 2. git status              (check what changed)
+[ ] 3. git add <files>         (stage code changes)
 [ ] 4. git commit -m "..."     (commit code, no attribution, one line of message)
-[ ] 5. bd sync                 (commit any new beads changes)
-[ ] 6. git push                (push to remote)
+[ ] 5. git push                (push to remote)
 ```
 
 **CRITICAL RULES:**
@@ -112,7 +110,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` for workflow
 
 ### Core Workflow Principles
 - **When in doubt**, prefer bd—persistence you don't need beats lost context
-- **Git workflow**: Hooks auto-sync, run `bd sync` at session end
+- **Git workflow**: Hooks auto-sync
 - **Session management**: Check `bd ready` for available work
 - Track dependencies explicitly with `bd dep add` when work blocks other work
 
