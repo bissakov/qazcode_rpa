@@ -1016,7 +1016,7 @@ impl RpaApp {
 
                 if ui
                     .add_enabled(
-                        self.undo_redo.has_undo(&self.project),
+                        !self.is_executing && self.undo_redo.has_undo(&self.project),
                         egui::Button::new("⟲ Undo (Ctrl+Z)"),
                     )
                     .clicked()
@@ -1026,7 +1026,7 @@ impl RpaApp {
 
                 if ui
                     .add_enabled(
-                        self.undo_redo.has_redo(&self.project),
+                        !self.is_executing && self.undo_redo.has_redo(&self.project),
                         egui::Button::new("⟳ Redo (Ctrl+Y)"),
                     )
                     .clicked()
