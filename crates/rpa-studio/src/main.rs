@@ -1599,6 +1599,11 @@ impl RpaApp {
             Ok(json) => match std::fs::write(&path, json) {
                 Ok(_) => {
                     self.current_file = Some(path.clone());
+                    // TODO: Decide undo history behavior on save:
+                    // - Option 1: Clear history on file save (cleaner UX, current recommendation)
+                    // - Option 2: Persist history to temporary state file (more powerful, uses disk space)
+                    // - Option 3: Keep history independent of save (current implementation)
+                    // When decided, call: self.undo_redo.clear_undo_history();
                     self.project.execution_log.push(LogEntry {
                         timestamp: "[00:00.00]".to_string(),
                         level: LogLevel::Info,
