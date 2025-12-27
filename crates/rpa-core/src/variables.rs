@@ -49,16 +49,9 @@ impl Variables {
         self.values.get(name).map(|var| &var.scope)
     }
 
-    pub fn set_scope(&mut self, name: &str, scope: VariableScope) {
-        if let Some(var) = self.values.get_mut(name) {
-            var.scope = scope;
-        }
-    }
-
-    pub fn set(&mut self, name: &str, value: VariableValue) {
-        if let Some(var) = self.values.get_mut(name) {
-            var.value = value;
-        }
+    pub fn set(&mut self, name: &str, value: VariableValue, scope: VariableScope) {
+        self.values
+            .insert(name.to_owned(), Variable::new(value, scope));
     }
 
     pub fn get(&self, name: &str) -> Option<&VariableValue> {
@@ -90,9 +83,4 @@ impl Variables {
     pub fn clear(&mut self) {
         self.values.clear();
     }
-}
-
-pub enum VarEvent {
-    Set { name: String, value: VariableValue },
-    Remove { name: String },
 }

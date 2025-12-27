@@ -3,6 +3,8 @@ use rpa_core::{Project, UiConstants};
 
 pub struct UndoRedoManager {
     undoer: Undoer<Project>,
+
+    #[allow(dead_code)]
     history_limit: usize,
 }
 
@@ -51,6 +53,7 @@ impl UndoRedoManager {
     /// - Option 1: Clear history on file save (cleaner UX, current recommendation)
     /// - Option 2: Persist history to temporary state file (more powerful, uses disk space)
     /// - Option 3: Keep history independent of save (current implementation)
+    #[allow(dead_code)]
     pub fn clear_undo_history(&mut self) {
         self.clear_history();
     }

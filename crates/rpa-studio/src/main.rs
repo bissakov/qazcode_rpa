@@ -1,5 +1,6 @@
 mod activity_ext;
 mod colors;
+mod custom;
 mod dialogs;
 mod loglevel_ext;
 mod ui;
@@ -19,7 +20,7 @@ use dialogs::DialogState;
 use nanoid::nanoid;
 use rpa_core::{
     Activity, Connection, IrBuilder, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
-    ScenarioValidator, UiConstants, VarEvent, VariableType, VariableValue, Variables,
+    ScenarioValidator, UiConstants, VariableType, VariableValue, Variables,
     execute_project_with_typed_vars, get_timestamp, node_graph::VariableDirection,
 };
 use rust_i18n::t;
@@ -28,6 +29,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::time::SystemTime;
+
+use self::custom::scenario_tab;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
@@ -113,14 +116,14 @@ struct RpaApp {
     selected_nodes: HashSet<String>,
     current_file: Option<std::path::PathBuf>,
     current_scenario_index: Option<usize>,
+    opened_scenarios: Vec<usize>,
     connection_from: Option<(String, usize)>,
     pan_offset: egui::Vec2,
     zoom: f32,
     settings: AppSettings,
     log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
     clipboard: ClipboardData,
-    variables: Variables,
-    variable_receiver: Option<std::sync::mpsc::Receiver<VarEvent>>,
+    global_variables: Variables,
     knife_tool_active: bool,
     knife_path: Vec<egui::Pos2>,
     resizing_node: Option<(String, ui::ResizeHandle)>,
@@ -139,14 +142,14 @@ impl Default for RpaApp {
             selected_nodes: std::collections::HashSet::new(),
             current_file: None,
             current_scenario_index: None,
+            opened_scenarios: Vec::new(),
             connection_from: None,
             pan_offset: egui::Vec2::ZERO,
             zoom: 1.0,
             settings: AppSettings::default(),
             log_receiver: None,
             clipboard: ClipboardData::default(),
-            variables: Variables::new(),
-            variable_receiver: None,
+            global_variables: Variables::new(),
             knife_tool_active: false,
             knife_path: Vec::new(),
             resizing_node: None,
@@ -203,7 +206,6 @@ impl RpaApp {
             self.knife_path.clear();
             self.resizing_node = None;
 
-            // Validate current_scenario_index is still valid after restoration
             if self
                 .current_scenario_index
                 .is_some_and(|idx| idx >= self.project.scenarios.len())
@@ -246,32 +248,16 @@ impl RpaApp {
             ctx.request_repaint();
         }
 
-        if let Some(var_receiver) = self.variable_receiver.as_ref() {
-            for event in var_receiver.try_iter() {
-                match event {
-                    VarEvent::Set { name, value } => {
-                        self.variables.set(&name, value);
-                    }
-                    VarEvent::Remove { name } => {
-                        self.variables.remove(&name);
-                    }
-                }
-            }
-            ctx.request_repaint();
-        }
-
         if execution_complete {
             self.is_executing = false;
             self.log_receiver = None;
-            self.variable_receiver = None;
         }
     }
 
     fn render_canvas_panel(&mut self, ctx: &egui::Context) -> (ui::ContextMenuAction, egui::Vec2) {
         egui::CentralPanel::default()
             .show(ctx, |ui| {
-                let scenario_name = self.get_current_scenario().name.clone();
-                ui.heading(&scenario_name);
+                self.render_scenario_tab_bar(ui);
                 ui.separator();
 
                 let clipboard_empty = self.clipboard.nodes.is_empty();
@@ -781,13 +767,24 @@ impl RpaApp {
                             ) {
                                 Ok(value) => {
                                     let var_name = self.dialogs.add_variable.name.trim();
-                                    let scope = if self.dialogs.add_variable.is_global {
-                                        rpa_core::variables::VariableScope::Global
+                                    if self.dialogs.add_variable.is_global {
+                                        self.global_variables.set(
+                                            var_name,
+                                            value,
+                                            VariableScope::Global,
+                                        );
                                     } else {
-                                        rpa_core::variables::VariableScope::Scenario
+                                        let scenario = match self.current_scenario_index {
+                                            None => &mut self.project.main_scenario,
+                                            Some(i) => &mut self.project.scenarios[i],
+                                        };
+
+                                        scenario.variables.set(
+                                            var_name,
+                                            value,
+                                            VariableScope::Scenario,
+                                        );
                                     };
-                                    self.project.variables.create_variable(var_name, scope);
-                                    self.project.variables.set(var_name, value);
                                     self.dialogs.add_variable.name.clear();
                                     self.dialogs.add_variable.value.clear();
                                     self.dialogs.add_variable.var_type = VariableType::String;
@@ -833,24 +830,6 @@ impl RpaApp {
                 .show(ctx, |ui| {
                     ctx.inspection_ui(ui);
                 });
-        }
-
-        if self.dialogs.debug.show_debug_ir {
-            // egui::Window::new("Debug Instructions")
-            //     .id(egui::Id::new("debug_instructions_window"))
-            //     .open(&mut self.show_debug_ir)
-            //     .show(ctx, |ui| {
-            //         // let ir_builder = IrBuilder::new(
-            //         //     &self.project.main_scenario,
-            //         //     &self.project,
-            //         //     &validation_result.reachable_nodes,
-            //         // );
-            //         ScrollArea::vertical()
-            //             .auto_shrink([false; 2])
-            //             .show(ui, |ui| {
-            //                 ui.monospace(format_ir(program));
-            //             });
-            //     });
         }
 
         if let Some(index) = self.dialogs.rename_scenario.scenario_index {
@@ -1254,6 +1233,93 @@ impl RpaApp {
             });
     }
 
+    fn open_scenario(&mut self, index: usize) {
+        if !self.opened_scenarios.contains(&index) {
+            self.opened_scenarios.push(index);
+        }
+        self.current_scenario_index = Some(index);
+        self.selected_nodes.clear();
+    }
+
+    fn render_scenario_tab_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.set_min_height(40.0);
+
+            let style = ui.style_mut();
+            style.spacing.scroll.bar_width = 4.0;
+
+            egui::ScrollArea::horizontal()
+                .id_salt("scenario_tabs")
+                .stick_to_right(true)
+                .max_width(ui.available_width() - 50.0)
+                .vscroll(false)
+                .show(ui, |ui| {
+                    let mut closed_tab_idx: Option<usize> = None;
+
+                    ui.push_id("main_tab", |ui| {
+                        let tab = scenario_tab(
+                            ui,
+                            ui.id(), // unique because of push_id
+                            &self.project.main_scenario.name,
+                            self.current_scenario_index.is_none(),
+                        );
+
+                        if tab.clicked {
+                            self.current_scenario_index = None;
+                            self.selected_nodes.clear();
+                        }
+                    });
+
+                    ui.separator();
+
+                    for &tab_idx in &self.opened_scenarios {
+                        ui.push_id(tab_idx, |ui| {
+                            let scenario = &self.project.scenarios[tab_idx];
+
+                            let tab = scenario_tab(
+                                ui,
+                                ui.id(), // scoped ID
+                                &scenario.name,
+                                self.current_scenario_index == Some(tab_idx),
+                            );
+
+                            if tab.close_clicked {
+                                closed_tab_idx = Some(tab_idx);
+                            } else if tab.clicked {
+                                self.current_scenario_index = Some(tab_idx);
+                                self.selected_nodes.clear();
+                            }
+                        });
+                    }
+
+                    if let Some(i) = closed_tab_idx {
+                        self.opened_scenarios.retain(|&idx| idx != i);
+
+                        if self.current_scenario_index == Some(i) {
+                            self.current_scenario_index = None;
+                            self.selected_nodes.clear();
+                        }
+                    }
+                });
+
+            ui.add_space(ui.available_width() - 30.0);
+
+            if ui.button(t!("sidebar.new_scenario").as_ref()).clicked() {
+                let new_tab_idx = self.project.scenarios.len();
+                let name = t!(
+                    "default_values.scenario_name",
+                    number = self.project.scenarios.len() + 1
+                )
+                .to_string();
+
+                self.project.scenarios.push(Scenario::new(&name));
+                self.undo_redo.add_undo(&self.project);
+
+                self.open_scenario(new_tab_idx)
+            }
+        });
+    }
+
     fn render_scenario_list(&mut self, ui: &mut egui::Ui) {
         ui.heading(t!("sidebar.scenarios").as_ref());
         ui.separator();
@@ -1274,7 +1340,9 @@ impl RpaApp {
                     self.selected_nodes.clear();
                 }
 
+                let mut to_open: Option<usize> = None;
                 let mut to_remove: Option<usize> = None;
+
                 for (i, scenario) in self.project.scenarios.iter().enumerate() {
                     ui.horizontal(|ui| {
                         if ui
@@ -1284,8 +1352,7 @@ impl RpaApp {
                             )
                             .clicked()
                         {
-                            self.current_scenario_index = Some(i);
-                            self.selected_nodes.clear();
+                            to_open = Some(i);
                         }
 
                         if ui.small_button("✏").clicked() {
@@ -1298,9 +1365,22 @@ impl RpaApp {
                     });
                 }
 
+                if let Some(i) = to_open {
+                    self.open_scenario(i);
+                }
+
                 if let Some(i) = to_remove {
                     self.project.scenarios.remove(i);
                     self.undo_redo.add_undo(&self.project);
+
+                    self.opened_scenarios.retain(|&idx| idx != i);
+
+                    for idx in &mut self.opened_scenarios {
+                        if *idx > i {
+                            *idx -= 1;
+                        }
+                    }
+
                     if self.current_scenario_index == Some(i) {
                         self.current_scenario_index = None;
                     } else if let Some(current) = self.current_scenario_index
@@ -1397,103 +1477,113 @@ impl RpaApp {
 
                 self.render_node_properties_section(ui, properties_height);
                 ui.add_space(10.0);
-                ui.separator();
                 self.render_variables_section(ui, variables_height);
             });
     }
 
     fn render_node_properties_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
-        ui.heading(t!("panels.properties").as_ref());
-        ui.separator();
+        egui::TopBottomPanel::top("node_properties_panel")
+            .resizable(true)
+            .default_height(max_height)
+            .show_inside(ui, |ui| {
+                ui.heading(t!("panels.properties").as_ref());
+                ui.separator();
 
-        egui::ScrollArea::vertical()
-            .id_salt("properties_scroll")
-            .max_height(max_height - 40.0)
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
-                    let scenarios: Vec<_> = self.project.scenarios.to_vec();
-                    let current_scenario = Some(self.get_current_scenario().clone());
-                    // Extract variables before taking mutable borrow of scenario
-                    let variables_copy = self.project.variables.clone();
+                egui::ScrollArea::vertical()
+                    .id_salt("properties_scroll")
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
+                            let scenarios: Vec<_> = self.project.scenarios.to_vec();
+                            let current_scenario = Some(self.get_current_scenario().clone());
+                            // Extract variables before taking mutable borrow of scenario
+                            let variables_copy = self.project.variables.clone();
 
-                    let (changed, param_action, activity) = {
-                        let scenario = self.get_current_scenario_mut();
-                        if let Some(node) = scenario.get_node_mut(&node_id) {
-                            if let Some(ref current_scen) = current_scenario {
-                                let (changed, param_action) = ui::render_node_properties(
-                                    ui,
-                                    node,
-                                    &scenarios,
-                                    current_scen,
-                                    &variables_copy,
+                            let (changed, param_action, activity) = {
+                                let scenario = self.get_current_scenario_mut();
+                                if let Some(node) = scenario.get_node_mut(&node_id) {
+                                    if let Some(ref current_scen) = current_scenario {
+                                        let (changed, param_action) = ui::render_node_properties(
+                                            ui,
+                                            node,
+                                            &scenarios,
+                                            current_scen,
+                                            &variables_copy,
+                                        );
+                                        (changed, param_action, Some(node.activity.clone()))
+                                    } else {
+                                        (false, ui::ParameterBindingAction::None, None)
+                                    }
+                                } else {
+                                    (false, ui::ParameterBindingAction::None, None)
+                                }
+                            };
+
+                            if let Some(activity) = activity {
+                                if changed {
+                                    self.property_edit_debounce = 0.0;
+                                }
+
+                                // Handle parameter binding actions
+                                match param_action {
+                                    ui::ParameterBindingAction::Add => {
+                                        if let Activity::CallScenario { scenario_id, .. } =
+                                            &activity
+                                        {
+                                            self.dialogs.var_binding_dialog.show = true;
+                                            self.dialogs.var_binding_dialog.scenario_id =
+                                                scenario_id.clone();
+                                            self.dialogs.var_binding_dialog.source_var_name =
+                                                String::new();
+                                            self.dialogs.var_binding_dialog.target_var_name =
+                                                String::new();
+                                            self.dialogs.var_binding_dialog.direction =
+                                                VariableDirection::In;
+                                            self.dialogs.var_binding_dialog.editing_index = None;
+                                            self.dialogs.var_binding_dialog.error_message = None;
+                                        }
+                                    }
+                                    ui::ParameterBindingAction::Edit(idx) => {
+                                        if let Activity::CallScenario {
+                                            scenario_id,
+                                            parameters,
+                                        } = &activity
+                                        {
+                                            if let Some(binding) = parameters.get(idx) {
+                                                self.dialogs.var_binding_dialog.show = true;
+                                                self.dialogs.var_binding_dialog.scenario_id =
+                                                    scenario_id.clone();
+                                                self.dialogs.var_binding_dialog.source_var_name =
+                                                    binding.source_var_name.clone();
+                                                self.dialogs.var_binding_dialog.target_var_name =
+                                                    binding.target_var_name.clone();
+                                                self.dialogs.var_binding_dialog.direction =
+                                                    binding.direction;
+                                                self.dialogs.var_binding_dialog.editing_index =
+                                                    Some(idx);
+                                                self.dialogs.var_binding_dialog.error_message =
+                                                    None;
+                                            }
+                                        }
+                                    }
+                                    ui::ParameterBindingAction::None => {}
+                                }
+                            }
+
+                            if self.selected_nodes.len() > 1 {
+                                ui.separator();
+                                ui.label(
+                                    t!("status.nodes_selected", count = self.selected_nodes.len())
+                                        .as_ref(),
                                 );
-                                (changed, param_action, Some(node.activity.clone()))
-                            } else {
-                                (false, ui::ParameterBindingAction::None, None)
                             }
                         } else {
-                            (false, ui::ParameterBindingAction::None, None)
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(20.0);
+                                ui.label(t!("status.no_node_selected").as_ref());
+                            });
                         }
-                    };
-
-                    if let Some(activity) = activity {
-                        if changed {
-                            self.property_edit_debounce = 0.0;
-                        }
-
-                        // Handle parameter binding actions
-                        match param_action {
-                            ui::ParameterBindingAction::Add => {
-                                if let Activity::CallScenario { scenario_id, .. } = &activity {
-                                    self.dialogs.var_binding_dialog.show = true;
-                                    self.dialogs.var_binding_dialog.scenario_id =
-                                        scenario_id.clone();
-                                    self.dialogs.var_binding_dialog.source_var_name = String::new();
-                                    self.dialogs.var_binding_dialog.target_var_name = String::new();
-                                    self.dialogs.var_binding_dialog.direction =
-                                        VariableDirection::In;
-                                    self.dialogs.var_binding_dialog.editing_index = None;
-                                    self.dialogs.var_binding_dialog.error_message = None;
-                                }
-                            }
-                            ui::ParameterBindingAction::Edit(idx) => {
-                                if let Activity::CallScenario {
-                                    scenario_id,
-                                    parameters,
-                                } = &activity
-                                {
-                                    if let Some(binding) = parameters.get(idx) {
-                                        self.dialogs.var_binding_dialog.show = true;
-                                        self.dialogs.var_binding_dialog.scenario_id =
-                                            scenario_id.clone();
-                                        self.dialogs.var_binding_dialog.source_var_name =
-                                            binding.source_var_name.clone();
-                                        self.dialogs.var_binding_dialog.target_var_name =
-                                            binding.target_var_name.clone();
-                                        self.dialogs.var_binding_dialog.direction =
-                                            binding.direction;
-                                        self.dialogs.var_binding_dialog.editing_index = Some(idx);
-                                        self.dialogs.var_binding_dialog.error_message = None;
-                                    }
-                                }
-                            }
-                            ui::ParameterBindingAction::None => {}
-                        }
-                    }
-
-                    if self.selected_nodes.len() > 1 {
-                        ui.separator();
-                        ui.label(
-                            t!("status.nodes_selected", count = self.selected_nodes.len()).as_ref(),
-                        );
-                    }
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(20.0);
-                        ui.label(t!("status.no_node_selected").as_ref());
                     });
-                }
             });
     }
 
@@ -1501,85 +1591,42 @@ impl RpaApp {
         ui.heading(t!("panels.variables").as_ref());
         ui.separator();
 
+        if ui.button(t!("variables.add_variable").as_ref()).clicked() {
+            self.dialogs.add_variable.show = true;
+        }
+
         egui::ScrollArea::vertical()
             .id_salt("variables_scroll")
             .max_height(max_height - 40.0)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                self.render_initial_variables(ui);
                 ui.add_space(5.0);
-                self.render_runtime_variables(ui);
+                self.render_variables(
+                    ui,
+                    t!("panels.global_variables").as_ref(),
+                    &self.global_variables,
+                );
+
+                let scenario = self.get_current_scenario();
+                self.render_variables(
+                    ui,
+                    t!("panels.local_variables").as_ref(),
+                    &scenario.variables,
+                );
             });
     }
 
-    fn render_initial_variables(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new(t!("variables.title").as_ref())
+    fn render_variables(
+        &self,
+        ui: &mut egui::Ui,
+        collapsing_header_id: &str,
+        variables: &Variables,
+    ) {
+        egui::CollapsingHeader::new(collapsing_header_id)
             .default_open(true)
             .show(ui, |ui| {
-                let all_vars: Vec<(String, VariableValue)> = self
-                    .project
-                    .variables
-                    .iter()
-                    .map(|(name, value, _scope)| (name.to_owned(), value.clone()))
-                    .collect();
-
-                if !all_vars.is_empty() {
-                    let mut to_remove: Option<String> = None;
-
-                    egui::Grid::new("user_defined_vars_grid")
-                        .striped(true)
-                        .spacing([10.0, 4.0])
-                        .min_col_width(60.0)
-                        .show(ui, |ui| {
-                            ui.strong(t!("variables.name").as_ref());
-                            ui.strong(t!("variables.type").as_ref());
-                            ui.strong(t!("variables.value").as_ref());
-                            ui.strong("");
-                            ui.end_row();
-
-                            for (name, value) in &all_vars {
-                                if !matches!(value, VariableValue::Undefined) {
-                                    ui.label(name);
-                                    ui.label(value.get_type().as_str());
-                                    let value_str = format!("{}", value);
-                                    let display_value = if value_str.len() > 15 {
-                                        format!("{}...", &value_str[..15])
-                                    } else {
-                                        value_str
-                                    };
-                                    ui.label(display_value);
-
-                                    if ui.small_button("🗑").clicked() {
-                                        to_remove = Some(name.to_string());
-                                    }
-                                    ui.end_row();
-                                }
-                            }
-                        });
-
-                    if let Some(name) = to_remove {
-                        self.project.variables.remove(&name);
-                    }
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(5.0);
-                        ui.label(t!("variables.no_variables").as_ref());
-                    });
-                }
-
-                ui.add_space(5.0);
-                if ui.button(t!("variables.add_variable").as_ref()).clicked() {
-                    self.dialogs.add_variable.show = true;
-                }
-            });
-    }
-
-    fn render_runtime_variables(&self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new(t!("panels.runtime_variables").as_ref())
-            .default_open(true)
-            .show(ui, |ui| {
-                if self.is_executing || !self.variables.is_empty() {
-                    if !self.variables.is_empty() {
+                if self.is_executing || !variables.is_empty() {
+                    if !variables.is_empty() {
                         egui::Grid::new("runtime_vars_grid")
                             .striped(true)
                             .spacing([10.0, 4.0])
@@ -1591,11 +1638,11 @@ impl RpaApp {
                                 ui.strong(t!("variables.value").as_ref());
                                 ui.end_row();
 
-                                for (name, value, scope) in self.variables.iter() {
+                                for (name, value, scope) in variables.iter() {
                                     ui.label(if *scope == VariableScope::Global {
-                                        "G"
+                                        "Global"
                                     } else {
-                                        "S"
+                                        "Local"
                                     });
                                     ui.label(name);
                                     ui.label(value.get_type().as_str());
@@ -1754,25 +1801,10 @@ impl RpaApp {
         self.stop_flag.store(false, Ordering::Relaxed);
 
         let project = self.project.clone();
-        // let initial_vars: indexmap::IndexMap<String, VariableValue> = self
-        //     .project
-        //     .variables
-        //     .iter()
-        //     .filter_map(|(name, value)| {
-        //         if !matches!(value, VariableValue::Undefined) {
-        //             Some((name.clone(), value.clone()))
-        //         } else {
-        //             None
-        //         }
-        //     })
-        //     .collect();
 
         let (log_sender, log_receiver) = channel();
-        let (var_sender, var_receiver) = channel::<VarEvent>();
 
         self.log_receiver = Some(log_receiver);
-        self.variable_receiver = Some(var_receiver);
-        // self.variables.clear();
 
         let start_time = SystemTime::now();
         let validator = ScenarioValidator::new(&project.main_scenario, &project);
@@ -1802,7 +1834,7 @@ impl RpaApp {
             &project.main_scenario,
             &project,
             &validation_result.reachable_nodes,
-            &mut self.variables,
+            &mut self.global_variables,
         );
         let program = match ir_builder.build() {
             Ok(prog) => prog,
@@ -1824,14 +1856,13 @@ impl RpaApp {
             }
         };
 
-        let variables = self.variables.clone();
+        let variables = self.global_variables.clone();
 
         let stop_flag = Arc::clone(&self.stop_flag);
         std::thread::spawn(move || {
             execute_project_with_typed_vars(
                 &project,
                 &log_sender,
-                &var_sender,
                 start_time,
                 &program,
                 variables,

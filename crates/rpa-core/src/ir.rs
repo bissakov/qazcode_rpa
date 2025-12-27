@@ -123,24 +123,6 @@ impl IrProgram {
     pub fn get_instruction(&self, index: usize) -> Option<&Instruction> {
         self.instructions.get(index)
     }
-
-    // #[allow(dead_code)]
-    // fn format_ir(program: &IrProgram) -> String {
-    //     let mut out = String::new();
-    //
-    //     out.push_str(&format!("Entry point: {}\n\n", program.entry_point));
-    //
-    //     for (i, instr) in program.instructions.iter().enumerate() {
-    //         out.push_str(&format!("{:04}: {:?}\n", i, instr));
-    //     }
-    //
-    //     out.push_str("\nNode → Instruction mapping:\n");
-    //     for (node, idx) in &program.node_to_instruction {
-    //         out.push_str(&format!("{} -> {}\n", node, idx));
-    //     }
-    //
-    //     out
-    // }
 }
 
 #[derive(Debug)]
@@ -160,28 +142,6 @@ pub struct IrBuilder<'a> {
     recursive_scenarios: HashSet<String>,
     compilation_depth: usize,
 }
-
-// #[derive(Debug)]
-// struct PendingJump {
-//     instruction_index: usize,
-//     target_node: Uuid,
-//     #[allow(dead_code)]
-//     jump_type: JumpType,
-// }
-
-// #[derive(Debug)]
-// #[allow(dead_code)]
-// enum JumpType {
-//     Unconditional,
-//     IfTrue,
-//     IfFalse,
-//     LoopBody,
-//     LoopEnd,
-//     WhileBody,
-//     WhileEnd,
-//     TryBranch,
-//     CatchBranch,
-// }
 
 impl<'a> IrBuilder<'a> {
     pub fn new(
@@ -208,92 +168,6 @@ impl<'a> IrBuilder<'a> {
         }
     }
 
-    fn resolve_value(&mut self, value: &str) -> String {
-        if (value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\''))
-        {
-            return value[1..value.len() - 1].to_owned();
-        }
-
-        let mut out = String::with_capacity(value.len());
-        let mut chars = value.char_indices().peekable();
-
-        while let Some((i, c)) = chars.next() {
-            if c == UiConstants::VARIABLE_PLACEHOLDER_OPEN {
-                let start = i + c.len_utf8();
-
-                let mut end = None;
-                for (j, c2) in chars.by_ref() {
-                    if c2 == UiConstants::VARIABLE_PLACEHOLDER_CLOSE {
-                        end = Some(j);
-                        break;
-                    }
-                }
-
-                if let Some(end) = end {
-                    let var_name = &value[start..end];
-                    let var_value = if self.scenario_variables.contains(var_name) {
-                        self.scenario_variables.get(var_name)
-                    } else {
-                        self.global_variables.get(var_name)
-                    };
-
-                    if let Some(s) = var_value.and_then(|v| v.as_str()) {
-                        out.push_str(s);
-                    } else if let Some(v) = var_value
-                        && !matches!(v, VariableValue::Undefined)
-                    {
-                        use std::fmt::Write;
-                        write!(out, "{}", v).unwrap();
-                    }
-                } else {
-                    out.push(c);
-                    break;
-                }
-            } else {
-                out.push(c);
-            }
-        }
-
-        out
-    }
-
-    // fn resolve_value(&mut self, value: &String) -> String {
-    //     if (value.starts_with('"') && value.ends_with('"'))
-    //         || (value.starts_with('\'') && value.ends_with('\''))
-    //     {
-    //         return value[1..value.len() - 1].to_string();
-    //     }
-    //
-    //     let mut result = value.to_string();
-    //     let mut start_idx = 0;
-    //
-    //     while let Some(open_pos) = result[start_idx..].find(UiConstants::VARIABLE_PLACEHOLDER_OPEN)
-    //     {
-    //         let actual_open = start_idx + open_pos;
-    //         if let Some(close_pos) =
-    //             result[actual_open..].find(UiConstants::VARIABLE_PLACEHOLDER_CLOSE)
-    //         {
-    //             let actual_close = actual_open + close_pos;
-    //             let var_name = &result[actual_open + 1..actual_close];
-    //
-    //             let id = self.variables.id(var_name);
-    //             let var_value = self.variables.get(id);
-    //             if !matches!(var_value, VariableValue::Undefined) {
-    //                 let var_string = var_value.to_string();
-    //                 result.replace_range(actual_open..=actual_close, &var_string);
-    //                 start_idx = actual_open + var_string.len();
-    //             } else {
-    //                 start_idx = actual_close + 1;
-    //             }
-    //         } else {
-    //             break;
-    //         }
-    //     }
-    //
-    //     result
-    // }
-
     pub fn build(mut self) -> Result<IrProgram, String> {
         self.program.scenario_call_graph = self.call_graph.clone();
         self.program.recursive_scenarios = self.recursive_scenarios.clone();
@@ -313,10 +187,8 @@ impl<'a> IrBuilder<'a> {
 
         self.compile_from_node(&start_node.id)?;
 
-        // Compile all reachable scenarios that were referenced but not yet compiled
         self.compile_all_called_scenarios()?;
 
-        // Store the scenario variables after compilation to preserve registered variables
         self.program.scenario_variables = self.scenario_variables;
 
         Ok(self.program)
@@ -325,19 +197,16 @@ impl<'a> IrBuilder<'a> {
     fn compile_all_called_scenarios(&mut self) -> Result<(), String> {
         let mut scenarios_to_compile = Vec::new();
 
-        // Collect all scenarios that need to be compiled
         for scenario in
             std::iter::once(&self.project.main_scenario).chain(self.project.scenarios.iter())
         {
             if !self.compiled_scenarios.contains(&scenario.id) {
-                // Check if this scenario is reachable
                 if self.call_graph.contains_key(&scenario.id) {
                     scenarios_to_compile.push(scenario.id.clone());
                 }
             }
         }
 
-        // Compile each scenario
         for scenario_id in scenarios_to_compile {
             self.compile_called_scenario(&scenario_id)?;
         }
@@ -401,8 +270,11 @@ impl<'a> IrBuilder<'a> {
 
         match &node.activity {
             Activity::Start { scenario_id } => {
-                self.global_variables
-                    .set("last_error", VariableValue::Undefined);
+                self.global_variables.set(
+                    "last_error",
+                    VariableValue::Undefined,
+                    VariableScope::Global,
+                );
                 self.program.add_instruction(Instruction::Start {
                     scenario_id: scenario_id.clone(),
                 });
@@ -450,8 +322,6 @@ impl<'a> IrBuilder<'a> {
                 self.compile_default_next(node_id)?;
             }
             Activity::Evaluate { expression } => {
-                // Need to use a combined mutable reference for expression parsing
-                // For now, we'll use global_variables as it's more persistent
                 let expr = parse_expr(expression, self.global_variables).map_err(|e| {
                     format!(
                         "Error in node {} while parsing expression '{}': {}",
@@ -488,11 +358,9 @@ impl<'a> IrBuilder<'a> {
                     parameters: parameters.clone(),
                 });
 
-                // Switch scope to callee scenario (mirrors execution)
                 let saved_scenario_variables = self.scenario_variables.clone();
                 let saved_scenario_id = self.current_scenario_id.clone();
 
-                // Find and switch to callee's scenario variables
                 let callee = self
                     .project
                     .scenarios
@@ -512,7 +380,6 @@ impl<'a> IrBuilder<'a> {
 
                     self.compile_default_next(node_id)?;
 
-                    // Restore caller's scope
                     self.scenario_variables = saved_scenario_variables;
                     self.current_scenario_id = saved_scenario_id;
                 } else {
@@ -600,8 +467,11 @@ impl<'a> IrBuilder<'a> {
         }
 
         let index_var = index.to_string();
-        self.scenario_variables
-            .set(&index_var, VariableValue::Number(start as f64));
+        self.scenario_variables.set(
+            &index_var,
+            VariableValue::Number(start as f64),
+            VariableScope::Scenario,
+        );
 
         self.program.add_instruction(Instruction::LoopInit {
             index: index_var.clone(),
@@ -752,24 +622,6 @@ impl<'a> IrBuilder<'a> {
             .map(|c| c.to_node.clone())
             .collect()
     }
-
-    // fn resolve_pending_jumps(&mut self) -> Result<(), String> {
-    //     for pending in &self.pending_jumps {
-    //         let target_index = self
-    //             .node_start_index
-    //             .get(&pending.target_node)
-    //             .ok_or_else(|| format!("Target node {} not compiled", pending.target_node))?;
-    //
-    //         match &mut self.program.instructions[pending.instruction_index] {
-    //             Instruction::Jump { target } => *target = *target_index,
-    //             Instruction::JumpIf { target, .. } => *target = *target_index,
-    //             Instruction::JumpIfNot { target, .. } => *target = *target_index,
-    //             _ => return Err("Invalid pending jump instruction".to_string()),
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
 
     fn compile_called_scenario(&mut self, scenario_id: &str) -> Result<(), String> {
         let scenario = self

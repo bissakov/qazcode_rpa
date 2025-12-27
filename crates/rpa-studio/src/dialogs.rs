@@ -74,7 +74,6 @@ impl Default for VariableBindingDialog {
 #[derive(Default)]
 pub struct DebugDialogs {
     pub show_debug: bool,
-    pub show_debug_ir: bool,
 }
 
 #[derive(Default)]

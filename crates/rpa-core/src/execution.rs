@@ -1,11 +1,9 @@
 use crate::constants::UiConstants;
-use crate::ir::{Instruction, IrBuilder, IrProgram};
+use crate::evaluator;
+use crate::ir::{Instruction, IrProgram};
 use crate::node_graph::{LogEntry, LogLevel, Project, VariableDirection, VariableValue};
 use crate::utils;
-use crate::validation::ScenarioValidator;
-use crate::variables::{VarEvent, Variables};
-use crate::{evaluator, variables};
-use indexmap::IndexMap;
+use crate::variables::{VariableScope, Variables};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,14 +14,13 @@ pub struct CallFrame {
     pub scenario_id: String,
     pub return_address: usize,
     pub var_bindings: Vec<crate::node_graph::VariablesBinding>,
-    pub saved_scenario_variables: variables::Variables,
+    pub saved_scenario_variables: Variables,
 }
 
 pub struct ExecutionContext {
     start_time: SystemTime,
-    variable_sender: Option<Sender<VarEvent>>,
-    pub global_variables: variables::Variables,
-    pub scenario_variables: variables::Variables,
+    pub global_variables: Variables,
+    pub scenario_variables: Variables,
     pub current_scenario_id: String,
     stop_flag: Arc<AtomicBool>,
 }
@@ -68,15 +65,13 @@ pub fn get_timestamp(start_time: SystemTime) -> String {
 impl ExecutionContext {
     fn new(
         start_time: SystemTime,
-        sender: Sender<VarEvent>,
-        global_variables: variables::Variables,
-        scenario_variables: variables::Variables,
+        global_variables: Variables,
+        scenario_variables: Variables,
         current_scenario_id: String,
         stop_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             start_time,
-            variable_sender: Some(sender),
             global_variables,
             scenario_variables,
             current_scenario_id,
@@ -84,27 +79,15 @@ impl ExecutionContext {
         }
     }
 
-    fn new_with_sender(sender: Sender<VarEvent>, stop_flag: Arc<AtomicBool>) -> Self {
-        Self {
-            start_time: SystemTime::now(),
-            variable_sender: Some(sender),
-            global_variables: variables::Variables::new(),
-            scenario_variables: variables::Variables::new(),
-            current_scenario_id: String::new(),
-            stop_flag,
-        }
-    }
-
     pub fn new_without_sender(
         start_time: SystemTime,
-        global_variables: variables::Variables,
-        scenario_variables: variables::Variables,
+        global_variables: Variables,
+        scenario_variables: Variables,
         current_scenario_id: String,
         stop_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             start_time,
-            variable_sender: None,
             global_variables,
             scenario_variables,
             current_scenario_id,
@@ -210,8 +193,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     fn get_combined_variables(&self) -> Variables {
         let mut combined = self.context.global_variables.clone();
         for (name, val, scope) in self.context.scenario_variables.iter() {
-            combined.set(name, val.clone());
-            combined.set_scope(name, scope.clone());
+            combined.set(name, val.clone(), scope.clone());
         }
         combined
     }
@@ -286,15 +268,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                                         .scenario_variables
                                         .get(&binding.target_var_name)
                                     {
-                                        self.context
-                                            .global_variables
-                                            .set(&binding.source_var_name, param_value.clone());
-                                        if let Some(ref sender) = self.context.variable_sender {
-                                            let _ = sender.send(VarEvent::Set {
-                                                name: binding.source_var_name.clone(),
-                                                value: param_value.clone(),
-                                            });
-                                        }
+                                        self.context.scenario_variables.set(
+                                            &binding.source_var_name,
+                                            param_value.clone(),
+                                            VariableScope::Scenario,
+                                        );
                                     }
                                 }
                                 VariableDirection::In => {}
@@ -348,19 +326,16 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.start_time);
 
                 match scope {
-                    crate::variables::VariableScope::Global => {
-                        self.context.global_variables.set(var, value.clone());
+                    VariableScope::Global => {
+                        self.context
+                            .global_variables
+                            .set(var, value.clone(), scope.clone());
                     }
-                    crate::variables::VariableScope::Scenario => {
-                        self.context.scenario_variables.set(var, value.clone());
+                    VariableScope::Scenario => {
+                        self.context
+                            .scenario_variables
+                            .set(var, value.clone(), scope.clone());
                     }
-                }
-
-                if let Some(sender) = &self.context.variable_sender {
-                    let _ = sender.send(VarEvent::Set {
-                        name: var.clone(),
-                        value: value.clone(),
-                    });
                 }
 
                 self.log.log(LogEntry {
@@ -473,16 +448,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 Ok(next_pc)
             }
             Instruction::LoopInit { index, start } => {
-                if let Some(sender) = &self.context.variable_sender {
-                    let _ = sender.send(VarEvent::Set {
-                        name: index.clone(),
-                        value: VariableValue::Number(*start as f64),
-                    });
-                }
-
-                self.context
-                    .scenario_variables
-                    .set(index, VariableValue::Number(*start as f64));
+                self.context.scenario_variables.set(
+                    index,
+                    VariableValue::Number(*start as f64),
+                    VariableScope::Scenario,
+                );
 
                 Ok(pc + 1)
             }
@@ -551,16 +521,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 let next = current + step;
 
-                self.context
-                    .scenario_variables
-                    .set(index, VariableValue::Number(next as f64));
-
-                if let Some(sender) = &self.context.variable_sender {
-                    let _ = sender.send(VarEvent::Set {
-                        name: index.clone(),
-                        value: VariableValue::Number(next as f64),
-                    });
-                }
+                self.context.scenario_variables.set(
+                    index,
+                    VariableValue::Number(next as f64),
+                    VariableScope::Scenario,
+                );
 
                 Ok(*check_target)
             }
@@ -672,27 +637,19 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                                         .cloned()
                                 };
                                 if let Some(val) = source_value {
-                                    self.context
-                                        .scenario_variables
-                                        .set(&binding.target_var_name, val.clone());
-                                    if let Some(ref sender) = self.context.variable_sender {
-                                        let _ = sender.send(VarEvent::Set {
-                                            name: binding.target_var_name.clone(),
-                                            value: val.clone(),
-                                        });
-                                    }
+                                    self.context.scenario_variables.set(
+                                        &binding.target_var_name,
+                                        val.clone(),
+                                        VariableScope::Scenario,
+                                    );
                                 }
                             }
                             VariableDirection::Out => {
-                                self.context
-                                    .scenario_variables
-                                    .set(&binding.target_var_name, VariableValue::Undefined);
-                                if let Some(ref sender) = self.context.variable_sender {
-                                    let _ = sender.send(VarEvent::Set {
-                                        name: binding.target_var_name.clone(),
-                                        value: VariableValue::Undefined,
-                                    });
-                                }
+                                self.context.scenario_variables.set(
+                                    &binding.target_var_name,
+                                    VariableValue::Undefined,
+                                    VariableScope::Scenario,
+                                );
                             }
                         }
                     }
@@ -737,16 +694,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     }
 
     fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
-        self.context
-            .global_variables
-            .set("last_error", VariableValue::String(error.clone()));
-
-        if let Some(sender) = &self.context.variable_sender {
-            let _ = sender.send(VarEvent::Set {
-                name: "last_error".to_string(),
-                value: VariableValue::String(error.clone()),
-            });
-        }
+        self.context.global_variables.set(
+            "last_error",
+            VariableValue::String(error.clone()),
+            VariableScope::Global,
+        );
 
         if let Some(catch_target) = self.error_handlers.pop() {
             let timestamp = get_timestamp(self.context.start_time);
@@ -784,103 +736,12 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     }
 }
 
-pub fn execute_project_with_vars(
-    project: &Project,
-    log_sender: &Sender<LogEntry>,
-    var_sender: &Sender<VarEvent>,
-    initial_vars: IndexMap<String, VariableValue>,
-    stop_flag: Arc<AtomicBool>,
-) {
-    let mut context = ExecutionContext::new_with_sender(var_sender.clone(), stop_flag);
-
-    for (name, value) in initial_vars {
-        context.global_variables.set(&name, value);
-    }
-
-    let mut log = log_sender.clone();
-
-    let validator = ScenarioValidator::new(&project.main_scenario, project);
-    let validation_result = validator.validate();
-
-    let timestamp = get_timestamp(context.start_time);
-    validation_result.log_to_output(&mut log, &timestamp);
-
-    if !validation_result.is_valid() {
-        let _ = log_sender.send(LogEntry {
-            timestamp: get_timestamp(context.start_time),
-            level: LogLevel::Error,
-            activity: "SYSTEM".to_string(),
-            message: format!(
-                "Execution aborted: {} validation errors",
-                validation_result.errors.len()
-            ),
-        });
-        let _ = log_sender.send(LogEntry {
-            timestamp: "[00:00.00]".to_string(),
-            level: LogLevel::Info,
-            activity: "SYSTEM".to_string(),
-            message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-        });
-        return;
-    }
-
-    let ir_builder = IrBuilder::new(
-        &project.main_scenario,
-        project,
-        &validation_result.reachable_nodes,
-        &mut context.global_variables,
-    );
-    let program = match ir_builder.build() {
-        Ok(prog) => prog,
-        Err(e) => {
-            let _ = log_sender.send(LogEntry {
-                timestamp: get_timestamp(context.start_time),
-                level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
-                message: format!("Execution error: {e}"),
-            });
-            let _ = log_sender.send(LogEntry {
-                timestamp: "[00:00.00]".to_string(),
-                level: LogLevel::Info,
-                activity: "SYSTEM".to_string(),
-                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-            });
-            return;
-        }
-    };
-
-    context.current_scenario_id = project.main_scenario.id.clone();
-    let mut executor = IrExecutor::new(&program, project, &mut context, &mut log);
-    if let Err(e) = executor.execute() {
-        let _ = log_sender.send(LogEntry {
-            timestamp: get_timestamp(context.start_time),
-            level: LogLevel::Error,
-            activity: "SYSTEM".to_string(),
-            message: format!("Execution error: {}", e),
-        });
-    }
-
-    let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(context.start_time),
-        level: LogLevel::Info,
-        activity: "SYSTEM".to_string(),
-        message: "Execution completed.".to_string(),
-    });
-    let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(context.start_time),
-        level: LogLevel::Info,
-        activity: "SYSTEM".to_string(),
-        message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-    });
-}
-
 pub fn execute_project_with_typed_vars(
     project: &Project,
     log_sender: &Sender<LogEntry>,
-    var_sender: &Sender<VarEvent>,
     start_time: SystemTime,
     program: &IrProgram,
-    global_variables: variables::Variables,
+    global_variables: Variables,
     stop_flag: Arc<AtomicBool>,
 ) {
     let scenario_variables = program.scenario_variables.clone();
@@ -889,73 +750,6 @@ pub fn execute_project_with_typed_vars(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut context = ExecutionContext::new(
             start_time,
-            var_sender.clone(),
-            global_variables,
-            scenario_variables,
-            current_scenario_id,
-            stop_flag,
-        );
-
-        let mut log = log_sender.clone();
-
-        let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
-        if let Err(e) = executor.execute() {
-            let _ = log_sender.send(LogEntry {
-                timestamp: get_timestamp(context.start_time),
-                level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
-                message: format!("Execution error: {e}"),
-            });
-        }
-    }));
-
-    if let Err(panic) = result {
-        let panic_msg = if let Some(s) = panic.downcast_ref::<String>() {
-            s.clone()
-        } else if let Some(s) = panic.downcast_ref::<&str>() {
-            s.to_string()
-        } else {
-            "Unknown panic occurred".to_string()
-        };
-
-        let _ = log_sender.send(LogEntry {
-            timestamp: get_timestamp(start_time),
-            level: LogLevel::Error,
-            activity: "SYSTEM".to_string(),
-            message: format!("Execution interrupted: {panic_msg}"),
-        });
-    }
-
-    let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(start_time),
-        level: LogLevel::Info,
-        activity: "SYSTEM".to_string(),
-        message: "Execution completed.".to_string(),
-    });
-    let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(start_time),
-        level: LogLevel::Info,
-        activity: "SYSTEM".to_string(),
-        message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
-    });
-}
-
-pub fn execute_scenario_with_vars(
-    project: &Project,
-    log_sender: &Sender<LogEntry>,
-    var_sender: &Sender<VarEvent>,
-    start_time: SystemTime,
-    program: &IrProgram,
-    global_variables: variables::Variables,
-    stop_flag: Arc<AtomicBool>,
-) {
-    let scenario_variables = program.scenario_variables.clone();
-    let current_scenario_id = project.main_scenario.id.clone();
-
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut context = ExecutionContext::new(
-            start_time,
-            var_sender.clone(),
             global_variables,
             scenario_variables,
             current_scenario_id,

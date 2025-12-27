@@ -12,10 +12,7 @@ pub use activity_metadata::{
     ActivityCategory, ActivityMetadata, ColorCategory, PinConfig, PropertyDef, PropertyType,
 };
 pub use constants::{ActivityCategories, ActivityDefaults, UiConstants};
-pub use execution::{
-    execute_project_with_typed_vars, execute_project_with_vars, execute_scenario_with_vars,
-    get_timestamp,
-};
+pub use execution::{execute_project_with_typed_vars, get_timestamp};
 pub use ir::{Instruction, IrBuilder, IrProgram};
 pub use node_graph::{
     Activity, BranchType, Connection, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
@@ -24,4 +21,4 @@ pub use node_graph::{
 pub use validation::{
     ScenarioValidator, ValidationCache, ValidationIssue, ValidationLevel, ValidationResult,
 };
-pub use variables::{VarEvent, Variables};
+pub use variables::Variables;
