@@ -93,10 +93,11 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` for workflow
 **SESSION CLOSE PROTOCOL:**
 
 ```
+[ ] 0. cargo fmt               (format the entire codebase)
 [ ] 1. git status              (check what changed)
 [ ] 2. git add <files>         (stage code changes)
 [ ] 3. bd sync                 (commit beads changes)
-[ ] 4. git commit -m "..."     (commit code)
+[ ] 4. git commit -m "..."     (commit code, no attribution, one line of message)
 [ ] 5. bd sync                 (commit any new beads changes)
 [ ] 6. git push                (push to remote)
 ```
