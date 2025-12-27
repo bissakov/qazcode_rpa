@@ -14,6 +14,7 @@ use std::collections::HashSet;
 pub enum ContextMenuAction {
     None,
     Copy,
+    Cut,
     Paste,
     Delete,
     SelectAll,
@@ -284,6 +285,13 @@ fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<C
                 && ui.button(t!("context_menu.copy").as_ref()).clicked()
             {
                 action = Some(ContextMenuAction::Copy);
+                ui.close();
+            }
+
+            if !state.selected_nodes.is_empty()
+                && ui.button(t!("context_menu.cut").as_ref()).clicked()
+            {
+                action = Some(ContextMenuAction::Cut);
                 ui.close();
             }
 
@@ -772,6 +780,10 @@ pub fn render_node_graph(
 
                     if ui.button(t!("context_menu.copy").as_ref()).clicked() {
                         context_action = ContextMenuAction::Copy;
+                        ui.close();
+                    }
+                    if ui.button(t!("context_menu.cut").as_ref()).clicked() {
+                        context_action = ContextMenuAction::Cut;
                         ui.close();
                     }
                     if ui.button(t!("context_menu.paste").as_ref()).clicked() {

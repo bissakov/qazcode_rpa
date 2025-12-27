@@ -268,6 +268,9 @@ impl RpaApp {
             ui::ContextMenuAction::Copy => {
                 self.copy_selected_nodes();
             }
+            ui::ContextMenuAction::Cut => {
+                self.cut_selected_nodes();
+            }
             ui::ContextMenuAction::Paste => {
                 self.paste_clipboard_nodes(mouse_world_pos);
             }
@@ -788,6 +791,7 @@ impl RpaApp {
         let copy_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
         let paste_event =
             ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
+        let cut_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Cut)));
         let has_selected = !self.selected_nodes.is_empty();
         let no_settings = !self.dialogs.settings.show;
         let no_rename = self.dialogs.rename_scenario.scenario_index.is_none();
@@ -809,6 +813,11 @@ impl RpaApp {
                 });
 
             self.paste_clipboard_nodes(mouse_world_pos);
+            handled = true;
+        }
+
+        if cut_event && has_selected && no_settings && no_rename {
+            self.cut_selected_nodes();
             handled = true;
         }
 
@@ -1257,6 +1266,22 @@ impl RpaApp {
             nodes: nodes_to_copy,
             connections: connections_to_copy,
         };
+    }
+
+    fn cut_selected_nodes(&mut self) {
+        self.copy_selected_nodes();
+
+        let selected_ids: Vec<String> = self.selected_nodes.iter().cloned().collect();
+
+        let scenario = self.get_current_scenario_mut();
+        scenario
+            .nodes
+            .retain(|node| !selected_ids.contains(&node.id));
+        scenario.connections.retain(|conn| {
+            !selected_ids.contains(&conn.from_node) && !selected_ids.contains(&conn.to_node)
+        });
+
+        self.selected_nodes.clear();
     }
 
     fn paste_clipboard_nodes(&mut self, mouse_world_pos: egui::Vec2) {
