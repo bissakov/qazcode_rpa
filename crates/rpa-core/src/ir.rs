@@ -93,6 +93,7 @@ pub struct IrProgram {
     pub scenario_start_index: HashMap<String, usize>,
     pub scenario_call_graph: HashMap<String, HashSet<String>>,
     pub recursive_scenarios: HashSet<String>,
+    pub scenario_variables: Variables,
 }
 
 impl Default for IrProgram {
@@ -109,6 +110,7 @@ impl IrProgram {
             scenario_start_index: HashMap::new(),
             scenario_call_graph: HashMap::new(),
             recursive_scenarios: HashSet::new(),
+            scenario_variables: Variables::new(),
         }
     }
 
@@ -317,6 +319,9 @@ impl<'a> IrBuilder<'a> {
 
         // Compile all reachable scenarios that were referenced but not yet compiled
         self.compile_all_called_scenarios()?;
+
+        // Store the scenario variables after compilation to preserve registered variables
+        self.program.scenario_variables = self.scenario_variables;
 
         Ok(self.program)
     }

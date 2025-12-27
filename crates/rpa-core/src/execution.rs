@@ -887,37 +887,57 @@ pub fn execute_project_with_typed_vars(
     global_variables: variables::Variables,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let scenario_variables = project.main_scenario.variables.clone();
+    let scenario_variables = program.scenario_variables.clone();
     let current_scenario_id = project.main_scenario.id.clone();
-    let mut context = ExecutionContext::new(
-        start_time,
-        var_sender.clone(),
-        global_variables,
-        scenario_variables,
-        current_scenario_id,
-        stop_flag,
-    );
 
-    let mut log = log_sender.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut context = ExecutionContext::new(
+            start_time,
+            var_sender.clone(),
+            global_variables,
+            scenario_variables,
+            current_scenario_id,
+            stop_flag,
+        );
 
-    let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
-    if let Err(e) = executor.execute() {
+        let mut log = log_sender.clone();
+
+        let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
+        if let Err(e) = executor.execute() {
+            let _ = log_sender.send(LogEntry {
+                timestamp: get_timestamp(context.start_time),
+                level: LogLevel::Error,
+                activity: "SYSTEM".to_string(),
+                message: format!("Execution error: {e}"),
+            });
+        }
+    }));
+
+    if let Err(panic) = result {
+        let panic_msg = if let Some(s) = panic.downcast_ref::<String>() {
+            s.clone()
+        } else if let Some(s) = panic.downcast_ref::<&str>() {
+            s.to_string()
+        } else {
+            "Unknown panic occurred".to_string()
+        };
+
         let _ = log_sender.send(LogEntry {
-            timestamp: get_timestamp(context.start_time),
+            timestamp: get_timestamp(start_time),
             level: LogLevel::Error,
             activity: "SYSTEM".to_string(),
-            message: format!("Execution error: {e}"),
+            message: format!("Execution interrupted: {panic_msg}"),
         });
     }
 
     let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(context.start_time),
+        timestamp: get_timestamp(start_time),
         level: LogLevel::Info,
         activity: "SYSTEM".to_string(),
         message: "Execution completed.".to_string(),
     });
     let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(context.start_time),
+        timestamp: get_timestamp(start_time),
         level: LogLevel::Info,
         activity: "SYSTEM".to_string(),
         message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
@@ -933,37 +953,57 @@ pub fn execute_scenario_with_vars(
     global_variables: variables::Variables,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let scenario_variables = project.main_scenario.variables.clone();
+    let scenario_variables = program.scenario_variables.clone();
     let current_scenario_id = project.main_scenario.id.clone();
-    let mut context = ExecutionContext::new(
-        start_time,
-        var_sender.clone(),
-        global_variables,
-        scenario_variables,
-        current_scenario_id,
-        stop_flag,
-    );
 
-    let mut log = log_sender.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut context = ExecutionContext::new(
+            start_time,
+            var_sender.clone(),
+            global_variables,
+            scenario_variables,
+            current_scenario_id,
+            stop_flag,
+        );
 
-    let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
-    if let Err(e) = executor.execute() {
+        let mut log = log_sender.clone();
+
+        let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
+        if let Err(e) = executor.execute() {
+            let _ = log_sender.send(LogEntry {
+                timestamp: get_timestamp(context.start_time),
+                level: LogLevel::Error,
+                activity: "SYSTEM".to_string(),
+                message: format!("Execution error: {e}"),
+            });
+        }
+    }));
+
+    if let Err(panic) = result {
+        let panic_msg = if let Some(s) = panic.downcast_ref::<String>() {
+            s.clone()
+        } else if let Some(s) = panic.downcast_ref::<&str>() {
+            s.to_string()
+        } else {
+            "Unknown panic occurred".to_string()
+        };
+
         let _ = log_sender.send(LogEntry {
-            timestamp: get_timestamp(context.start_time),
+            timestamp: get_timestamp(start_time),
             level: LogLevel::Error,
             activity: "SYSTEM".to_string(),
-            message: format!("Execution error: {e}"),
+            message: format!("Execution interrupted: {panic_msg}"),
         });
     }
 
     let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(context.start_time),
+        timestamp: get_timestamp(start_time),
         level: LogLevel::Info,
         activity: "SYSTEM".to_string(),
         message: "Execution completed.".to_string(),
     });
     let _ = log_sender.send(LogEntry {
-        timestamp: get_timestamp(context.start_time),
+        timestamp: get_timestamp(start_time),
         level: LogLevel::Info,
         activity: "SYSTEM".to_string(),
         message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
