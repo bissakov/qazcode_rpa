@@ -118,8 +118,6 @@ struct RpaApp {
     current_scenario_index: Option<usize>,
     opened_scenarios: Vec<usize>,
     connection_from: Option<(String, usize)>,
-    pan_offset: egui::Vec2,
-    zoom: f32,
     settings: AppSettings,
     log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
     clipboard: ClipboardData,
@@ -144,8 +142,6 @@ impl Default for RpaApp {
             current_scenario_index: None,
             opened_scenarios: Vec::new(),
             connection_from: None,
-            pan_offset: egui::Vec2::ZERO,
-            zoom: 1.0,
             settings: AppSettings::default(),
             log_receiver: None,
             clipboard: ClipboardData::default(),
@@ -273,8 +269,6 @@ impl RpaApp {
                 let mut render_state = ui::RenderState {
                     selected_nodes: &mut self.selected_nodes,
                     connection_from: &mut self.connection_from,
-                    pan_offset: &mut self.pan_offset,
-                    zoom: &mut self.zoom,
                     clipboard_empty,
                     show_minimap,
                     knife_tool_active: &mut self.knife_tool_active,
@@ -313,8 +307,10 @@ impl RpaApp {
                 if let Some(activity) = dropped_activity {
                     let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
                     if let Some(pointer_pos) = pointer_pos {
-                        let world_pos =
-                            ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
+                        let current_scenario = self.get_current_scenario();
+                        let world_pos = ((pointer_pos.to_vec2() - current_scenario.pan_offset)
+                            / current_scenario.zoom)
+                            .to_pos2();
                         self.get_current_scenario_mut()
                             .add_node((*activity).clone(), world_pos);
                         self.undo_redo.add_undo(&self.project);
@@ -1078,12 +1074,14 @@ impl RpaApp {
         let has_clipboard = !self.clipboard.nodes.is_empty();
 
         if paste_event && has_clipboard && no_settings && no_rename {
+            let current_scenario = self.get_current_scenario();
             let mouse_world_pos = ctx
                 .pointer_hover_pos()
-                .map(|pos| (pos.to_vec2() - self.pan_offset) / self.zoom)
+                .map(|pos| (pos.to_vec2() - current_scenario.pan_offset) / current_scenario.zoom)
                 .unwrap_or_else(|| {
                     let viewport_center = ctx.content_rect().center();
-                    (viewport_center.to_vec2() - self.pan_offset) / self.zoom
+                    (viewport_center.to_vec2() - current_scenario.pan_offset)
+                        / current_scenario.zoom
                 });
 
             self.paste_clipboard_nodes(mouse_world_pos);
@@ -1149,8 +1147,11 @@ impl RpaApp {
                         );
                         self.current_file = None;
                         self.current_scenario_index = None;
-                        self.pan_offset = egui::Vec2::ZERO;
-                        self.zoom = 1.0;
+
+                        let current_scenario = self.get_current_scenario_mut();
+
+                        current_scenario.pan_offset = egui::Vec2::ZERO;
+                        current_scenario.zoom = 1.0;
                         self.selected_nodes.clear();
                         ui.close();
                     }
@@ -1456,8 +1457,10 @@ impl RpaApp {
 
                 if let Some(activity) = node_to_add {
                     let viewport_center = ctx.content_rect().center();
-                    let world_pos =
-                        ((viewport_center.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
+                    let current_scenario = self.get_current_scenario();
+                    let world_pos = ((viewport_center.to_vec2() - current_scenario.pan_offset)
+                        / current_scenario.zoom)
+                        .to_pos2();
                     let offset = self.get_current_scenario().nodes.len() as f32
                         * UiConstants::NEW_NODE_OFFSET_INCREMENT;
                     let new_node_pos = world_pos + egui::vec2(offset, offset);
@@ -1958,8 +1961,9 @@ impl RpaApp {
 
                             self.project = project_file.project;
                             self.current_scenario_index = None;
-                            self.pan_offset = egui::Vec2::ZERO;
-                            self.zoom = 1.0;
+                            let current_scenario = self.get_current_scenario_mut();
+                            current_scenario.pan_offset = egui::Vec2::ZERO;
+                            current_scenario.zoom = 1.0;
 
                             rust_i18n::set_locale(&self.settings.language);
                             self.current_file = Some(path);

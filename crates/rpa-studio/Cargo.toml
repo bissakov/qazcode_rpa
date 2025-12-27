@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 rpa-core = { path = "../rpa-core" }
 eframe = "0.33.3"
-egui = "0.33.3"
+egui = { version = "0.33", features = ["serde"] }
 egui_extras = "0.33.3"
 egui_code_editor = "0.2.20"
 rfd = "0.15"

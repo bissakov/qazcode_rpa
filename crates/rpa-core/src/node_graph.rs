@@ -272,6 +272,8 @@ pub struct Scenario {
     pub parameters: Vec<ScenarioParameter>,
     #[serde(default)]
     pub variables: Variables,
+    pub pan_offset: egui::Vec2,
+    pub zoom: f32,
 }
 
 impl Scenario {
@@ -283,6 +285,8 @@ impl Scenario {
             connections: Vec::new(),
             parameters: Vec::new(),
             variables: Variables::new(),
+            pan_offset: egui::Vec2::ZERO,
+            zoom: 1.0,
         };
 
         const START_X: f32 = 1000.0;
