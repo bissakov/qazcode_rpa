@@ -421,7 +421,8 @@ impl<'a> ScenarioValidator<'a> {
             }
 
             if let Activity::CallScenario { scenario_id, .. } = &node.activity
-                && !scenario_id.is_empty() {
+                && !scenario_id.is_empty()
+            {
                 let scenario_exists = self.project.scenarios.iter().any(|s| s.id == *scenario_id)
                     || self.project.main_scenario.id == *scenario_id;
 
@@ -1056,7 +1057,11 @@ pub fn compute_call_graph(
 
         let mut called_scenarios = HashSet::new();
         for node in &scenario.nodes {
-            if let Activity::CallScenario { scenario_id: called_id, .. } = &node.activity {
+            if let Activity::CallScenario {
+                scenario_id: called_id,
+                ..
+            } = &node.activity
+            {
                 called_scenarios.insert(called_id.clone());
             }
         }

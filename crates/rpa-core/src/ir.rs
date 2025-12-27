@@ -294,10 +294,9 @@ impl<'a> IrBuilder<'a> {
             .ok_or("No Start node found")?;
 
         self.program.entry_point = self.program.instructions.len();
-        self.program.scenario_start_index.insert(
-            self.scenario.id.clone(),
-            self.program.entry_point,
-        );
+        self.program
+            .scenario_start_index
+            .insert(self.scenario.id.clone(), self.program.entry_point);
         self.compiled_scenarios.insert(self.scenario.id.clone());
 
         self.compile_from_node(&start_node.id)?;
@@ -312,8 +311,8 @@ impl<'a> IrBuilder<'a> {
         let mut scenarios_to_compile = Vec::new();
 
         // Collect all scenarios that need to be compiled
-        for scenario in std::iter::once(&self.project.main_scenario)
-            .chain(self.project.scenarios.iter())
+        for scenario in
+            std::iter::once(&self.project.main_scenario).chain(self.project.scenarios.iter())
         {
             if !self.compiled_scenarios.contains(&scenario.id) {
                 // Check if this scenario is reachable
@@ -376,7 +375,8 @@ impl<'a> IrBuilder<'a> {
             .ok_or_else(|| format!("Node {} not found", node_id))?;
 
         let start_index = self.program.instructions.len();
-        self.node_start_index.insert(node_id.to_string(), start_index);
+        self.node_start_index
+            .insert(node_id.to_string(), start_index);
         self.compiled_nodes.insert(node_id.to_string());
 
         self.program.add_instruction(Instruction::DebugMarker {
@@ -457,7 +457,10 @@ impl<'a> IrBuilder<'a> {
             Activity::TryCatch => {
                 self.compile_try_catch_node(node_id)?;
             }
-            Activity::CallScenario { scenario_id, parameters } => {
+            Activity::CallScenario {
+                scenario_id,
+                parameters,
+            } => {
                 self.program.add_instruction(Instruction::CallScenario {
                     scenario_id: scenario_id.clone(),
                     parameters: parameters.clone(),
@@ -717,7 +720,9 @@ impl<'a> IrBuilder<'a> {
     // }
 
     fn compile_called_scenario(&mut self, scenario_id: &str) -> Result<(), String> {
-        let scenario = self.project.scenarios
+        let scenario = self
+            .project
+            .scenarios
             .iter()
             .find(|s| s.id == scenario_id)
             .ok_or_else(|| format!("Scenario {} not found", scenario_id))?
@@ -730,10 +735,9 @@ impl<'a> IrBuilder<'a> {
             .ok_or(format!("No Start node found in scenario {}", scenario_id))?
             .clone();
 
-        self.program.scenario_start_index.insert(
-            scenario_id.to_string(),
-            self.program.instructions.len(),
-        );
+        self.program
+            .scenario_start_index
+            .insert(scenario_id.to_string(), self.program.instructions.len());
         self.compiled_scenarios.insert(scenario_id.to_string());
 
         self.program.add_instruction(Instruction::Start {
@@ -745,7 +749,11 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn compile_from_called_scenario(&mut self, scenario: &Scenario, node_id: &str) -> Result<(), String> {
+    fn compile_from_called_scenario(
+        &mut self,
+        scenario: &Scenario,
+        node_id: &str,
+    ) -> Result<(), String> {
         if self.compiled_nodes.contains(node_id) {
             return Ok(());
         }
@@ -765,13 +773,18 @@ impl<'a> IrBuilder<'a> {
         result
     }
 
-    fn compile_from_called_scenario_inner(&mut self, scenario: &Scenario, node_id: &str) -> Result<(), String> {
+    fn compile_from_called_scenario_inner(
+        &mut self,
+        scenario: &Scenario,
+        node_id: &str,
+    ) -> Result<(), String> {
         let node = scenario
             .get_node(node_id)
             .ok_or_else(|| format!("Node {} not found", node_id))?;
 
         let start_index = self.program.instructions.len();
-        self.node_start_index.insert(node_id.to_string(), start_index);
+        self.node_start_index
+            .insert(node_id.to_string(), start_index);
         self.compiled_nodes.insert(node_id.to_string());
 
         self.program.add_instruction(Instruction::DebugMarker {
@@ -802,7 +815,11 @@ impl<'a> IrBuilder<'a> {
                 });
                 self.compile_default_next_called(scenario, node_id)?;
             }
-            Activity::SetVariable { name, value, var_type } => {
+            Activity::SetVariable {
+                name,
+                value,
+                var_type,
+            } => {
                 let var_value = match VariableValue::from_string(value, var_type) {
                     Ok(v) => v,
                     Err(_) => VariableValue::String(value.to_string()),
@@ -821,8 +838,10 @@ impl<'a> IrBuilder<'a> {
                 self.compile_default_next_called(scenario, node_id)?;
             }
             Activity::IfCondition { condition } => {
-                let true_next = self.first_next_node_called(scenario, node_id, BranchType::TrueBranch);
-                let false_next = self.first_next_node_called(scenario, node_id, BranchType::FalseBranch);
+                let true_next =
+                    self.first_next_node_called(scenario, node_id, BranchType::TrueBranch);
+                let false_next =
+                    self.first_next_node_called(scenario, node_id, BranchType::FalseBranch);
 
                 let expr = parse_expr(condition, self.variables)?;
 
@@ -863,7 +882,10 @@ impl<'a> IrBuilder<'a> {
                     *target = after_if;
                 }
             }
-            Activity::CallScenario { scenario_id, parameters } => {
+            Activity::CallScenario {
+                scenario_id,
+                parameters,
+            } => {
                 self.program.add_instruction(Instruction::CallScenario {
                     scenario_id: scenario_id.clone(),
                     parameters: parameters.clone(),
@@ -878,7 +900,12 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn first_next_node_called(&self, scenario: &Scenario, node_id: &str, branch: BranchType) -> Option<String> {
+    fn first_next_node_called(
+        &self,
+        scenario: &Scenario,
+        node_id: &str,
+        branch: BranchType,
+    ) -> Option<String> {
         scenario
             .connections
             .iter()
@@ -886,7 +913,11 @@ impl<'a> IrBuilder<'a> {
             .map(|c| c.to_node.clone())
     }
 
-    fn compile_default_next_called(&mut self, scenario: &Scenario, node_id: &str) -> Result<(), String> {
+    fn compile_default_next_called(
+        &mut self,
+        scenario: &Scenario,
+        node_id: &str,
+    ) -> Result<(), String> {
         if let Some(next) = self.first_next_node_called(scenario, node_id, BranchType::Default) {
             self.compile_from_called_scenario(scenario, &next)?;
         }

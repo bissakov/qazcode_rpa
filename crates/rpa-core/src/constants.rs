@@ -64,6 +64,8 @@ impl UiConstants {
     pub const NANOID_LENGTH: usize = 10;
 
     pub const IR_COMPILATION_MAX_DEPTH: usize = 1000;
+    pub const UNDO_HISTORY_LIMIT: usize = 100;
+    pub const PROPERTY_EDIT_DEBOUNCE_MS: f32 = 500.0;
 }
 
 pub struct ActivityCategories;

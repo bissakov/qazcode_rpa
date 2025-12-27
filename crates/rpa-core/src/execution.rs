@@ -213,8 +213,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             match binding.direction {
                                 crate::node_graph::ParameterDirection::Out
                                 | crate::node_graph::ParameterDirection::InOut => {
-                                    let param_value = self.context.variables.get(binding.param_var_id).clone();
-                                    self.context.variables.set(binding.source_var_id, param_value.clone());
+                                    let param_value =
+                                        self.context.variables.get(binding.param_var_id).clone();
+                                    self.context
+                                        .variables
+                                        .set(binding.source_var_id, param_value.clone());
                                     if let Some(ref sender) = self.context.variable_sender {
                                         let _ = sender.send(VarEvent::SetId {
                                             id: binding.source_var_id,
@@ -524,7 +527,10 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 });
                 Ok(pc + 1)
             }
-            Instruction::CallScenario { scenario_id, parameters } => {
+            Instruction::CallScenario {
+                scenario_id,
+                parameters,
+            } => {
                 if scenario_id.is_empty() {
                     return Ok(pc + 1);
                 }
@@ -559,8 +565,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         match binding.direction {
                             crate::node_graph::ParameterDirection::In
                             | crate::node_graph::ParameterDirection::InOut => {
-                                let source_value = self.context.variables.get(binding.source_var_id).clone();
-                                self.context.variables.set(binding.param_var_id, source_value.clone());
+                                let source_value =
+                                    self.context.variables.get(binding.source_var_id).clone();
+                                self.context
+                                    .variables
+                                    .set(binding.param_var_id, source_value.clone());
                                 if let Some(ref sender) = self.context.variable_sender {
                                     let _ = sender.send(VarEvent::SetId {
                                         id: binding.param_var_id,
@@ -569,7 +578,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                                 }
                             }
                             crate::node_graph::ParameterDirection::Out => {
-                                self.context.variables.set(binding.param_var_id, VariableValue::Undefined);
+                                self.context
+                                    .variables
+                                    .set(binding.param_var_id, VariableValue::Undefined);
                                 if let Some(ref sender) = self.context.variable_sender {
                                     let _ = sender.send(VarEvent::SetId {
                                         id: binding.param_var_id,
@@ -595,7 +606,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         Err(format!("Scenario {} not found in IR program", scenario_id))
                     }
                 } else {
-                    Err(format!("Scenario with ID {scenario_id} not found in project"))
+                    Err(format!(
+                        "Scenario with ID {scenario_id} not found in project"
+                    ))
                 }
             }
             Instruction::RunPowershell { code: _ } => {

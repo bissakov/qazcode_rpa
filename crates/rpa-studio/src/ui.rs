@@ -320,8 +320,9 @@ pub fn render_node_graph(
     ui: &mut Ui,
     scenario: &mut Scenario,
     state: &mut RenderState,
-) -> (ContextMenuAction, Vec2) {
+) -> (ContextMenuAction, Vec2, bool) {
     let mut context_action = ContextMenuAction::None;
+    let mut connection_created = false;
     let (response, painter) =
         ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
@@ -384,6 +385,7 @@ pub fn render_node_graph(
                 scenario
                     .connections
                     .retain(|c| !(c.from_node == from_node && c.to_node == to_node));
+                connection_created = true;
             }
         }
         *state.knife_tool_active = false;
@@ -1140,6 +1142,7 @@ pub fn render_node_graph(
         }
 
         scenario.add_connection_with_branch(&from, &to, branch_type);
+        connection_created = true;
     }
 
     if let Some(clicked) = clicked_node {
@@ -1193,7 +1196,7 @@ pub fn render_node_graph(
         }
     }
 
-    (context_action, mouse_world_pos)
+    (context_action, mouse_world_pos, connection_created)
 }
 
 fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, zoom: f32) {
@@ -1336,26 +1339,42 @@ pub fn draw_node_transformed<F>(
             let branch_type = node.get_branch_type_for_pin(pin_index);
 
             let (color, stroke_color, label) = match branch_type {
-                BranchType::TrueBranch => (ColorPalette::PIN_TRUE, Color32::from_rgb(60, 120, 60), "T"),
-                BranchType::FalseBranch => (ColorPalette::PIN_FALSE, Color32::from_rgb(120, 60, 60), "F"),
-                BranchType::LoopBody => (ColorPalette::PIN_LOOP_BODY, Color32::from_rgb(200, 120, 0), "B"),
-                BranchType::ErrorBranch => (ColorPalette::PIN_ERROR, Color32::from_rgb(120, 60, 60), "E"),
-                BranchType::TryBranch => (ColorPalette::PIN_SUCCESS, Color32::from_rgb(60, 120, 60), "T"),
-                BranchType::CatchBranch => (ColorPalette::PIN_ERROR, Color32::from_rgb(120, 60, 60), "C"),
+                BranchType::TrueBranch => {
+                    (ColorPalette::PIN_TRUE, Color32::from_rgb(60, 120, 60), "T")
+                }
+                BranchType::FalseBranch => {
+                    (ColorPalette::PIN_FALSE, Color32::from_rgb(120, 60, 60), "F")
+                }
+                BranchType::LoopBody => (
+                    ColorPalette::PIN_LOOP_BODY,
+                    Color32::from_rgb(200, 120, 0),
+                    "B",
+                ),
+                BranchType::ErrorBranch => {
+                    (ColorPalette::PIN_ERROR, Color32::from_rgb(120, 60, 60), "E")
+                }
+                BranchType::TryBranch => (
+                    ColorPalette::PIN_SUCCESS,
+                    Color32::from_rgb(60, 120, 60),
+                    "T",
+                ),
+                BranchType::CatchBranch => {
+                    (ColorPalette::PIN_ERROR, Color32::from_rgb(120, 60, 60), "C")
+                }
                 BranchType::Default => {
                     if node.get_output_pin_count() > 1 {
-                        (ColorPalette::PIN_LOOP_NEXT, Color32::from_rgb(80, 80, 80), "N")
+                        (
+                            ColorPalette::PIN_LOOP_NEXT,
+                            Color32::from_rgb(80, 80, 80),
+                            "N",
+                        )
                     } else {
                         (ColorPalette::PIN_DEFAULT, Color32::from_rgb(80, 80, 80), "")
                     }
                 }
             };
 
-            painter.circle_filled(
-                pin_screen,
-                UiConstants::PIN_RADIUS * zoom,
-                color,
-            );
+            painter.circle_filled(pin_screen, UiConstants::PIN_RADIUS * zoom, color);
             painter.circle_stroke(
                 pin_screen,
                 UiConstants::PIN_RADIUS * zoom,

@@ -293,6 +293,12 @@ impl RpaApp {
                         ui::render_node_graph(ui, scenario, &mut render_state)
                     });
 
+                let (context_action, mouse_world_pos, connection_created) = canvas_result.inner;
+
+                if connection_created {
+                    self.snapshot_undo_state();
+                }
+
                 if let Some(activity) = dropped_activity {
                     let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
                     if let Some(pointer_pos) = pointer_pos {
@@ -304,7 +310,7 @@ impl RpaApp {
                     }
                 }
 
-                canvas_result.inner
+                (context_action, mouse_world_pos)
             })
             .inner
     }
