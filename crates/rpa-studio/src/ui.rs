@@ -320,11 +320,13 @@ pub fn render_node_graph(
     ui: &mut Ui,
     scenario: &mut Scenario,
     state: &mut RenderState,
-) -> (ContextMenuAction, Vec2, bool, bool, bool) {
+) -> (ContextMenuAction, Vec2, bool, bool, bool, bool, bool) {
     let mut context_action = ContextMenuAction::None;
     let mut connection_created = false;
     let mut drag_started = false;
     let mut drag_ended = false;
+    let mut resize_started = false;
+    let mut resize_ended = false;
     let (response, painter) =
         ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
@@ -518,6 +520,7 @@ pub fn render_node_graph(
     {
         if ui.input(|i| i.pointer.any_released()) {
             *state.resizing_node = None;
+            resize_ended = true;
         } else {
             let delta = ui.input(|i| i.pointer.delta());
             let delta_world = delta / *state.zoom;
@@ -723,20 +726,28 @@ pub fn render_node_graph(
 
             if br_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::BottomRight));
+                resize_started = true;
             } else if bl_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::BottomLeft));
+                resize_started = true;
             } else if tr_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::TopRight));
+                resize_started = true;
             } else if tl_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::TopLeft));
+                resize_started = true;
             } else if r_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::Right));
+                resize_started = true;
             } else if l_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::Left));
+                resize_started = true;
             } else if b_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::Bottom));
+                resize_started = true;
             } else if t_response.drag_started() {
                 *state.resizing_node = Some((node.id.clone(), ResizeHandle::Top));
+                resize_started = true;
             }
         }
 
@@ -1206,6 +1217,8 @@ pub fn render_node_graph(
         connection_created,
         drag_started,
         drag_ended,
+        resize_started,
+        resize_ended,
     )
 }
 

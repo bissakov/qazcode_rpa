@@ -293,9 +293,21 @@ impl RpaApp {
                         ui::render_node_graph(ui, scenario, &mut render_state)
                     });
 
-                let (context_action, mouse_world_pos, connection_created, drag_started, drag_ended) = canvas_result.inner;
+                let (
+                    context_action,
+                    mouse_world_pos,
+                    connection_created,
+                    drag_started,
+                    drag_ended,
+                    resize_started,
+                    resize_ended,
+                ) = canvas_result.inner;
 
                 if drag_started && !self.is_executing {
+                    self.begin_undo_transaction();
+                }
+
+                if resize_started && !self.is_executing {
                     self.begin_undo_transaction();
                 }
 
@@ -304,6 +316,10 @@ impl RpaApp {
                 }
 
                 if drag_ended && !self.is_executing {
+                    self.end_undo_transaction();
+                }
+
+                if resize_ended && !self.is_executing {
                     self.end_undo_transaction();
                 }
 
