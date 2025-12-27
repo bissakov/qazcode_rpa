@@ -20,17 +20,9 @@ impl UndoRedoManager {
 
     /// Force an immediate undo point without waiting for stable_time.
     /// Used for discrete user actions that should each be a separate undo step
-    /// (e.g., creating a scenario, dropping an activity, creating a connection).
+    /// (e.g., creating a scenario, dropping an activity, creating a connection, dragging a node).
     pub fn add_undo(&mut self, project: &Project) {
         self.undoer.add_undo(project);
-    }
-
-    /// Force the current flux to stabilize, creating an undo point if state changed.
-    /// Used when user finishes a continuous interaction like dragging or resizing.
-    /// Makes a time jump large enough to exceed stable_time, triggering undo point creation.
-    pub fn force_stabilize_flux(&mut self, current_time: f64, project: &Project) {
-        const STABLE_TIME_BUFFER: f64 = 1.5;
-        self.feed_state(current_time + STABLE_TIME_BUFFER, project);
     }
 
     pub fn undo(&mut self, project: &Project) -> Option<Project> {

@@ -324,19 +324,11 @@ impl RpaApp {
                 }
 
                 if drag_ended && !self.is_executing {
-                    let time = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f64();
-                    self.undo_redo.force_stabilize_flux(time, &self.project);
+                    self.undo_redo.add_undo(&self.project);
                 }
 
                 if resize_ended && !self.is_executing {
-                    let time = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f64();
-                    self.undo_redo.force_stabilize_flux(time, &self.project);
+                    self.undo_redo.add_undo(&self.project);
                 }
 
                 if let Some(activity) = dropped_activity {
