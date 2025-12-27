@@ -213,6 +213,14 @@ impl RpaApp {
             self.knife_tool_active = false;
             self.knife_path.clear();
             self.resizing_node = None;
+
+            // Validate current_scenario_index is still valid after restoration
+            if self
+                .current_scenario_index
+                .is_some_and(|idx| idx >= self.project.scenarios.len())
+            {
+                self.current_scenario_index = None;
+            }
         }
     }
 
@@ -224,6 +232,14 @@ impl RpaApp {
             self.knife_tool_active = false;
             self.knife_path.clear();
             self.resizing_node = None;
+
+            // Validate current_scenario_index is still valid after restoration
+            if self
+                .current_scenario_index
+                .is_some_and(|idx| idx >= self.project.scenarios.len())
+            {
+                self.current_scenario_index = None;
+            }
         }
     }
 
