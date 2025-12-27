@@ -176,7 +176,6 @@ impl eframe::App for RpaApp {
 }
 
 impl RpaApp {
-    #[allow(dead_code)]
     fn snapshot_undo_state(&mut self) {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -185,12 +184,10 @@ impl RpaApp {
         self.undo_redo.feed_state(time, &self.project);
     }
 
-    #[allow(dead_code)]
     fn begin_undo_transaction(&mut self) {
         self.transaction_in_progress = true;
     }
 
-    #[allow(dead_code)]
     fn end_undo_transaction(&mut self) {
         self.snapshot_undo_state();
         self.transaction_in_progress = false;
@@ -303,6 +300,7 @@ impl RpaApp {
                             ((pointer_pos.to_vec2() - self.pan_offset) / self.zoom).to_pos2();
                         self.get_current_scenario_mut()
                             .add_node((*activity).clone(), world_pos);
+                        self.snapshot_undo_state();
                     }
                 }
 
@@ -328,12 +326,14 @@ impl RpaApp {
             }
             ui::ContextMenuAction::Delete => {
                 if !self.selected_nodes.is_empty() {
+                    self.begin_undo_transaction();
                     let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
                     let scenario = self.get_current_scenario_mut();
                     for node_id in nodes_to_remove {
                         scenario.remove_node(&node_id);
                     }
                     self.selected_nodes.clear();
+                    self.end_undo_transaction();
                 }
             }
             ui::ContextMenuAction::SelectAll => {
