@@ -82,7 +82,7 @@ fn main() -> eframe::Result<()> {
         t!("window.title").as_ref(),
         options,
         Box::new(|cc| {
-            let app = RpaApp::default();
+            let app = RpaApp::default().with_initial_snapshot();
             rust_i18n::set_locale(&app.settings.language);
             let mut style = (*cc.egui_ctx.style()).clone();
             style.text_styles.insert(
@@ -183,6 +183,11 @@ impl eframe::App for RpaApp {
 }
 
 impl RpaApp {
+    fn with_initial_snapshot(mut self) -> Self {
+        self.snapshot_undo_state();
+        self
+    }
+
     fn snapshot_undo_state(&mut self) {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -1017,7 +1022,7 @@ impl RpaApp {
                 if ui
                     .add_enabled(
                         !self.is_executing && self.undo_redo.has_undo(&self.project),
-                        egui::Button::new("⟲ Undo (Ctrl+Z)"),
+                        egui::Button::new("⟲ Undo"),
                     )
                     .clicked()
                 {
@@ -1027,7 +1032,7 @@ impl RpaApp {
                 if ui
                     .add_enabled(
                         !self.is_executing && self.undo_redo.has_redo(&self.project),
-                        egui::Button::new("⟳ Redo (Ctrl+Y)"),
+                        egui::Button::new("⟳ Redo"),
                     )
                     .clicked()
                 {
