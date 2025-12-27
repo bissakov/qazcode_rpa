@@ -420,22 +420,21 @@ impl<'a> ScenarioValidator<'a> {
                 continue;
             }
 
-            if let Activity::CallScenario { scenario_id, .. } = &node.activity {
-                if !scenario_id.is_empty() {
-                    let scenario_exists = self.project.scenarios.iter().any(|s| s.id == *scenario_id)
-                        || self.project.main_scenario.id == *scenario_id;
+            if let Activity::CallScenario { scenario_id, .. } = &node.activity
+                && !scenario_id.is_empty() {
+                let scenario_exists = self.project.scenarios.iter().any(|s| s.id == *scenario_id)
+                    || self.project.main_scenario.id == *scenario_id;
 
-                    if !scenario_exists {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Error,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
-                                "CallScenario node ({}) references non-existent scenario {}",
-                                node.id, scenario_id
-                            ),
-                            code: "E103".to_string(),
-                        });
-                    }
+                if !scenario_exists {
+                    issues.push(ValidationIssue {
+                        level: ValidationLevel::Error,
+                        node_id: Some(node.id.clone()),
+                        message: format!(
+                            "CallScenario node ({}) references non-existent scenario {}",
+                            node.id, scenario_id
+                        ),
+                        code: "E103".to_string(),
+                    });
                 }
             }
         }

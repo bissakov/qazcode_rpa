@@ -62,6 +62,8 @@ impl UiConstants {
     pub const MAX_LOG_ENTRIES: usize = 10_000;
 
     pub const NANOID_LENGTH: usize = 10;
+
+    pub const IR_COMPILATION_MAX_DEPTH: usize = 1000;
 }
 
 pub struct ActivityCategories;

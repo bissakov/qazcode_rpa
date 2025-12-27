@@ -153,6 +153,7 @@ pub struct IrBuilder<'a> {
     compiled_scenarios: HashSet<String>,
     call_graph: HashMap<String, HashSet<String>>,
     recursive_scenarios: HashSet<String>,
+    compilation_depth: usize,
 }
 
 // #[derive(Debug)]
@@ -196,6 +197,7 @@ impl<'a> IrBuilder<'a> {
             compiled_scenarios: HashSet::new(),
             call_graph,
             recursive_scenarios,
+            compilation_depth: 0,
         }
     }
 
@@ -353,6 +355,21 @@ impl<'a> IrBuilder<'a> {
             return Ok(());
         }
 
+        if self.compilation_depth >= UiConstants::IR_COMPILATION_MAX_DEPTH {
+            return Err(format!(
+                "IR compilation recursion depth limit exceeded ({} levels). Node: {}",
+                UiConstants::IR_COMPILATION_MAX_DEPTH,
+                node_id
+            ));
+        }
+
+        self.compilation_depth += 1;
+        let result = self.compile_from_node_inner(node_id);
+        self.compilation_depth -= 1;
+        result
+    }
+
+    fn compile_from_node_inner(&mut self, node_id: &str) -> Result<(), String> {
         let node = self
             .scenario
             .get_node(node_id)
@@ -733,6 +750,22 @@ impl<'a> IrBuilder<'a> {
             return Ok(());
         }
 
+        if self.compilation_depth >= UiConstants::IR_COMPILATION_MAX_DEPTH {
+            return Err(format!(
+                "IR compilation recursion depth limit exceeded ({} levels). Scenario: {}, Node: {}",
+                UiConstants::IR_COMPILATION_MAX_DEPTH,
+                scenario.id,
+                node_id
+            ));
+        }
+
+        self.compilation_depth += 1;
+        let result = self.compile_from_called_scenario_inner(scenario, node_id);
+        self.compilation_depth -= 1;
+        result
+    }
+
+    fn compile_from_called_scenario_inner(&mut self, scenario: &Scenario, node_id: &str) -> Result<(), String> {
         let node = scenario
             .get_node(node_id)
             .ok_or_else(|| format!("Node {} not found", node_id))?;
