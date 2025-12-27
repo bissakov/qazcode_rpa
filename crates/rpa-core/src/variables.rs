@@ -13,10 +13,17 @@ impl VarId {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum VariableScope {
+    Global,
+    Scenario,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Variables {
     name_to_id: HashMap<String, VarId>,
     id_to_name: Vec<String>,
     values: Vec<VariableValue>,
+    scopes: Vec<VariableScope>,
 }
 
 impl Default for Variables {
@@ -31,6 +38,7 @@ impl Variables {
             name_to_id: HashMap::new(),
             id_to_name: Vec::new(),
             values: Vec::new(),
+            scopes: Vec::new(),
         }
     }
 
@@ -50,7 +58,28 @@ impl Variables {
         self.name_to_id.insert(name.to_owned(), id);
         self.id_to_name.push(name.to_owned());
         self.values.push(VariableValue::Undefined);
+        self.scopes.push(VariableScope::Global);
         id
+    }
+
+    pub fn id_with_scope(&mut self, name: &str, scope: VariableScope) -> VarId {
+        if let Some(&id) = self.name_to_id.get(name) {
+            return id;
+        }
+        let id = VarId(self.id_to_name.len() as u32);
+        self.name_to_id.insert(name.to_owned(), id);
+        self.id_to_name.push(name.to_owned());
+        self.values.push(VariableValue::Undefined);
+        self.scopes.push(scope);
+        id
+    }
+
+    pub fn get_scope(&self, id: VarId) -> &VariableScope {
+        &self.scopes[id.index()]
+    }
+
+    pub fn set_scope(&mut self, id: VarId, scope: VariableScope) {
+        self.scopes[id.index()] = scope;
     }
 
     pub fn name(&self, id: VarId) -> &str {
@@ -73,6 +102,10 @@ impl Variables {
         self.name_to_id.contains_key(name)
     }
 
+    pub fn find_id(&self, name: &str) -> Option<VarId> {
+        self.name_to_id.get(name).copied()
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &String> {
         self.name_to_id.keys()
     }
@@ -91,6 +124,7 @@ impl Variables {
         self.name_to_id.clear();
         self.id_to_name.clear();
         self.values.clear();
+        self.scopes.clear();
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::UiConstants;
 use crate::evaluator::{Expr, parse_expr};
-use crate::variables::VarId;
+use crate::variables::{VarId, VariableScope};
 use crate::{
     LogLevel, VariableValue,
     node_graph::{Activity, BranchType, Project, Scenario},
@@ -26,6 +26,7 @@ pub enum Instruction {
     SetVar {
         var: VarId,
         value: VariableValue,
+        scope: VariableScope,
     },
     Evaluate {
         expr: Expr,
@@ -74,7 +75,7 @@ pub enum Instruction {
     PopErrorHandler,
     CallScenario {
         scenario_id: String,
-        parameters: Vec<crate::node_graph::ParameterBinding>,
+        parameters: Vec<crate::node_graph::VariablesBinding>,
     },
     RunPowershell {
         code: String,
@@ -149,7 +150,9 @@ pub struct IrBuilder<'a> {
     reachable_nodes: &'a HashSet<String>,
     compiled_nodes: HashSet<String>,
     node_start_index: HashMap<String, usize>,
-    variables: &'a mut Variables,
+    global_variables: &'a mut Variables,
+    scenario_variables: Variables,
+    current_scenario_id: String,
     compiled_scenarios: HashSet<String>,
     call_graph: HashMap<String, HashSet<String>>,
     recursive_scenarios: HashSet<String>,
@@ -183,7 +186,7 @@ impl<'a> IrBuilder<'a> {
         scenario: &'a Scenario,
         project: &'a Project,
         reachable_nodes: &'a HashSet<String>,
-        variables: &'a mut Variables,
+        global_variables: &'a mut Variables,
     ) -> Self {
         let (call_graph, recursive_scenarios) = crate::validation::compute_call_graph(project);
         Self {
@@ -193,7 +196,9 @@ impl<'a> IrBuilder<'a> {
             reachable_nodes,
             compiled_nodes: HashSet::new(),
             node_start_index: HashMap::new(),
-            variables,
+            global_variables,
+            scenario_variables: scenario.variables.clone(),
+            current_scenario_id: scenario.id.clone(),
             compiled_scenarios: HashSet::new(),
             call_graph,
             recursive_scenarios,
@@ -225,8 +230,17 @@ impl<'a> IrBuilder<'a> {
 
                 if let Some(end) = end {
                     let var_name = &value[start..end];
-                    let id = self.variables.id(var_name);
-                    let var_value = self.variables.get(id);
+                    // Check scenario scope first, then global scope
+                    let id = if let Some(id) = self.scenario_variables.find_id(var_name) {
+                        id
+                    } else {
+                        self.global_variables.id(var_name)
+                    };
+                    let var_value = if let Some(id) = self.scenario_variables.find_id(var_name) {
+                        self.scenario_variables.get(id)
+                    } else {
+                        self.global_variables.get(id)
+                    };
 
                     if let Some(s) = var_value.as_str() {
                         out.push_str(s);
@@ -386,8 +400,8 @@ impl<'a> IrBuilder<'a> {
 
         match &node.activity {
             Activity::Start { scenario_id } => {
-                let id = self.variables.id("last_error");
-                self.variables.set(id, VariableValue::Undefined);
+                let id = self.global_variables.id("last_error");
+                self.global_variables.set(id, VariableValue::Undefined);
                 self.program.add_instruction(Instruction::Start {
                     scenario_id: scenario_id.clone(),
                 });
@@ -399,10 +413,9 @@ impl<'a> IrBuilder<'a> {
                 });
             }
             Activity::Log { level, message } => {
-                let resolved = self.resolve_value(message);
                 self.program.add_instruction(Instruction::Log {
                     level: level.clone(),
-                    message: resolved,
+                    message: message.clone(),
                 });
                 self.compile_default_next(node_id)?;
             }
@@ -416,21 +429,33 @@ impl<'a> IrBuilder<'a> {
                 name,
                 value,
                 var_type,
+                is_global,
             } => {
                 let var_value = match VariableValue::from_string(value, var_type) {
                     Ok(v) => v,
                     Err(_) => VariableValue::String(value.to_string()),
                 };
 
-                let var_id = self.variables.id(name);
+                let (var_id, scope) = if *is_global {
+                    let id = self
+                        .global_variables
+                        .id_with_scope(name, crate::variables::VariableScope::Global);
+                    (id, crate::variables::VariableScope::Global)
+                } else {
+                    let id = self.scenario_variables.id(name);
+                    (id, crate::variables::VariableScope::Scenario)
+                };
                 self.program.add_instruction(Instruction::SetVar {
                     var: var_id,
                     value: var_value,
+                    scope,
                 });
                 self.compile_default_next(node_id)?;
             }
             Activity::Evaluate { expression } => {
-                let expr = parse_expr(expression, self.variables).map_err(|e| {
+                // Need to use a combined mutable reference for expression parsing
+                // For now, we'll use global_variables as it's more persistent
+                let expr = parse_expr(expression, self.global_variables).map_err(|e| {
                     format!(
                         "Error in node {} while parsing expression '{}': {}",
                         node_id, expression, e
@@ -465,7 +490,37 @@ impl<'a> IrBuilder<'a> {
                     scenario_id: scenario_id.clone(),
                     parameters: parameters.clone(),
                 });
-                self.compile_default_next(node_id)?;
+
+                // Switch scope to callee scenario (mirrors execution)
+                let saved_scenario_variables = self.scenario_variables.clone();
+                let saved_scenario_id = self.current_scenario_id.clone();
+
+                // Find and switch to callee's scenario variables
+                let callee = self
+                    .project
+                    .scenarios
+                    .iter()
+                    .find(|s| s.id == *scenario_id)
+                    .or_else(|| {
+                        if self.project.main_scenario.id == *scenario_id {
+                            Some(&self.project.main_scenario)
+                        } else {
+                            None
+                        }
+                    });
+
+                if let Some(callee_scenario) = callee {
+                    self.scenario_variables = callee_scenario.variables.clone();
+                    self.current_scenario_id = scenario_id.clone();
+
+                    self.compile_default_next(node_id)?;
+
+                    // Restore caller's scope
+                    self.scenario_variables = saved_scenario_variables;
+                    self.current_scenario_id = saved_scenario_id;
+                } else {
+                    return Err(format!("Scenario {} not found", scenario_id));
+                }
             }
             Activity::RunPowershell { code } => {
                 self.program
@@ -482,7 +537,7 @@ impl<'a> IrBuilder<'a> {
         let true_target = self.first_next_node(node_id, BranchType::TrueBranch);
         let false_target = self.first_next_node(node_id, BranchType::FalseBranch);
 
-        let expr = parse_expr(condition, self.variables).map_err(|e| {
+        let expr = parse_expr(condition, self.global_variables).map_err(|e| {
             format!(
                 "Error in node {} while parsing expression '{}': {}",
                 node_id, condition, e
@@ -547,8 +602,8 @@ impl<'a> IrBuilder<'a> {
             return Ok(());
         }
 
-        let index_var = self.variables.id(index);
-        self.variables
+        let index_var = self.scenario_variables.id(index);
+        self.scenario_variables
             .set(index_var, VariableValue::Number(start as f64));
 
         self.program.add_instruction(Instruction::LoopInit {
@@ -612,7 +667,7 @@ impl<'a> IrBuilder<'a> {
 
         let check_idx = self.program.instructions.len();
 
-        let expr = parse_expr(condition, self.variables).map_err(|e| {
+        let expr = parse_expr(condition, self.global_variables).map_err(|e| {
             format!(
                 "Error in node {} while parsing expression '{}': {}",
                 node_id, condition, e
@@ -802,10 +857,9 @@ impl<'a> IrBuilder<'a> {
                 });
             }
             Activity::Log { level, message } => {
-                let resolved = self.resolve_value(message);
                 self.program.add_instruction(Instruction::Log {
                     level: level.clone(),
-                    message: resolved,
+                    message: message.clone(),
                 });
                 self.compile_default_next_called(scenario, node_id)?;
             }
@@ -819,21 +873,31 @@ impl<'a> IrBuilder<'a> {
                 name,
                 value,
                 var_type,
+                is_global,
             } => {
                 let var_value = match VariableValue::from_string(value, var_type) {
                     Ok(v) => v,
                     Err(_) => VariableValue::String(value.to_string()),
                 };
 
-                let var_id = self.variables.id(name);
+                let (var_id, scope) = if *is_global {
+                    let id = self
+                        .global_variables
+                        .id_with_scope(name, crate::variables::VariableScope::Global);
+                    (id, crate::variables::VariableScope::Global)
+                } else {
+                    let id = self.scenario_variables.id(name);
+                    (id, crate::variables::VariableScope::Scenario)
+                };
                 self.program.add_instruction(Instruction::SetVar {
                     var: var_id,
                     value: var_value,
+                    scope,
                 });
                 self.compile_default_next_called(scenario, node_id)?;
             }
             Activity::Evaluate { expression } => {
-                let expr = parse_expr(expression, self.variables)?;
+                let expr = parse_expr(expression, self.global_variables)?;
                 self.program.add_instruction(Instruction::Evaluate { expr });
                 self.compile_default_next_called(scenario, node_id)?;
             }
@@ -843,7 +907,7 @@ impl<'a> IrBuilder<'a> {
                 let false_next =
                     self.first_next_node_called(scenario, node_id, BranchType::FalseBranch);
 
-                let expr = parse_expr(condition, self.variables)?;
+                let expr = parse_expr(condition, self.global_variables)?;
 
                 let jump_if_not_idx = self.program.add_instruction(Instruction::JumpIfNot {
                     condition: expr,
