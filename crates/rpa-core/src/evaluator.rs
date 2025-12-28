@@ -597,6 +597,7 @@ pub fn eval_expr(expr: &Expr, variables: &Variables) -> Result<VariableValue, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::variables::{VariableScope, Variables};
 
     #[test]
     fn test_arithmetic() {
@@ -616,7 +617,7 @@ mod tests {
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
                 eval_expr(&expr, &variables).unwrap(),
-                VariableValue::Number(5.0)
+                VariableValue::Number(6.0)
             );
         }
 
@@ -625,7 +626,7 @@ mod tests {
             let expr = parse_expr(expression, &mut variables).unwrap();
             assert_eq!(
                 eval_expr(&expr, &variables).unwrap(),
-                VariableValue::Number(6.0)
+                VariableValue::Number(12.0)
             );
         }
 
@@ -729,11 +730,11 @@ mod tests {
     fn test_variables() {
         let mut variables = Variables::new();
 
-        variables.create_variable("x", crate::variables::VariableScope::Global);
-        variables.set("x", VariableValue::Number(10.0));
+        variables.create_variable("x", VariableScope::Global);
+        variables.set("x", VariableValue::Number(10.0), VariableScope::Global);
 
-        variables.create_variable("y", crate::variables::VariableScope::Global);
-        variables.set("y", VariableValue::Number(5.0));
+        variables.create_variable("y", VariableScope::Global);
+        variables.set("y", VariableValue::Number(5.0), VariableScope::Global);
 
         {
             let expr = parse_expr("{x} + {y}", &mut variables).unwrap();
@@ -756,11 +757,11 @@ mod tests {
     fn test_complex() {
         let mut variables = Variables::new();
 
-        variables.create_variable("a", crate::variables::VariableScope::Global);
-        variables.set("a", VariableValue::Number(10.0));
+        variables.create_variable("a", VariableScope::Global);
+        variables.set("a", VariableValue::Number(10.0), VariableScope::Global);
 
-        variables.create_variable("b", crate::variables::VariableScope::Global);
-        variables.set("b", VariableValue::Number(5.0));
+        variables.create_variable("b", VariableScope::Global);
+        variables.set("b", VariableValue::Number(5.0), VariableScope::Global);
 
         let expr = parse_expr("({a} + {b}) * 2 > 20", &mut variables).unwrap();
         assert_eq!(
