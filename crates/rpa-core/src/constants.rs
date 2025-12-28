@@ -17,6 +17,7 @@ impl UiConstants {
     pub const PIN_INTERACT_SIZE: f32 = 12.0;
 
     pub const GRID_SPACING: f32 = 20.0;
+    pub const GRID_MIN_ZOOM: f32 = 0.5;
 
     pub const LEFT_PANEL_WIDTH: f32 = 200.0;
     pub const PROPERTIES_PANEL_WIDTH: f32 = 280.0;

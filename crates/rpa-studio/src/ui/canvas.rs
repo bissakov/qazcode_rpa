@@ -4,8 +4,8 @@ use egui::{
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::{
-    Activity, BranchType, LogLevel, Node, Scenario, UiConstants, VariableType,
-    constants::FlowDirection,
+    Activity, ActivityMetadata, BranchType, LogLevel, Node, PropertyType, Scenario, UiConstants,
+    VariableType, constants::FlowDirection,
 };
 use rust_i18n::t;
 use std::collections::HashSet;
@@ -143,7 +143,6 @@ fn find_connection_near_point(
             let start = to_screen(start_out_pin_pos);
             let end = to_screen(to_node.get_input_pin_pos());
 
-            use rpa_core::constants::{FlowDirection, UiConstants};
             let (control1, control2) = match UiConstants::FLOW_DIRECTION {
                 FlowDirection::Horizontal => {
                     let distance = (end.x - start.x).abs();
@@ -198,7 +197,6 @@ fn find_intersecting_connections(
             let start = to_screen(start_out_pin_pos);
             let end = to_screen(to_node.get_input_pin_pos());
 
-            use rpa_core::constants::{FlowDirection, UiConstants};
             let (control1, control2) = match UiConstants::FLOW_DIRECTION {
                 FlowDirection::Horizontal => {
                     let distance = (end.x - start.x).abs();
@@ -1012,8 +1010,6 @@ pub fn render_node_graph(
             let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
             let end = pointer_pos;
 
-            use rpa_core::constants::{FlowDirection, UiConstants};
-
             let is_error_branch = from_node.activity.can_have_error_output() && *pin_index == 1;
 
             let (control1, control2) = match UiConstants::FLOW_DIRECTION {
@@ -1167,6 +1163,10 @@ pub fn render_node_graph(
 }
 
 fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, zoom: f32) {
+    if zoom < UiConstants::GRID_MIN_ZOOM {
+        return;
+    }
+
     let world_grid_spacing = UiConstants::GRID_SPACING;
     let grid_color = Color32::from_rgb(50, 50, 50);
 
@@ -1184,7 +1184,10 @@ fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, 
     while grid_x <= grid_max_x {
         let screen_x = grid_x * zoom + pan_offset.x;
         painter.line_segment(
-            [Pos2::new(screen_x, rect.top()), Pos2::new(screen_x, rect.bottom())],
+            [
+                Pos2::new(screen_x, rect.top()),
+                Pos2::new(screen_x, rect.bottom()),
+            ],
             Stroke::new(1.0, grid_color),
         );
         grid_x += world_grid_spacing;
@@ -1194,7 +1197,10 @@ fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, 
     while grid_y <= grid_max_y {
         let screen_y = grid_y * zoom + pan_offset.y;
         painter.line_segment(
-            [Pos2::new(rect.left(), screen_y), Pos2::new(rect.right(), screen_y)],
+            [
+                Pos2::new(rect.left(), screen_y),
+                Pos2::new(rect.right(), screen_y),
+            ],
             Stroke::new(1.0, grid_color),
         );
         grid_y += world_grid_spacing;
@@ -1282,33 +1288,35 @@ pub fn draw_node_transformed<F>(
         let galley = painter.layout_job(job);
         painter.galley(text_rect.min, galley, Color32::from_rgb(60, 60, 60));
     } else {
-        let text_pos = rect.min + Vec2::new(10.0 * zoom, 10.0 * zoom);
-        painter.text(
-            text_pos,
-            egui::Align2::LEFT_TOP,
-            node.activity.get_name(),
-            egui::FontId::proportional(14.0 * zoom),
-            Color32::WHITE,
-        );
+        if zoom >= UiConstants::GRID_MIN_ZOOM {
+            let text_pos = rect.min + Vec2::new(10.0 * zoom, 10.0 * zoom);
+            painter.text(
+                text_pos,
+                egui::Align2::LEFT_TOP,
+                node.activity.get_name(),
+                egui::FontId::proportional(14.0 * zoom),
+                Color32::WHITE,
+            );
+        }
     }
 
-    if node.has_input_pin() {
-        let input_pin = to_screen(node.get_input_pin_pos());
-        painter.circle_filled(
-            input_pin,
-            UiConstants::PIN_RADIUS * zoom,
-            Color32::from_rgb(150, 150, 150),
-        );
-        painter.circle_stroke(
-            input_pin,
-            UiConstants::PIN_RADIUS * zoom,
-            Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
-        );
+    if zoom >= UiConstants::GRID_MIN_ZOOM {
+        if node.has_input_pin() {
+            let input_pin = to_screen(node.get_input_pin_pos());
+            painter.circle_filled(
+                input_pin,
+                UiConstants::PIN_RADIUS * zoom,
+                Color32::from_rgb(150, 150, 150),
+            );
+            painter.circle_stroke(
+                input_pin,
+                UiConstants::PIN_RADIUS * zoom,
+                Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
+            );
+        }
     }
 
     if node.has_output_pin() {
-        use rpa_core::constants::{FlowDirection, UiConstants};
-
         let positions = node.get_output_pin_positions();
         for (pin_index, &pos) in positions.iter().enumerate() {
             let pin_screen = to_screen(pos);
@@ -1350,29 +1358,31 @@ pub fn draw_node_transformed<F>(
                 }
             };
 
-            painter.circle_filled(pin_screen, UiConstants::PIN_RADIUS * zoom, color);
-            painter.circle_stroke(
-                pin_screen,
-                UiConstants::PIN_RADIUS * zoom,
-                Stroke::new(1.0 * zoom, stroke_color),
-            );
-
-            if !label.is_empty() {
-                let (label_offset, label_align) = match UiConstants::FLOW_DIRECTION {
-                    FlowDirection::Horizontal => {
-                        (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                    }
-                    FlowDirection::Vertical => {
-                        (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                    }
-                };
-                painter.text(
-                    pin_screen + label_offset,
-                    label_align,
-                    label,
-                    egui::FontId::proportional(10.0 * zoom),
-                    color,
+            if zoom >= UiConstants::GRID_MIN_ZOOM {
+                painter.circle_filled(pin_screen, UiConstants::PIN_RADIUS * zoom, color);
+                painter.circle_stroke(
+                    pin_screen,
+                    UiConstants::PIN_RADIUS * zoom,
+                    Stroke::new(1.0 * zoom, stroke_color),
                 );
+
+                if !label.is_empty() {
+                    let (label_offset, label_align) = match UiConstants::FLOW_DIRECTION {
+                        FlowDirection::Horizontal => {
+                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
+                        }
+                        FlowDirection::Vertical => {
+                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
+                        }
+                    };
+                    painter.text(
+                        pin_screen + label_offset,
+                        label_align,
+                        label,
+                        egui::FontId::proportional(10.0 * zoom),
+                        color,
+                    );
+                }
             }
         }
     }
@@ -1577,8 +1587,6 @@ pub fn render_node_properties(
     _current_scenario: &Scenario,
     _variables: &rpa_core::Variables,
 ) -> (bool, ParameterBindingAction) {
-    use rpa_core::{ActivityMetadata, PropertyType};
-
     let original_activity = node.activity.clone();
 
     ui.horizontal(|ui| {
