@@ -9,3 +9,6 @@ EXPLORATION_SUMMARY.md
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Environment variables
+.env
