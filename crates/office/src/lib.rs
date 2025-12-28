@@ -3,6 +3,5 @@ pub mod outlook;
 pub mod word;
 
 pub use excel::Excel;
-pub use outlook::{Outlook, EmailMessage};
+pub use outlook::{EmailMessage, Outlook};
 pub use word::Word;
-
