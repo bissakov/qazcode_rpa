@@ -91,9 +91,7 @@ impl RpaApp {
 
                             self.project = project_file.project;
                             self.current_scenario_index = None;
-                            let current_scenario = self.get_current_scenario_mut();
-                            current_scenario.pan_offset = egui::Vec2::ZERO;
-                            current_scenario.zoom = 1.0;
+                            self.init_current_scenario_view();
 
                             rust_i18n::set_locale(&self.settings.language);
                             self.current_file = Some(path);

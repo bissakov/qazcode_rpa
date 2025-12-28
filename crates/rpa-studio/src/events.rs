@@ -25,14 +25,13 @@ impl RpaApp {
         let has_clipboard = !self.clipboard.nodes.is_empty();
 
         if paste_event && has_clipboard && no_settings && no_rename {
-            let current_scenario = self.get_current_scenario();
+            let view = self.get_current_scenario_view_mut();
             let mouse_world_pos = ctx
                 .pointer_hover_pos()
-                .map(|pos| (pos.to_vec2() - current_scenario.pan_offset) / current_scenario.zoom)
+                .map(|pos| (pos.to_vec2() - view.pan_offset) / view.zoom)
                 .unwrap_or_else(|| {
                     let viewport_center = ctx.content_rect().center();
-                    (viewport_center.to_vec2() - current_scenario.pan_offset)
-                        / current_scenario.zoom
+                    (viewport_center.to_vec2() - view.pan_offset) / view.zoom
                 });
 
             self.paste_clipboard_nodes(mouse_world_pos);

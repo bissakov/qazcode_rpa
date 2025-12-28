@@ -1,6 +1,6 @@
-use crate::loglevel_ext::LogLevelExt;
 use crate::state::RpaApp;
 use crate::ui::canvas;
+use crate::{loglevel_ext::LogLevelExt, state::ScenarioViewState};
 use eframe::egui;
 use egui::{DragValue, Slider};
 use egui_extras::{Column, TableBuilder};
@@ -44,9 +44,14 @@ impl RpaApp {
                     allow_node_resize,
                 };
 
+                let view = self
+                    .scenario_views
+                    .entry(scenario.id.clone())
+                    .or_insert_with(ScenarioViewState::default);
+
                 let (canvas_result, dropped_activity) = ui
                     .dnd_drop_zone::<Activity, _>(egui::Frame::default(), |ui| {
-                        canvas::render_node_graph(ui, scenario, &mut render_state)
+                        canvas::render_node_graph(ui, scenario, &mut render_state, view)
                     });
 
                 let (
@@ -74,10 +79,9 @@ impl RpaApp {
                 if let Some(activity) = dropped_activity {
                     let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
                     if let Some(pointer_pos) = pointer_pos {
-                        let current_scenario = self.get_current_scenario();
-                        let world_pos = ((pointer_pos.to_vec2() - current_scenario.pan_offset)
-                            / current_scenario.zoom)
-                            .to_pos2();
+                        let view = self.get_current_scenario_view_mut();
+                        let world_pos =
+                            ((pointer_pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2();
                         self.get_current_scenario_mut()
                             .add_node((*activity).clone(), world_pos);
                         self.undo_redo.add_undo(&self.project);
@@ -791,12 +795,8 @@ impl RpaApp {
                         );
                         self.current_file = None;
                         self.current_scenario_index = None;
-
-                        let current_scenario = self.get_current_scenario_mut();
-
-                        current_scenario.pan_offset = egui::Vec2::ZERO;
-                        current_scenario.zoom = 1.0;
                         self.selected_nodes.clear();
+                        self.init_current_scenario_view();
                         ui.close();
                     }
                     if ui.button(t!("menu.open").as_ref()).clicked() {
@@ -1093,10 +1093,9 @@ impl RpaApp {
 
                 if let Some(activity) = node_to_add {
                     let viewport_center = ctx.content_rect().center();
-                    let current_scenario = self.get_current_scenario();
-                    let world_pos = ((viewport_center.to_vec2() - current_scenario.pan_offset)
-                        / current_scenario.zoom)
-                        .to_pos2();
+                    let view = self.get_current_scenario_view_mut();
+                    let world_pos =
+                        ((viewport_center.to_vec2() - view.pan_offset) / view.zoom).to_pos2();
                     let offset = self.get_current_scenario().nodes.len() as f32
                         * UiConstants::NEW_NODE_OFFSET_INCREMENT;
                     let new_node_pos = world_pos + egui::vec2(offset, offset);

@@ -1,4 +1,4 @@
-use crate::{activity_ext::ActivityExt, colors::ColorPalette};
+use crate::{activity_ext::ActivityExt, colors::ColorPalette, state::ScenarioViewState};
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -295,6 +295,7 @@ pub fn render_node_graph(
     ui: &mut Ui,
     scenario: &mut Scenario,
     state: &mut RenderState,
+    view: &mut ScenarioViewState,
 ) -> (ContextMenuAction, Vec2, bool, bool, bool, bool, bool) {
     let mut context_action = ContextMenuAction::None;
     let mut connection_created = false;
@@ -305,14 +306,16 @@ pub fn render_node_graph(
     let (response, painter) =
         ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
+    // let scenario_view = scenario.get_scenario_view(scenario.id);
+
     let rect = response.rect;
     painter.rect_filled(rect, 0.0, Color32::from_rgb(40, 40, 40));
 
     let mouse_world_pos = if let Some(mouse_pos) = ui.ctx().pointer_hover_pos() {
-        (mouse_pos.to_vec2() - scenario.pan_offset) / scenario.zoom
+        (mouse_pos.to_vec2() - view.pan_offset) / view.zoom
     } else {
         let viewport_center = ui.ctx().viewport_rect().center();
-        (viewport_center.to_vec2() - scenario.pan_offset) / scenario.zoom
+        (viewport_center.to_vec2() - view.pan_offset) / view.zoom
     };
 
     if response.hovered() {
@@ -320,17 +323,16 @@ pub fn render_node_graph(
         if scroll_delta != 0.0
             && let Some(mouse_pos) = ui.ctx().pointer_hover_pos()
         {
-            let old_zoom = scenario.zoom;
+            let old_zoom = view.zoom;
             let zoom_delta = scroll_delta * UiConstants::ZOOM_DELTA_MULTIPLIER;
-            scenario.zoom =
-                (scenario.zoom + zoom_delta).clamp(UiConstants::ZOOM_MIN, UiConstants::ZOOM_MAX);
+            view.zoom =
+                (view.zoom + zoom_delta).clamp(UiConstants::ZOOM_MIN, UiConstants::ZOOM_MAX);
 
-            let mouse_world_before =
-                ((mouse_pos.to_vec2() - scenario.pan_offset) / old_zoom).to_pos2();
+            let mouse_world_before = ((mouse_pos.to_vec2() - view.pan_offset) / old_zoom).to_pos2();
             let mouse_world_after = mouse_world_before;
             let mouse_screen_after =
-                (mouse_world_after.to_vec2() * scenario.zoom + scenario.pan_offset).to_pos2();
-            scenario.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
+                (mouse_world_after.to_vec2() * view.zoom + view.pan_offset).to_pos2();
+            view.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
         }
     }
 
@@ -340,7 +342,7 @@ pub fn render_node_graph(
     });
 
     if is_panning && response.dragged() && !*state.knife_tool_active {
-        scenario.pan_offset += response.drag_delta();
+        view.pan_offset += response.drag_delta();
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
 
@@ -357,8 +359,8 @@ pub fn render_node_graph(
             let connections_to_remove = find_intersecting_connections(
                 scenario,
                 state.knife_path,
-                scenario.pan_offset,
-                scenario.zoom,
+                view.pan_offset,
+                view.zoom,
             );
             for (from_node, to_node) in connections_to_remove {
                 scenario
@@ -379,12 +381,12 @@ pub fn render_node_graph(
         state.knife_path.push(pos);
     }
 
-    let pan_offset = scenario.pan_offset.clone();
-    let zoom = scenario.zoom.clone();
+    let pan_offset = view.pan_offset.clone();
+    let zoom = view.zoom.clone();
 
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
-    draw_grid_transformed(&painter, rect, scenario.pan_offset, scenario.zoom);
+    draw_grid_transformed(&painter, rect, view.pan_offset, view.zoom);
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
@@ -478,9 +480,9 @@ pub fn render_node_graph(
         if find_connection_near_point(
             scenario,
             node_center_screen,
-            scenario.pan_offset,
-            scenario.zoom,
-            UiConstants::LINK_INSERT_THRESHOLD * scenario.zoom,
+            view.pan_offset,
+            view.zoom,
+            UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
         )
         .is_some()
         {
@@ -500,7 +502,7 @@ pub fn render_node_graph(
             resize_ended = true;
         } else {
             let delta = ui.input(|i| i.pointer.delta());
-            let delta_world = delta / scenario.zoom;
+            let delta_world = delta / view.zoom;
             match handle {
                 ResizeHandle::Right => {
                     node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
@@ -584,7 +586,7 @@ pub fn render_node_graph(
             && !is_panning
             && state.resizing_node.is_none()
         {
-            let handle_size = UiConstants::NOTE_RESIZE_HANDLE_SIZE * scenario.zoom;
+            let handle_size = UiConstants::NOTE_RESIZE_HANDLE_SIZE * view.zoom;
 
             let corner_br = egui::Rect::from_min_size(
                 node_rect_screen.max - egui::vec2(handle_size, handle_size),
@@ -740,7 +742,7 @@ pub fn render_node_graph(
                 drag_started = true;
             }
 
-            drag_delta_to_apply = Some(node_response.drag_delta() / scenario.zoom);
+            drag_delta_to_apply = Some(node_response.drag_delta() / view.zoom);
         }
 
         if node_response.drag_stopped()
@@ -809,7 +811,7 @@ pub fn render_node_graph(
             is_hovering_connection,
             is_being_resized,
             to_screen,
-            scenario.zoom,
+            view.zoom,
         );
     }
 
@@ -836,9 +838,9 @@ pub fn render_node_graph(
         if let Some((from_id, to_id)) = find_connection_near_point(
             scenario,
             node_center_screen,
-            scenario.pan_offset,
-            scenario.zoom,
-            UiConstants::LINK_INSERT_THRESHOLD * scenario.zoom,
+            view.pan_offset,
+            view.zoom,
+            UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
         ) && released_node_id != from_id
             && released_node_id != to_id
             && let Some(conn_to_remove) = scenario
@@ -920,8 +922,8 @@ pub fn render_node_graph(
                 let output_pin_rect = egui::Rect::from_center_size(
                     output_pin,
                     egui::vec2(
-                        UiConstants::PIN_INTERACT_SIZE * scenario.zoom,
-                        UiConstants::PIN_INTERACT_SIZE * scenario.zoom,
+                        UiConstants::PIN_INTERACT_SIZE * view.zoom,
+                        UiConstants::PIN_INTERACT_SIZE * view.zoom,
                     ),
                 );
                 let output_response = ui.interact(
@@ -951,8 +953,8 @@ pub fn render_node_graph(
             let input_pin_rect = egui::Rect::from_center_size(
                 input_pin,
                 egui::vec2(
-                    UiConstants::PIN_INTERACT_SIZE * scenario.zoom,
-                    UiConstants::PIN_INTERACT_SIZE * scenario.zoom,
+                    UiConstants::PIN_INTERACT_SIZE * view.zoom,
+                    UiConstants::PIN_INTERACT_SIZE * view.zoom,
                 ),
             );
             let input_response = ui.interact(
@@ -1016,14 +1018,14 @@ pub fn render_node_graph(
 
             let (control1, control2) = match UiConstants::FLOW_DIRECTION {
                 FlowDirection::Horizontal => {
-                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * scenario.zoom;
+                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * view.zoom;
                     (
                         start + Vec2::new(control_offset, 0.0),
                         end - Vec2::new(control_offset, 0.0),
                     )
                 }
                 FlowDirection::Vertical => {
-                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * scenario.zoom;
+                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * view.zoom;
                     if is_error_branch {
                         (
                             start + Vec2::new(control_offset, 0.0),
@@ -1079,7 +1081,7 @@ pub fn render_node_graph(
                 control1,
                 control2,
                 end,
-                Stroke::new(2.0 * scenario.zoom, preview_color),
+                Stroke::new(2.0 * view.zoom, preview_color),
             );
         }
 
@@ -1137,13 +1139,7 @@ pub fn render_node_graph(
         let minimap_layer =
             egui::LayerId::new(egui::Order::Foreground, egui::Id::new("minimap_layer"));
         let minimap_painter = ui.ctx().layer_painter(minimap_layer);
-        render_minimap_internal(
-            &minimap_painter,
-            scenario,
-            scenario.pan_offset,
-            scenario.zoom,
-            rect,
-        );
+        render_minimap_internal(&minimap_painter, scenario, view.pan_offset, view.zoom, rect);
     }
 
     if *state.knife_tool_active {
@@ -1171,28 +1167,37 @@ pub fn render_node_graph(
 }
 
 fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, zoom: f32) {
-    let grid_spacing = UiConstants::GRID_SPACING * zoom;
+    let world_grid_spacing = UiConstants::GRID_SPACING;
     let grid_color = Color32::from_rgb(50, 50, 50);
 
-    let start_x = (rect.left() - pan_offset.x % grid_spacing).floor();
-    let start_y = (rect.top() - pan_offset.y % grid_spacing).floor();
+    let world_min_x = (rect.left() - pan_offset.x) / zoom;
+    let world_max_x = (rect.right() - pan_offset.x) / zoom;
+    let world_min_y = (rect.top() - pan_offset.y) / zoom;
+    let world_max_y = (rect.bottom() - pan_offset.y) / zoom;
 
-    let mut x = start_x;
-    while x < rect.right() {
+    let grid_min_x = (world_min_x / world_grid_spacing).floor() * world_grid_spacing;
+    let grid_max_x = (world_max_x / world_grid_spacing).ceil() * world_grid_spacing;
+    let grid_min_y = (world_min_y / world_grid_spacing).floor() * world_grid_spacing;
+    let grid_max_y = (world_max_y / world_grid_spacing).ceil() * world_grid_spacing;
+
+    let mut grid_x = grid_min_x;
+    while grid_x <= grid_max_x {
+        let screen_x = grid_x * zoom + pan_offset.x;
         painter.line_segment(
-            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+            [Pos2::new(screen_x, rect.top()), Pos2::new(screen_x, rect.bottom())],
             Stroke::new(1.0, grid_color),
         );
-        x += grid_spacing;
+        grid_x += world_grid_spacing;
     }
 
-    let mut y = start_y;
-    while y < rect.bottom() {
+    let mut grid_y = grid_min_y;
+    while grid_y <= grid_max_y {
+        let screen_y = grid_y * zoom + pan_offset.y;
         painter.line_segment(
-            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            [Pos2::new(rect.left(), screen_y), Pos2::new(rect.right(), screen_y)],
             Stroke::new(1.0, grid_color),
         );
-        y += grid_spacing;
+        grid_y += world_grid_spacing;
     }
 }
 

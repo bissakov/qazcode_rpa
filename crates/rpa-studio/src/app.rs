@@ -63,12 +63,7 @@ impl RpaApp {
             self.knife_path.clear();
             self.resizing_node = None;
 
-            if self
-                .current_scenario_index
-                .is_some_and(|idx| idx >= self.project.scenarios.len())
-            {
-                self.current_scenario_index = None;
-            }
+            self.validate_scenario_indices();
         }
     }
 
@@ -81,12 +76,20 @@ impl RpaApp {
             self.knife_path.clear();
             self.resizing_node = None;
 
-            if self
-                .current_scenario_index
-                .is_some_and(|idx| idx >= self.project.scenarios.len())
-            {
-                self.current_scenario_index = None;
-            }
+            self.validate_scenario_indices();
+        }
+    }
+
+    fn validate_scenario_indices(&mut self) {
+        let scenario_count = self.project.scenarios.len();
+
+        self.opened_scenarios.retain(|&idx| idx < scenario_count);
+
+        if self
+            .current_scenario_index
+            .is_some_and(|idx| idx >= scenario_count)
+        {
+            self.current_scenario_index = None;
         }
     }
 }

@@ -191,9 +191,6 @@ pub struct Project {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiState {
     pub current_scenario_index: Option<usize>,
-    #[serde(with = "vec2_serde")]
-    pub pan_offset: egui::Vec2,
-    pub zoom: f32,
     pub font_size: f32,
     pub show_minimap: bool,
     #[serde(default = "default_allow_node_resize")]
@@ -231,11 +228,8 @@ impl UiState {
 
 impl Default for UiState {
     fn default() -> Self {
-        use crate::constants::UiConstants;
         Self {
             current_scenario_index: None,
-            pan_offset: egui::Vec2::ZERO,
-            zoom: 1.0,
             font_size: UiConstants::DEFAULT_FONT_SIZE,
             show_minimap: true,
             allow_node_resize: true,
@@ -272,8 +266,6 @@ pub struct Scenario {
     pub parameters: Vec<ScenarioParameter>,
     #[serde(default)]
     pub variables: Variables,
-    pub pan_offset: egui::Vec2,
-    pub zoom: f32,
 }
 
 impl Scenario {
@@ -285,8 +277,6 @@ impl Scenario {
             connections: Vec::new(),
             parameters: Vec::new(),
             variables: Variables::new(),
-            pan_offset: egui::Vec2::ZERO,
-            zoom: 1.0,
         };
 
         const START_X: f32 = 1000.0;
@@ -387,7 +377,6 @@ impl Node {
     }
 
     pub fn get_input_pin_pos(&self) -> egui::Pos2 {
-        use crate::constants::{FlowDirection, UiConstants};
         match UiConstants::FLOW_DIRECTION {
             FlowDirection::Horizontal => self.position + egui::vec2(0.0, self.height / 2.0),
             FlowDirection::Vertical => self.position + egui::vec2(self.width / 2.0, 0.0),
@@ -395,7 +384,6 @@ impl Node {
     }
 
     pub fn get_output_pin_pos(&self) -> egui::Pos2 {
-        use crate::constants::{FlowDirection, UiConstants};
         match UiConstants::FLOW_DIRECTION {
             FlowDirection::Horizontal => self.position + egui::vec2(self.width, self.height / 2.0),
             FlowDirection::Vertical => self.position + egui::vec2(self.width / 2.0, self.height),
