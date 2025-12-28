@@ -144,7 +144,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         Ok(())
     }
 
-    fn resolve_variables_runtime(&self, template: &str) -> String {
+    fn resolve_variables_runtime(&mut self, template: &str) -> String {
         let mut out = String::with_capacity(template.len());
         let mut chars = template.char_indices().peekable();
 
@@ -180,13 +180,25 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         out
     }
 
-    fn get_variable_value(&self, name: &str) -> VariableValue {
-        if let Some(val) = self.context.scenario_variables.get(name) {
-            val.clone()
-        } else if let Some(val) = self.context.global_variables.get(name) {
-            val.clone()
-        } else {
-            VariableValue::Undefined
+    fn get_variable_value(&mut self, name: &str) -> VariableValue {
+        let scenario = self.context.scenario_variables.get(name);
+        let global = self.context.global_variables.get(name);
+
+        match (scenario, global) {
+            (Some(val), Some(_)) => {
+                self.log.log(LogEntry {
+                    timestamp: get_timestamp(self.context.start_time),
+                    level: LogLevel::Warning,
+                    activity: "LOG".to_string(),
+                    message: format!(
+                        "Variable `{name}` exists both in local and global scopes; using local value"
+                    ),
+                });
+                val.clone()
+            }
+            (Some(val), None) => val.clone(),
+            (None, Some(val)) => val.clone(),
+            (None, None) => VariableValue::Undefined,
         }
     }
 
