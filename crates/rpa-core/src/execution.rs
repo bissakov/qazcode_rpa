@@ -319,21 +319,21 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 });
                 Ok(pc + 1)
             }
-            Instruction::Delay { milliseconds } => {
-                let timestamp = get_timestamp(self.context.start_time);
-                self.log.log(LogEntry {
-                    timestamp,
-                    level: LogLevel::Info,
-                    activity: "DELAY".to_string(),
-                    message: format!("Waiting for {milliseconds} ms"),
-                });
+             Instruction::Delay { milliseconds } => {
+                 let timestamp = get_timestamp(self.context.start_time);
+                 self.log.log(LogEntry {
+                     timestamp,
+                     level: LogLevel::Info,
+                     activity: "DELAY".to_string(),
+                     message: format!("Waiting for {milliseconds} ms"),
+                 });
 
-                if utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
-                    Ok(pc + 1)
-                } else {
-                    Err("Aborted".into())
-                }
-            }
+                 if utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
+                     Ok(pc + 1)
+                 } else {
+                     Err("Execution stopped by user".into())
+                 }
+             }
             Instruction::SetVar { var, value, scope } => {
                 let timestamp = get_timestamp(self.context.start_time);
 
@@ -705,47 +705,58 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         }
     }
 
-    fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
-        self.context.global_variables.set(
-            "last_error",
-            VariableValue::String(error.clone()),
-            VariableScope::Global,
-        );
+     fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
+         if error == "Execution stopped by user" {
+             let timestamp = get_timestamp(self.context.start_time);
+             self.log.log(LogEntry {
+                 timestamp,
+                 level: LogLevel::Info,
+                 activity: "SYSTEM".to_string(),
+                 message: "Execution stopped by user".to_string(),
+             });
+             return Err(error);
+         }
 
-        if let Some(catch_target) = self.error_handlers.pop() {
-            let timestamp = get_timestamp(self.context.start_time);
-            self.log.log(LogEntry {
-                timestamp,
-                level: LogLevel::Warning,
-                activity: "TRY-CATCH".to_string(),
-                message: format!("Error caught: {error}"),
-            });
+         self.context.global_variables.set(
+             "last_error",
+             VariableValue::String(error.clone()),
+             VariableScope::Global,
+         );
 
-            let mut pc = catch_target;
-            while pc < self.program.instructions.len() {
-                match self.execute_instruction(pc) {
-                    Ok(next_pc) => {
-                        if next_pc >= self.program.instructions.len() {
-                            break;
-                        }
-                        pc = next_pc;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
+         if let Some(catch_target) = self.error_handlers.pop() {
+             let timestamp = get_timestamp(self.context.start_time);
+             self.log.log(LogEntry {
+                 timestamp,
+                 level: LogLevel::Warning,
+                 activity: "TRY-CATCH".to_string(),
+                 message: format!("Error caught: {error}"),
+             });
 
-            Ok(())
-        } else {
-            let timestamp = get_timestamp(self.context.start_time);
-            self.log.log(LogEntry {
-                timestamp,
-                level: LogLevel::Error,
-                activity: "ERROR".to_string(),
-                message: format!("Unhandled error: {error}. No error handler connected."),
-            });
-            Err(error)
-        }
-    }
+             let mut pc = catch_target;
+             while pc < self.program.instructions.len() {
+                 match self.execute_instruction(pc) {
+                     Ok(next_pc) => {
+                         if next_pc >= self.program.instructions.len() {
+                             break;
+                         }
+                         pc = next_pc;
+                     }
+                     Err(e) => return Err(e),
+                 }
+             }
+
+             Ok(())
+         } else {
+             let timestamp = get_timestamp(self.context.start_time);
+             self.log.log(LogEntry {
+                 timestamp,
+                 level: LogLevel::Error,
+                 activity: "ERROR".to_string(),
+                 message: format!("Unhandled error: {error}. No error handler connected."),
+             });
+             Err(error)
+         }
+     }
 }
 
 pub fn execute_project_with_typed_vars(
@@ -770,15 +781,17 @@ pub fn execute_project_with_typed_vars(
 
         let mut log = log_sender.clone();
 
-        let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
-        if let Err(e) = executor.execute() {
-            let _ = log_sender.send(LogEntry {
-                timestamp: get_timestamp(context.start_time),
-                level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
-                message: format!("Execution error: {e}"),
-            });
-        }
+         let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
+         if let Err(e) = executor.execute() {
+             if e != "Execution stopped by user" {
+                 let _ = log_sender.send(LogEntry {
+                     timestamp: get_timestamp(context.start_time),
+                     level: LogLevel::Error,
+                     activity: "SYSTEM".to_string(),
+                     message: format!("Execution error: {e}"),
+                 });
+             }
+         }
     }));
 
     if let Err(panic) = result {
