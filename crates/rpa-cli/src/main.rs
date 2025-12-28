@@ -1,11 +1,10 @@
 use clap::Parser;
 use rpa_core::execution::{ExecutionContext, IrExecutor, LogOutput};
 use rpa_core::{
-    IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, VariableValue,
+    IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, StopControl,
+    VariableValue,
 };
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
 #[derive(Parser)]
@@ -88,7 +87,7 @@ fn main() {
     println!();
 
     let verbose = cli.verbose;
-    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_control = StopControl::new();
     let start_time = SystemTime::now();
     let validator = ScenarioValidator::new(&project.main_scenario, &project);
     let validation_result = validator.validate();
@@ -130,7 +129,7 @@ fn main() {
         variables,
         scenario_variables,
         current_scenario_id,
-        stop_flag,
+        stop_control,
     );
 
     let mut log_output = CliLogOutput {

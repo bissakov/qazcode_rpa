@@ -111,7 +111,7 @@ fn get_out_pin_pos_by_branch(node: &Node, branch_type: &BranchType) -> egui::Pos
     match branch_type {
         BranchType::TrueBranch => node.get_output_pin_pos_by_index(0),
         BranchType::FalseBranch => node.get_output_pin_pos_by_index(1),
-        BranchType::LoopBody => node.get_output_pin_pos_by_index(0),
+        BranchType::LoopBody => node.get_output_pin_pos_by_index(1),
         BranchType::ErrorBranch => node.get_output_pin_pos_by_index(1),
         BranchType::TryBranch => node.get_output_pin_pos_by_index(0),
         BranchType::CatchBranch => node.get_output_pin_pos_by_index(1),

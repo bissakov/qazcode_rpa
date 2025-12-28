@@ -2,10 +2,8 @@ use crate::AppSettings;
 use crate::dialogs::DialogState;
 use crate::ui::canvas::ResizeHandle;
 use crate::undo_redo::UndoRedoManager;
-use rpa_core::{Connection, LogEntry, Node, Project, Scenario, Variables};
+use rpa_core::{Connection, LogEntry, Node, Project, Scenario, StopControl, Variables};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 #[derive(Clone, Default)]
 pub struct ClipboardData {
@@ -28,7 +26,7 @@ pub struct RpaApp {
     pub knife_tool_active: bool,
     pub knife_path: Vec<egui::Pos2>,
     pub resizing_node: Option<(String, ResizeHandle)>,
-    pub stop_flag: Arc<AtomicBool>,
+    pub stop_control: StopControl,
     pub dialogs: DialogState,
     pub undo_redo: UndoRedoManager,
     #[allow(dead_code)]
@@ -53,7 +51,7 @@ impl Default for RpaApp {
             knife_tool_active: false,
             knife_path: Vec::new(),
             resizing_node: None,
-            stop_flag: Arc::new(AtomicBool::new(false)),
+            stop_control: StopControl::new(),
             dialogs: DialogState::default(),
             undo_redo: UndoRedoManager::new(),
             property_edit_debounce: 0.0,

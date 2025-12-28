@@ -2,11 +2,9 @@ use crate::constants::UiConstants;
 use crate::evaluator;
 use crate::ir::{Instruction, IrProgram};
 use crate::node_graph::{LogEntry, LogLevel, Project, VariableDirection, VariableValue};
-use crate::utils;
+use crate::stop_control::StopControl;
 use crate::variables::{VariableScope, Variables};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
@@ -22,7 +20,7 @@ pub struct ExecutionContext {
     pub global_variables: Variables,
     pub scenario_variables: Variables,
     pub current_scenario_id: String,
-    stop_flag: Arc<AtomicBool>,
+    pub stop_control: StopControl,
 }
 
 pub struct IrExecutor<'a, L: LogOutput> {
@@ -68,14 +66,14 @@ impl ExecutionContext {
         global_variables: Variables,
         scenario_variables: Variables,
         current_scenario_id: String,
-        stop_flag: Arc<AtomicBool>,
+        stop_control: StopControl,
     ) -> Self {
         Self {
             start_time,
             global_variables,
             scenario_variables,
             current_scenario_id,
-            stop_flag,
+            stop_control,
         }
     }
 
@@ -84,19 +82,19 @@ impl ExecutionContext {
         global_variables: Variables,
         scenario_variables: Variables,
         current_scenario_id: String,
-        stop_flag: Arc<AtomicBool>,
+        stop_control: StopControl,
     ) -> Self {
         Self {
             start_time,
             global_variables,
             scenario_variables,
             current_scenario_id,
-            stop_flag,
+            stop_control,
         }
     }
 
     pub fn is_stopped(&self) -> bool {
-        self.stop_flag.load(Ordering::Relaxed)
+        self.stop_control.is_stopped()
     }
 }
 
@@ -319,21 +317,21 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 });
                 Ok(pc + 1)
             }
-             Instruction::Delay { milliseconds } => {
-                 let timestamp = get_timestamp(self.context.start_time);
-                 self.log.log(LogEntry {
-                     timestamp,
-                     level: LogLevel::Info,
-                     activity: "DELAY".to_string(),
-                     message: format!("Waiting for {milliseconds} ms"),
-                 });
+            Instruction::Delay { milliseconds } => {
+                let timestamp = get_timestamp(self.context.start_time);
+                self.log.log(LogEntry {
+                    timestamp,
+                    level: LogLevel::Info,
+                    activity: "DELAY".to_string(),
+                    message: format!("Waiting for {milliseconds} ms"),
+                });
 
-                 if utils::interruptible_sleep(*milliseconds, &self.context.stop_flag.clone()) {
-                     Ok(pc + 1)
-                 } else {
-                     Err("Execution stopped by user".into())
-                 }
-             }
+                if self.context.stop_control.sleep_interruptible(*milliseconds) {
+                    Ok(pc + 1)
+                } else {
+                    Err("Execution stopped by user".into())
+                }
+            }
             Instruction::SetVar { var, value, scope } => {
                 let timestamp = get_timestamp(self.context.start_time);
 
@@ -705,58 +703,58 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         }
     }
 
-     fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
-         if error == "Execution stopped by user" {
-             let timestamp = get_timestamp(self.context.start_time);
-             self.log.log(LogEntry {
-                 timestamp,
-                 level: LogLevel::Info,
-                 activity: "SYSTEM".to_string(),
-                 message: "Execution stopped by user".to_string(),
-             });
-             return Err(error);
-         }
+    fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
+        if error == "Execution stopped by user" {
+            let timestamp = get_timestamp(self.context.start_time);
+            self.log.log(LogEntry {
+                timestamp,
+                level: LogLevel::Info,
+                activity: "SYSTEM".to_string(),
+                message: "Execution stopped by user".to_string(),
+            });
+            return Err(error);
+        }
 
-         self.context.global_variables.set(
-             "last_error",
-             VariableValue::String(error.clone()),
-             VariableScope::Global,
-         );
+        self.context.global_variables.set(
+            "last_error",
+            VariableValue::String(error.clone()),
+            VariableScope::Global,
+        );
 
-         if let Some(catch_target) = self.error_handlers.pop() {
-             let timestamp = get_timestamp(self.context.start_time);
-             self.log.log(LogEntry {
-                 timestamp,
-                 level: LogLevel::Warning,
-                 activity: "TRY-CATCH".to_string(),
-                 message: format!("Error caught: {error}"),
-             });
+        if let Some(catch_target) = self.error_handlers.pop() {
+            let timestamp = get_timestamp(self.context.start_time);
+            self.log.log(LogEntry {
+                timestamp,
+                level: LogLevel::Warning,
+                activity: "TRY-CATCH".to_string(),
+                message: format!("Error caught: {error}"),
+            });
 
-             let mut pc = catch_target;
-             while pc < self.program.instructions.len() {
-                 match self.execute_instruction(pc) {
-                     Ok(next_pc) => {
-                         if next_pc >= self.program.instructions.len() {
-                             break;
-                         }
-                         pc = next_pc;
-                     }
-                     Err(e) => return Err(e),
-                 }
-             }
+            let mut pc = catch_target;
+            while pc < self.program.instructions.len() {
+                match self.execute_instruction(pc) {
+                    Ok(next_pc) => {
+                        if next_pc >= self.program.instructions.len() {
+                            break;
+                        }
+                        pc = next_pc;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
 
-             Ok(())
-         } else {
-             let timestamp = get_timestamp(self.context.start_time);
-             self.log.log(LogEntry {
-                 timestamp,
-                 level: LogLevel::Error,
-                 activity: "ERROR".to_string(),
-                 message: format!("Unhandled error: {error}. No error handler connected."),
-             });
-             Err(error)
-         }
-     }
+            Ok(())
+        } else {
+            let timestamp = get_timestamp(self.context.start_time);
+            self.log.log(LogEntry {
+                timestamp,
+                level: LogLevel::Error,
+                activity: "ERROR".to_string(),
+                message: format!("Unhandled error: {error}. No error handler connected."),
+            });
+            Err(error)
+        }
+    }
 }
 
 pub fn execute_project_with_typed_vars(
@@ -765,7 +763,7 @@ pub fn execute_project_with_typed_vars(
     start_time: SystemTime,
     program: &IrProgram,
     global_variables: Variables,
-    stop_flag: Arc<AtomicBool>,
+    stop_control: StopControl,
 ) {
     let scenario_variables = program.scenario_variables.clone();
     let current_scenario_id = project.main_scenario.id.clone();
@@ -776,22 +774,22 @@ pub fn execute_project_with_typed_vars(
             global_variables,
             scenario_variables,
             current_scenario_id,
-            stop_flag,
+            stop_control,
         );
 
         let mut log = log_sender.clone();
 
-         let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
-         if let Err(e) = executor.execute() {
-             if e != "Execution stopped by user" {
-                 let _ = log_sender.send(LogEntry {
-                     timestamp: get_timestamp(context.start_time),
-                     level: LogLevel::Error,
-                     activity: "SYSTEM".to_string(),
-                     message: format!("Execution error: {e}"),
-                 });
-             }
-         }
+        let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
+        if let Err(e) = executor.execute() {
+            if e != "Execution stopped by user" {
+                let _ = log_sender.send(LogEntry {
+                    timestamp: get_timestamp(context.start_time),
+                    level: LogLevel::Error,
+                    activity: "SYSTEM".to_string(),
+                    message: format!("Execution error: {e}"),
+                });
+            }
+        }
     }));
 
     if let Err(panic) = result {

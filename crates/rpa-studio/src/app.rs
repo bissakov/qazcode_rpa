@@ -5,6 +5,8 @@ use std::time::SystemTime;
 
 impl eframe::App for RpaApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+
         self.process_execution_updates(ctx);
 
         let old_debounce = self.property_edit_debounce;

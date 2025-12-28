@@ -4,6 +4,7 @@ pub mod evaluator;
 pub mod execution;
 pub mod ir;
 pub mod node_graph;
+pub mod stop_control;
 pub mod utils;
 pub mod validation;
 pub mod variables;
@@ -18,6 +19,7 @@ pub use node_graph::{
     Activity, BranchType, Connection, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
     UiState, VariableType, VariableValue,
 };
+pub use stop_control::StopControl;
 pub use validation::{
     ScenarioValidator, ValidationCache, ValidationIssue, ValidationLevel, ValidationResult,
 };

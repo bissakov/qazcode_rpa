@@ -474,13 +474,13 @@ impl Node {
                 _ => 0,
             },
             Activity::Loop { .. } => match branch_type {
-                BranchType::LoopBody => 0,
-                BranchType::Default => 1,
+                BranchType::Default => 0,
+                BranchType::LoopBody => 1,
                 _ => 0,
             },
             Activity::While { .. } => match branch_type {
-                BranchType::LoopBody => 0,
-                BranchType::Default => 1,
+                BranchType::Default => 0,
+                BranchType::LoopBody => 1,
                 _ => 0,
             },
             Activity::TryCatch => match branch_type {
@@ -511,7 +511,7 @@ impl Node {
                 }
             }
             Activity::Loop { .. } | Activity::While { .. } => {
-                if pin_index == 0 {
+                if pin_index == 1 {
                     BranchType::LoopBody
                 } else {
                     BranchType::Default

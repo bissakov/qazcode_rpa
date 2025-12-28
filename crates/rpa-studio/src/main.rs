@@ -18,8 +18,6 @@ use rpa_core::{
 };
 use rust_i18n::t;
 use state::RpaApp;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 use std::time::SystemTime;
 
@@ -63,6 +61,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_visible(false)
             .with_maximized(true)
             .with_title(t!("window.title").as_ref())
             .with_icon(load_icon()),
@@ -107,7 +106,7 @@ impl RpaApp {
             message: t!("system_messages.execution_start").to_string(),
         });
 
-        self.stop_flag.store(false, Ordering::Relaxed);
+        self.stop_control.reset();
 
         let project = self.project.clone();
 
@@ -165,7 +164,7 @@ impl RpaApp {
             }
         };
 
-        let stop_flag = Arc::clone(&self.stop_flag);
+        let stop_control = self.stop_control.clone();
         let variables = self.global_variables.clone();
 
         std::thread::spawn(move || {
@@ -175,7 +174,7 @@ impl RpaApp {
                 start_time,
                 &program,
                 variables,
-                stop_flag,
+                stop_control,
             );
         });
     }

@@ -834,7 +834,7 @@ impl RpaApp {
                 if self.is_executing {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Wait);
                     if ui.button(t!("toolbar.stop").as_ref()).clicked() {
-                        self.stop_flag.store(true, Ordering::Relaxed);
+                        self.stop_control.request_stop();
                     }
                 } else {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
