@@ -8,7 +8,39 @@ use rpa_core::{
     VariableType, constants::FlowDirection,
 };
 use rust_i18n::t;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Copy)]
+struct InputCache {
+    pub scroll_delta: f32,
+    pub is_panning: bool,
+    pub alt_rmb: bool,
+    pub shift_held: bool,
+    pub is_left_drag: bool,
+    pub pointer_any_released: bool,
+    pub pointer_delta: Vec2,
+    pub pointer_primary_down: bool,
+    pub key_escape: bool,
+}
+
+impl InputCache {
+    fn capture(ui: &Ui, response: &Response) -> Self {
+        Self {
+            scroll_delta: ui.input(|i| i.raw_scroll_delta.y),
+            is_panning: ui.input(|i| {
+                i.pointer.button_down(egui::PointerButton::Middle)
+                    || (i.pointer.button_down(egui::PointerButton::Primary) && i.key_down(egui::Key::Space))
+            }),
+            alt_rmb: ui.input(|i| i.modifiers.alt && i.pointer.button_down(egui::PointerButton::Secondary)),
+            shift_held: ui.input(|i| i.modifiers.shift),
+            is_left_drag: ui.input(|i| i.pointer.primary_down()) && response.drag_started(),
+            pointer_any_released: ui.input(|i| i.pointer.any_released()),
+            pointer_delta: ui.input(|i| i.pointer.delta()),
+            pointer_primary_down: ui.input(|i| i.pointer.primary_down()),
+            key_escape: ui.input(|i| i.key_pressed(egui::Key::Escape)),
+        }
+    }
+}
 
 pub enum ContextMenuAction {
     None,
@@ -48,6 +80,20 @@ pub enum ResizeHandle {
     TopLeft,
 }
 
+type NodeIndex = HashMap<String, usize>;
+
+fn build_node_index(nodes: &[Node]) -> NodeIndex {
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(idx, n)| (n.id.clone(), idx))
+        .collect()
+}
+
+fn get_node_from_index<'a>(nodes: &'a [Node], index: &NodeIndex, id: &str) -> Option<&'a Node> {
+    index.get(id).and_then(|&idx| nodes.get(idx))
+}
+
 fn line_segments_intersect(p1: Pos2, p2: Pos2, p3: Pos2, p4: Pos2) -> bool {
     let d = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
     if d.abs() < 0.0001 {
@@ -79,6 +125,20 @@ fn bezier_to_line_segments(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> 
     }
 
     points
+}
+
+fn get_or_compute_bezier(
+    cache: &mut HashMap<String, Vec<Pos2>>,
+    connection_id: &str,
+    p0: Pos2,
+    p1: Pos2,
+    p2: Pos2,
+    p3: Pos2,
+) -> Vec<Pos2> {
+    cache
+        .entry(connection_id.to_string())
+        .or_insert_with(|| bezier_to_line_segments(p0, p1, p2, p3))
+        .clone()
 }
 
 fn point_to_bezier_distance(point: Pos2, bezier_points: &[Pos2]) -> f32 {
@@ -127,17 +187,19 @@ fn get_out_pin_pos_by_branch(node: &Node, branch_type: &BranchType) -> egui::Pos
 
 fn find_connection_near_point(
     scenario: &Scenario,
+    node_index: &NodeIndex,
     point: Pos2,
     pan_offset: Vec2,
     zoom: f32,
     threshold: f32,
+    cache: &mut HashMap<String, Vec<Pos2>>,
 ) -> Option<(String, String)> {
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(&connection.from_node),
-            scenario.get_node(&connection.to_node),
+            get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
+            get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
             let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, &connection.branch_type);
             let start = to_screen(start_out_pin_pos);
@@ -162,7 +224,7 @@ fn find_connection_near_point(
                 }
             };
 
-            let bezier_points = bezier_to_line_segments(start, control1, control2, end);
+            let bezier_points = get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
             let dist = point_to_bezier_distance(point, &bezier_points);
 
             if dist < threshold {
@@ -176,9 +238,11 @@ fn find_connection_near_point(
 
 fn find_intersecting_connections(
     scenario: &Scenario,
+    node_index: &NodeIndex,
     cut_path: &[Pos2],
     pan_offset: Vec2,
     zoom: f32,
+    cache: &mut HashMap<String, Vec<Pos2>>,
 ) -> Vec<(String, String)> {
     let mut intersecting = Vec::new();
 
@@ -190,8 +254,8 @@ fn find_intersecting_connections(
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(&connection.from_node),
-            scenario.get_node(&connection.to_node),
+            get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
+            get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
             let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, &connection.branch_type);
             let start = to_screen(start_out_pin_pos);
@@ -216,7 +280,7 @@ fn find_intersecting_connections(
                 }
             };
 
-            let bezier_points = bezier_to_line_segments(start, control1, control2, end);
+            let bezier_points = get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
 
             for i in 0..cut_path.len() - 1 {
                 let cut_start = cut_path[i];
@@ -304,6 +368,10 @@ pub fn render_node_graph(
     let (response, painter) =
         ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
+    let input_cache = InputCache::capture(ui, &response);
+
+    let node_index = build_node_index(&scenario.nodes);
+
     // let scenario_view = scenario.get_scenario_view(scenario.id);
 
     let rect = response.rect;
@@ -317,7 +385,7 @@ pub fn render_node_graph(
     };
 
     if response.hovered() {
-        let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
+        let scroll_delta = input_cache.scroll_delta;
         if scroll_delta != 0.0
             && let Some(mouse_pos) = ui.ctx().pointer_hover_pos()
         {
@@ -331,21 +399,29 @@ pub fn render_node_graph(
             let mouse_screen_after =
                 (mouse_world_after.to_vec2() * view.zoom + view.pan_offset).to_pos2();
             view.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
+            
+            if zoom_delta != 0.0 {
+                view.bezier_cache.clear();
+            }
         }
     }
 
-    let is_panning = ui.input(|i| {
-        i.pointer.button_down(egui::PointerButton::Middle)
-            || (i.pointer.button_down(egui::PointerButton::Primary) && i.key_down(egui::Key::Space))
-    });
+    let is_panning = input_cache.is_panning;
 
     if is_panning && response.dragged() && !*state.knife_tool_active {
-        view.pan_offset += response.drag_delta();
+        let pan_delta = response.drag_delta();
+        view.pan_offset += pan_delta;
+        
+        for bezier_points in view.bezier_cache.values_mut() {
+            for point in bezier_points.iter_mut() {
+                *point += pan_delta;
+            }
+        }
+        
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
 
-    let alt_rmb =
-        ui.input(|i| i.modifiers.alt && i.pointer.button_down(egui::PointerButton::Secondary));
+    let alt_rmb = input_cache.alt_rmb;
 
     if alt_rmb && !*state.knife_tool_active {
         *state.knife_tool_active = true;
@@ -356,9 +432,11 @@ pub fn render_node_graph(
         if !state.knife_path.is_empty() {
             let connections_to_remove = find_intersecting_connections(
                 scenario,
+                &node_index,
                 state.knife_path,
                 view.pan_offset,
                 view.zoom,
+                &mut view.bezier_cache,
             );
             for (from_node, to_node) in connections_to_remove {
                 scenario
@@ -379,8 +457,8 @@ pub fn render_node_graph(
         state.knife_path.push(pos);
     }
 
-    let pan_offset = view.pan_offset.clone();
-    let zoom = view.zoom.clone();
+    let pan_offset = view.pan_offset;
+    let zoom = view.zoom;
 
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
@@ -388,8 +466,8 @@ pub fn render_node_graph(
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(&connection.from_node),
-            scenario.get_node(&connection.to_node),
+            get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
+            get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
         ) {
             draw_connection_transformed(
                 &painter,
@@ -397,6 +475,8 @@ pub fn render_node_graph(
                 to_node,
                 &connection.branch_type,
                 to_screen,
+                &connection.id,
+                &mut view.bezier_cache,
             );
         }
     }
@@ -404,13 +484,13 @@ pub fn render_node_graph(
     let mut clicked_node: Option<String> = None;
     let mut any_node_hovered = false;
     let mut new_connection: Option<(String, usize, String)> = None;
-    let shift_held = ui.input(|i| i.modifiers.shift);
+    let shift_held = input_cache.shift_held;
 
     let box_select_start =
         ui.memory(|mem| mem.data.get_temp::<Pos2>(ui.id().with("box_select_start")));
     let mut box_select_rect: Option<Rect> = None;
 
-    let is_left_drag = ui.input(|i| i.pointer.primary_down()) && response.drag_started();
+    let is_left_drag = input_cache.is_left_drag;
     if !*state.knife_tool_active
         && !is_panning
         && is_left_drag
@@ -443,7 +523,7 @@ pub fn render_node_graph(
         }
     }
 
-    if ui.input(|i| i.pointer.any_released()) {
+    if input_cache.pointer_any_released {
         if let Some(select_rect) = box_select_rect {
             if !shift_held {
                 state.selected_nodes.clear();
@@ -470,17 +550,19 @@ pub fn render_node_graph(
 
     let node_hovering_connection = if state.selected_nodes.len() == 1
         && let Some(selected_id) = state.selected_nodes.iter().next().cloned()
-        && let Some(selected_node) = scenario.get_node(&selected_id)
-        && ui.input(|i| i.pointer.primary_down())
+        && let Some(selected_node) = get_node_from_index(&scenario.nodes, &node_index, &selected_id)
+        && input_cache.pointer_primary_down
         && state.connection_from.is_none()
     {
         let node_center_screen = to_screen(selected_node.get_rect().center());
         if find_connection_near_point(
             scenario,
+            &node_index,
             node_center_screen,
             view.pan_offset,
             view.zoom,
             UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
+            &mut view.bezier_cache,
         )
         .is_some()
         {
@@ -495,11 +577,11 @@ pub fn render_node_graph(
     if let Some((resizing_id, handle)) = state.resizing_node.as_ref()
         && let Some(node) = scenario.nodes.iter_mut().find(|n| n.id == *resizing_id)
     {
-        if ui.input(|i| i.pointer.any_released()) {
+        if input_cache.pointer_any_released {
             *state.resizing_node = None;
             resize_ended = true;
         } else {
-            let delta = ui.input(|i| i.pointer.delta());
+            let delta = input_cache.pointer_delta;
             let delta_world = delta / view.zoom;
             match handle {
                 ResizeHandle::Right => {
@@ -826,19 +908,23 @@ pub fn render_node_graph(
                 node.position += drag_delta;
             }
         }
+        view.bezier_cache.clear();
     }
 
     if let Some(released_node_id) = node_drag_released
-        && let Some(released_node) = scenario.get_node(&released_node_id)
+        && let Some(released_node) =
+            get_node_from_index(&scenario.nodes, &node_index, &released_node_id)
     {
         let node_center_screen = to_screen(released_node.get_rect().center());
 
         if let Some((from_id, to_id)) = find_connection_near_point(
             scenario,
+            &node_index,
             node_center_screen,
             view.pan_offset,
             view.zoom,
             UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
+            &mut view.bezier_cache,
         ) && released_node_id != from_id
             && released_node_id != to_id
             && let Some(conn_to_remove) = scenario
@@ -854,11 +940,13 @@ pub fn render_node_graph(
                 .retain(|c| !(c.from_node == from_id && c.to_node == to_id));
 
             if let (Some(from_node), Some(to_node)) = (
-                scenario.nodes.iter().find(|n| n.id == from_id),
-                scenario.nodes.iter().find(|n| n.id == to_id),
+                get_node_from_index(&scenario.nodes, &node_index, &from_id),
+                get_node_from_index(&scenario.nodes, &node_index, &to_id),
             ) {
                 let from_pos = from_node.position;
                 let to_pos = to_node.position;
+                let mid_x = (from_pos.x + to_pos.x) * 0.5;
+                let mid_y = (from_pos.y + to_pos.y) * 0.5;
 
                 match UiConstants::FLOW_DIRECTION {
                     FlowDirection::Horizontal => {
@@ -891,16 +979,12 @@ pub fn render_node_graph(
                     }
                 }
 
-                let from = scenario.nodes.iter().find(|n| n.id == from_id).unwrap();
-                let to = scenario.nodes.iter().find(|n| n.id == to_id).unwrap();
-                let mid_x = (from.position.x + to.position.x) * 0.5;
-                let mid_y = (from.position.y + to.position.y) * 0.5;
-
-                if let Some(inserted_node_mut) =
-                    scenario.nodes.iter_mut().find(|n| n.id == released_node_id)
-                {
-                    inserted_node_mut.position.x = mid_x;
-                    inserted_node_mut.position.y = mid_y;
+                for node in &mut scenario.nodes {
+                    if node.id == released_node_id {
+                        node.position.x = mid_x;
+                        node.position.y = mid_y;
+                        break;
+                    }
                 }
             }
 
@@ -980,7 +1064,9 @@ pub fn render_node_graph(
                     .find(|c| c.to_node == node.id)
                     .cloned()
             {
-                if let Some(from_node) = scenario.get_node(&conn.from_node) {
+                if let Some(from_node) =
+                    get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)
+                {
                     let pin_index = from_node.get_pin_index_for_branch(&conn.branch_type);
                     *state.connection_from = Some((conn.from_node.clone(), pin_index));
                 }
@@ -992,7 +1078,7 @@ pub fn render_node_graph(
 
             if let Some((from_id, pin_index)) = state.connection_from.as_ref()
                 && (input_response.hovered() || node_body_response.hovered())
-                && ui.input(|i| i.pointer.any_released())
+                && input_cache.pointer_any_released
                 && !*state.knife_tool_active
             {
                 if from_id != &node.id {
@@ -1004,7 +1090,7 @@ pub fn render_node_graph(
     }
 
     if let Some((from_id, pin_index)) = state.connection_from.as_ref() {
-        if let Some(from_node) = scenario.get_node(from_id)
+        if let Some(from_node) = get_node_from_index(&scenario.nodes, &node_index, from_id)
             && let Some(pointer_pos) = ui.ctx().pointer_latest_pos()
         {
             let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
@@ -1071,7 +1157,7 @@ pub fn render_node_graph(
                 }
             };
 
-            draw_bezier(
+            draw_bezier_uncached(
                 &painter,
                 start,
                 control1,
@@ -1081,17 +1167,17 @@ pub fn render_node_graph(
             );
         }
 
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+        if input_cache.key_escape || response.secondary_clicked() {
             *state.connection_from = None;
         }
 
-        if ui.input(|i| i.pointer.any_released()) && !any_node_hovered {
+        if input_cache.pointer_any_released && !any_node_hovered {
             *state.connection_from = None;
         }
     }
 
     if let Some((from, pin_index, to)) = new_connection {
-        let from_node = scenario.get_node(&from).unwrap();
+        let from_node = get_node_from_index(&scenario.nodes, &node_index, &from).unwrap();
         let branch_type = from_node.get_branch_type_for_pin(pin_index);
 
         if from_node.get_output_pin_count() > 1 {
@@ -1135,7 +1221,14 @@ pub fn render_node_graph(
         let minimap_layer =
             egui::LayerId::new(egui::Order::Foreground, egui::Id::new("minimap_layer"));
         let minimap_painter = ui.ctx().layer_painter(minimap_layer);
-        render_minimap_internal(&minimap_painter, scenario, view.pan_offset, view.zoom, rect);
+        render_minimap_internal(
+            &minimap_painter,
+            scenario,
+            &node_index,
+            view.pan_offset,
+            view.zoom,
+            rect,
+        );
     }
 
     if *state.knife_tool_active {
@@ -1394,6 +1487,8 @@ fn draw_connection_transformed<F>(
     to_node: &Node,
     branch_type: &BranchType,
     to_screen: F,
+    connection_id: &str,
+    cache: &mut HashMap<String, Vec<Pos2>>,
 ) where
     F: Fn(Pos2) -> Pos2,
 {
@@ -1446,33 +1541,25 @@ fn draw_connection_transformed<F>(
         control2,
         end,
         Stroke::new(2.0, color),
+        connection_id,
+        cache,
     );
 }
 
-fn draw_bezier(painter: &egui::Painter, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, stroke: Stroke) {
-    let steps = UiConstants::BEZIER_STEPS;
-    let mut points = Vec::with_capacity(steps);
+fn draw_bezier(painter: &egui::Painter, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, stroke: Stroke, connection_id: &str, cache: &mut HashMap<String, Vec<Pos2>>) {
+    let points = get_or_compute_bezier(cache, connection_id, p0, p1, p2, p3);
+    painter.add(egui::Shape::line(points, stroke));
+}
 
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let t2 = t * t;
-        let t3 = t2 * t;
-        let mt = 1.0 - t;
-        let mt2 = mt * mt;
-        let mt3 = mt2 * mt;
-
-        let x = mt3 * p0.x + 3.0 * mt2 * t * p1.x + 3.0 * mt * t2 * p2.x + t3 * p3.x;
-        let y = mt3 * p0.y + 3.0 * mt2 * t * p1.y + 3.0 * mt * t2 * p2.y + t3 * p3.y;
-
-        points.push(Pos2::new(x, y));
-    }
-
+fn draw_bezier_uncached(painter: &egui::Painter, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, stroke: Stroke) {
+    let points = bezier_to_line_segments(p0, p1, p2, p3);
     painter.add(egui::Shape::line(points, stroke));
 }
 
 fn render_minimap_internal(
     painter: &egui::Painter,
     scenario: &Scenario,
+    node_index: &NodeIndex,
     pan_offset: Vec2,
     zoom: f32,
     canvas_rect: egui::Rect,
@@ -1545,8 +1632,8 @@ fn render_minimap_internal(
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
-            scenario.get_node(&connection.from_node),
-            scenario.get_node(&connection.to_node),
+            get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
+            get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
             let from_pos = to_minimap(from_node.get_output_pin_pos());
             let to_pos = to_minimap(to_node.get_input_pin_pos());
@@ -1583,9 +1670,7 @@ fn render_minimap_internal(
 pub fn render_node_properties(
     ui: &mut Ui,
     node: &mut Node,
-    scenarios: &[Scenario],
-    _current_scenario: &Scenario,
-    _variables: &rpa_core::Variables,
+    scenarios: &Vec<Scenario>,
 ) -> (bool, ParameterBindingAction) {
     let original_activity = node.activity.clone();
 
@@ -1681,22 +1766,14 @@ pub fn render_node_properties(
             }
             PropertyType::Slider => {
                 ui.label(&label);
-
-                if let Activity::Delay { milliseconds } = &mut node.activity {
-                    ui.add(egui::Slider::new(
-                        milliseconds,
-                        0..=UiConstants::DELAY_MAX_MS,
-                    ));
-                }
             }
             PropertyType::DragInt => {
                 ui.label(&label);
 
-                if let Activity::Loop {
-                    start, end, step, ..
-                } = &mut node.activity
-                {
-                    match prop_idx {
+                match &mut node.activity {
+                    Activity::Loop {
+                        start, end, step, ..
+                    } => match prop_idx {
                         1 => {
                             ui.add(egui::DragValue::new(start));
                         }
@@ -1707,7 +1784,15 @@ pub fn render_node_properties(
                             ui.add(egui::DragValue::new(step));
                         }
                         _ => {}
+                    },
+                    Activity::Delay { milliseconds } => {
+                        ui.add(
+                            egui::DragValue::new(milliseconds)
+                                .range(0..=usize::MAX)
+                                .speed(25),
+                        );
                     }
+                    _ => {}
                 }
             }
             PropertyType::ScenarioSelector => {

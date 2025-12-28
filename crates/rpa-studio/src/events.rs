@@ -109,6 +109,8 @@ impl RpaApp {
                         scenario.remove_node(&node_id);
                     }
                     self.selected_nodes.clear();
+                    let view = self.get_current_scenario_view_mut();
+                    view.bezier_cache.clear();
                     self.undo_redo.add_undo(&self.project);
                 }
             }
@@ -170,6 +172,8 @@ impl RpaApp {
         });
 
         self.selected_nodes.clear();
+        let view = self.get_current_scenario_view_mut();
+        view.bezier_cache.clear();
     }
 
     pub fn paste_clipboard_nodes(&mut self, mouse_world_pos: egui::Vec2) {
@@ -229,5 +233,8 @@ impl RpaApp {
         for (new_from, new_to, branch_type) in connections_to_add {
             scenario.add_connection_with_branch(&new_from, &new_to, branch_type);
         }
+
+        let view = self.get_current_scenario_view_mut();
+        view.bezier_cache.clear();
     }
 }

@@ -29,13 +29,17 @@ impl StopControl {
     }
 
     pub fn sleep_interruptible(&self, ms: u64) -> bool {
+        if ms == 0 {
+            return true;
+        }
+
         if self.is_stopped() {
             return false;
         }
 
         let mutex = Mutex::new(());
         let guard = mutex.lock().unwrap();
-        let result = self.condvar.wait_timeout(guard, Duration::from_millis(ms));
+        _ = self.condvar.wait_timeout(guard, Duration::from_millis(ms));
 
         !self.is_stopped()
     }

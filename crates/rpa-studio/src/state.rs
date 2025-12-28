@@ -99,7 +99,7 @@ impl RpaApp {
         let scenario_id = self.get_current_scenario_id().clone();
         self.scenario_views
             .entry(scenario_id)
-            .or_insert_with(ScenarioViewState::default)
+            .or_default()
     }
 
     #[allow(dead_code)]
@@ -112,7 +112,7 @@ impl RpaApp {
     pub fn get_scenario_view_mut(&mut self, scenario_id: String) -> &mut ScenarioViewState {
         self.scenario_views
             .entry(scenario_id)
-            .or_insert_with(ScenarioViewState::default)
+            .or_default()
     }
 
     #[allow(dead_code)]
@@ -136,6 +136,7 @@ impl RpaApp {
 pub struct ScenarioViewState {
     pub pan_offset: egui::Vec2,
     pub zoom: f32,
+    pub bezier_cache: HashMap<String, Vec<egui::Pos2>>,
 }
 
 impl Default for ScenarioViewState {
@@ -143,6 +144,7 @@ impl Default for ScenarioViewState {
         Self {
             pan_offset: egui::Vec2::ZERO,
             zoom: 1.0,
+            bezier_cache: HashMap::new(),
         }
     }
 }
@@ -151,8 +153,9 @@ impl ScenarioViewState {
     #[allow(dead_code)]
     pub fn new(pan_offset: egui::Vec2, zoom: f32) -> Self {
         Self {
-            pan_offset: pan_offset,
-            zoom: zoom,
+            pan_offset,
+            zoom,
+            bezier_cache: HashMap::new(),
         }
     }
 }

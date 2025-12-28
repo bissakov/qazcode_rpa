@@ -366,7 +366,7 @@ static DELAY_METADATA: ActivityMetadata = ActivityMetadata {
     properties: &[PropertyDef {
         label_key: "properties.delay_ms",
         tooltip_key: None,
-        property_type: PropertyType::Slider,
+        property_type: PropertyType::DragInt,
     }],
 };
 

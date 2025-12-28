@@ -30,8 +30,8 @@ impl UiConstants {
     pub const MINIMAP_PADDING: f32 = 10.0;
     pub const MINIMAP_WORLD_PADDING: f32 = 20.0;
 
-    pub const BEZIER_STEPS: usize = 50;
-    pub const BEZIER_CONTROL_OFFSET: f32 = 50.0;
+    pub const BEZIER_STEPS: usize = 20;
+    pub const BEZIER_CONTROL_OFFSET: f32 = 20.0;
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
     pub const MIN_NODE_SPACING: f32 = 100.0;
 
@@ -41,8 +41,6 @@ impl UiConstants {
 
     pub const DEFAULT_FONT_SIZE: f32 = 18.0;
     pub const SMALL_FONT_MULTIPLIER: f32 = 0.85;
-
-    pub const DELAY_MAX_MS: u64 = 10000;
 
     pub const NEW_NODE_OFFSET_INCREMENT: f32 = 20.0;
 

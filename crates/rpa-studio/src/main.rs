@@ -108,14 +108,12 @@ impl RpaApp {
 
         self.stop_control.reset();
 
-        let project = self.project.clone();
-
         let (log_sender, log_receiver) = channel();
 
         self.log_receiver = Some(log_receiver);
 
         let start_time = SystemTime::now();
-        let validator = ScenarioValidator::new(&project.main_scenario, &project);
+        let validator = ScenarioValidator::new(&self.project.main_scenario, &self.project);
         let validation_result = validator.validate();
 
         if !validation_result.is_valid() {
@@ -139,8 +137,8 @@ impl RpaApp {
         }
 
         let ir_builder = IrBuilder::new(
-            &project.main_scenario,
-            &project,
+            &self.project.main_scenario,
+            &self.project,
             &validation_result.reachable_nodes,
             &mut self.global_variables,
         );
@@ -166,6 +164,8 @@ impl RpaApp {
 
         let stop_control = self.stop_control.clone();
         let variables = self.global_variables.clone();
+
+        let project = std::sync::Arc::new(self.project.clone());
 
         std::thread::spawn(move || {
             execute_project_with_typed_vars(

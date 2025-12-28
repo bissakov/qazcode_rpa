@@ -9,7 +9,6 @@ use rpa_core::{
     Variables, node_graph::VariableDirection, variables::VariableScope,
 };
 use rust_i18n::t;
-use std::sync::atomic::Ordering;
 
 use crate::custom::scenario_tab;
 
@@ -863,6 +862,9 @@ impl RpaApp {
                 {
                     self.redo();
                 }
+
+                let fps = ctx.input(|i| 1.0 / i.stable_dt);
+                ui.label(format!("FPS: {:.2}", fps));
             });
         });
     }
@@ -1132,27 +1134,13 @@ impl RpaApp {
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
-                            let scenarios: Vec<_> = self.project.scenarios.to_vec();
-                            let current_scenario = Some(self.get_current_scenario().clone());
-                            // Extract variables before taking mutable borrow of scenario
-                            let variables_copy = self.project.variables.clone();
-
+                            let scenarios = self.project.scenarios.clone();
                             let (changed, param_action, activity) = {
                                 let scenario = self.get_current_scenario_mut();
                                 if let Some(node) = scenario.get_node_mut(&node_id) {
-                                    if let Some(ref current_scen) = current_scenario {
-                                        let (changed, param_action) =
-                                            canvas::render_node_properties(
-                                                ui,
-                                                node,
-                                                &scenarios,
-                                                current_scen,
-                                                &variables_copy,
-                                            );
-                                        (changed, param_action, Some(node.activity.clone()))
-                                    } else {
-                                        (false, canvas::ParameterBindingAction::None, None)
-                                    }
+                                    let (changed, param_action) =
+                                        canvas::render_node_properties(ui, node, &scenarios);
+                                    (changed, param_action, Some(node.activity.clone()))
                                 } else {
                                     (false, canvas::ParameterBindingAction::None, None)
                                 }
