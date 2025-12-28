@@ -29,9 +29,12 @@ impl InputCache {
             scroll_delta: ui.input(|i| i.raw_scroll_delta.y),
             is_panning: ui.input(|i| {
                 i.pointer.button_down(egui::PointerButton::Middle)
-                    || (i.pointer.button_down(egui::PointerButton::Primary) && i.key_down(egui::Key::Space))
+                    || (i.pointer.button_down(egui::PointerButton::Primary)
+                        && i.key_down(egui::Key::Space))
             }),
-            alt_rmb: ui.input(|i| i.modifiers.alt && i.pointer.button_down(egui::PointerButton::Secondary)),
+            alt_rmb: ui.input(|i| {
+                i.modifiers.alt && i.pointer.button_down(egui::PointerButton::Secondary)
+            }),
             shift_held: ui.input(|i| i.modifiers.shift),
             is_left_drag: ui.input(|i| i.pointer.primary_down()) && response.drag_started(),
             pointer_any_released: ui.input(|i| i.pointer.any_released()),
@@ -224,7 +227,8 @@ fn find_connection_near_point(
                 }
             };
 
-            let bezier_points = get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
+            let bezier_points =
+                get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
             let dist = point_to_bezier_distance(point, &bezier_points);
 
             if dist < threshold {
@@ -280,7 +284,8 @@ fn find_intersecting_connections(
                 }
             };
 
-            let bezier_points = get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
+            let bezier_points =
+                get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
 
             for i in 0..cut_path.len() - 1 {
                 let cut_start = cut_path[i];
@@ -399,7 +404,7 @@ pub fn render_node_graph(
             let mouse_screen_after =
                 (mouse_world_after.to_vec2() * view.zoom + view.pan_offset).to_pos2();
             view.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
-            
+
             if zoom_delta != 0.0 {
                 view.bezier_cache.clear();
             }
@@ -411,13 +416,13 @@ pub fn render_node_graph(
     if is_panning && response.dragged() && !*state.knife_tool_active {
         let pan_delta = response.drag_delta();
         view.pan_offset += pan_delta;
-        
+
         for bezier_points in view.bezier_cache.values_mut() {
             for point in bezier_points.iter_mut() {
                 *point += pan_delta;
             }
         }
-        
+
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
 
@@ -1273,6 +1278,16 @@ fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, 
     let grid_min_y = (world_min_y / world_grid_spacing).floor() * world_grid_spacing;
     let grid_max_y = (world_max_y / world_grid_spacing).ceil() * world_grid_spacing;
 
+    // Bound iterations to prevent unbounded loop on high-resolution displays
+    const MAX_GRID_LINES: usize = 500;
+
+    let num_x_lines = ((grid_max_x - grid_min_x) / world_grid_spacing).ceil() as usize;
+    let num_y_lines = ((grid_max_y - grid_min_y) / world_grid_spacing).ceil() as usize;
+
+    if num_x_lines > MAX_GRID_LINES || num_y_lines > MAX_GRID_LINES {
+        return; // Skip grid rendering if it would be too expensive
+    }
+
     let mut grid_x = grid_min_x;
     while grid_x <= grid_max_x {
         let screen_x = grid_x * zoom + pan_offset.x;
@@ -1546,12 +1561,28 @@ fn draw_connection_transformed<F>(
     );
 }
 
-fn draw_bezier(painter: &egui::Painter, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, stroke: Stroke, connection_id: &str, cache: &mut HashMap<String, Vec<Pos2>>) {
+fn draw_bezier(
+    painter: &egui::Painter,
+    p0: Pos2,
+    p1: Pos2,
+    p2: Pos2,
+    p3: Pos2,
+    stroke: Stroke,
+    connection_id: &str,
+    cache: &mut HashMap<String, Vec<Pos2>>,
+) {
     let points = get_or_compute_bezier(cache, connection_id, p0, p1, p2, p3);
     painter.add(egui::Shape::line(points, stroke));
 }
 
-fn draw_bezier_uncached(painter: &egui::Painter, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, stroke: Stroke) {
+fn draw_bezier_uncached(
+    painter: &egui::Painter,
+    p0: Pos2,
+    p1: Pos2,
+    p2: Pos2,
+    p3: Pos2,
+    stroke: Stroke,
+) {
     let points = bezier_to_line_segments(p0, p1, p2, p3);
     painter.add(egui::Shape::line(points, stroke));
 }
