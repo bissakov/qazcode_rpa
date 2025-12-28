@@ -197,8 +197,6 @@ pub struct UiState {
     pub allow_node_resize: bool,
     #[serde(default = "default_language")]
     pub language: String,
-    #[serde(default = "default_max_iterations")]
-    pub max_iterations: usize,
 }
 
 fn default_language() -> String {
@@ -209,18 +207,7 @@ fn default_allow_node_resize() -> bool {
     true
 }
 
-fn default_max_iterations() -> usize {
-    UiConstants::LOOP_MAX_ITERATIONS
-}
-
 impl UiState {
-    pub fn normalize_max_iterations(value: usize) -> usize {
-        value.clamp(
-            UiConstants::LOOP_ITERATIONS_MIN,
-            UiConstants::LOOP_ITERATIONS_MAX,
-        )
-    }
-
     pub fn is_unlimited(value: usize) -> bool {
         value == 0
     }
@@ -234,7 +221,6 @@ impl Default for UiState {
             show_minimap: true,
             allow_node_resize: true,
             language: "en".to_string(),
-            max_iterations: UiState::normalize_max_iterations(UiConstants::LOOP_MAX_ITERATIONS),
         }
     }
 }
@@ -674,24 +660,5 @@ mod pos2_serde {
     {
         let (x, y) = <(f32, f32)>::deserialize(deserializer)?;
         Ok(egui::pos2(x, y))
-    }
-}
-
-mod vec2_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S>(vec: &egui::Vec2, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (vec.x, vec.y).serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<egui::Vec2, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let (x, y) = <(f32, f32)>::deserialize(deserializer)?;
-        Ok(egui::vec2(x, y))
     }
 }

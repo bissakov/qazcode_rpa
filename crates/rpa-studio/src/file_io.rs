@@ -1,5 +1,4 @@
 use crate::state::RpaApp;
-use eframe::egui;
 use rpa_core::{LogEntry, LogLevel, Project, ProjectFile};
 use rust_i18n::t;
 

@@ -43,9 +43,6 @@ impl UiConstants {
     pub const SMALL_FONT_MULTIPLIER: f32 = 0.85;
 
     pub const DELAY_MAX_MS: u64 = 10000;
-    pub const LOOP_MAX_ITERATIONS: usize = 100;
-    pub const LOOP_ITERATIONS_MIN: usize = 0;
-    pub const LOOP_ITERATIONS_MAX: usize = 10000;
 
     pub const NEW_NODE_OFFSET_INCREMENT: f32 = 20.0;
 
