@@ -1,5 +1,4 @@
-use crate::activity_ext::ActivityExt;
-use crate::colors::ColorPalette;
+use crate::{activity_ext::ActivityExt, colors::ColorPalette};
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -1450,9 +1449,7 @@ fn draw_connection_transformed<F>(
         BranchType::Default => {
             if from_node.get_output_pin_count() > 1 {
                 match &from_node.activity {
-                    crate::Activity::Loop { .. } => {
-                        to_screen(from_node.get_output_pin_pos_by_index(1))
-                    }
+                    Activity::Loop { .. } => to_screen(from_node.get_output_pin_pos_by_index(1)),
                     _ if from_node.activity.can_have_error_output() => {
                         to_screen(from_node.get_output_pin_pos_by_index(0))
                     }
@@ -1647,8 +1644,8 @@ fn render_minimap_internal(
 pub fn render_node_properties(
     ui: &mut Ui,
     node: &mut Node,
-    scenarios: &[crate::Scenario],
-    _current_scenario: &crate::Scenario,
+    scenarios: &[Scenario],
+    _current_scenario: &Scenario,
     _variables: &rpa_core::Variables,
 ) -> (bool, ParameterBindingAction) {
     use rpa_core::{ActivityMetadata, PropertyType};
