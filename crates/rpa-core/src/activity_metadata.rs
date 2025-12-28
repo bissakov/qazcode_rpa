@@ -1,6 +1,7 @@
 use crate::Activity;
 use crate::LogLevel;
 use crate::VariableType;
+use crate::node_graph::NanoId;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,13 +85,13 @@ impl ActivityMetadata {
             (
                 &START_METADATA,
                 Activity::Start {
-                    scenario_id: String::new(),
+                    scenario_id: NanoId::new_with_nanoid(),
                 },
             ),
             (
                 &END_METADATA,
                 Activity::End {
-                    scenario_id: String::new(),
+                    scenario_id: NanoId::new_with_nanoid(),
                 },
             ),
             (
@@ -141,7 +142,7 @@ impl ActivityMetadata {
             (
                 &CALL_SCENARIO_METADATA,
                 Activity::CallScenario {
-                    scenario_id: String::new(),
+                    scenario_id: NanoId::new_with_nanoid(),
                     parameters: Vec::new(),
                 },
             ),
@@ -176,19 +177,19 @@ impl ActivityMetadata {
                     (
                         &START_METADATA,
                         Activity::Start {
-                            scenario_id: String::new(),
+                            scenario_id: NanoId::new_with_nanoid(),
                         },
                     ),
                     (
                         &END_METADATA,
                         Activity::End {
-                            scenario_id: String::new(),
+                            scenario_id: NanoId::new_with_nanoid(),
                         },
                     ),
                     (
                         &CALL_SCENARIO_METADATA,
                         Activity::CallScenario {
-                            scenario_id: String::new(),
+                            scenario_id: NanoId::new_with_nanoid(),
                             parameters: Vec::new(),
                         },
                     ),

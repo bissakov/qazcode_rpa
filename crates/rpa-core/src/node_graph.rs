@@ -2,6 +2,7 @@ use crate::constants::{FlowDirection, UiConstants};
 use crate::variables::Variables;
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::{collections::VecDeque, fmt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
@@ -244,7 +245,7 @@ impl Project {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scenario {
-    pub id: String,
+    pub id: NanoId,
     pub name: String,
     pub nodes: Vec<Node>,
     pub connections: Vec<Connection>,
@@ -257,7 +258,7 @@ pub struct Scenario {
 impl Scenario {
     pub fn new(name: &str) -> Self {
         let mut scenario = Self {
-            id: nanoid!(8),
+            id: NanoId::new_with_nanoid(),
             name: name.to_string(),
             nodes: Vec::new(),
             connections: Vec::new(),
@@ -284,7 +285,7 @@ impl Scenario {
         if scenario.nodes.len() >= 2 {
             let start_id = scenario.nodes[0].id.clone();
             let end_id = scenario.nodes[1].id.clone();
-            scenario.add_connection_with_branch(&start_id, &end_id, BranchType::Default);
+            scenario.add_connection_with_branch(start_id, end_id, BranchType::Default);
         }
 
         scenario
@@ -296,7 +297,7 @@ impl Scenario {
             _ => (UiConstants::NODE_WIDTH, UiConstants::NODE_HEIGHT),
         };
         let node = Node {
-            id: nanoid!(8),
+            id: NanoId::new_with_nanoid(),
             activity,
             position,
             width,
@@ -305,21 +306,26 @@ impl Scenario {
         self.nodes.push(node);
     }
 
-    pub fn get_node_mut(&mut self, id: &str) -> Option<&mut Node> {
+    pub fn get_node_mut(&mut self, id: NanoId) -> Option<&mut Node> {
         self.nodes.iter_mut().find(|n| n.id == id)
     }
 
-    pub fn get_node(&self, id: &str) -> Option<&Node> {
+    pub fn get_node(&self, id: NanoId) -> Option<&Node> {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    pub fn remove_node(&mut self, id: &str) {
+    pub fn remove_node(&mut self, id: NanoId) {
         self.nodes.retain(|n| n.id != id);
         self.connections
             .retain(|c| c.from_node != id && c.to_node != id);
     }
 
-    pub fn add_connection_with_branch(&mut self, from: &str, to: &str, branch_type: BranchType) {
+    pub fn add_connection_with_branch(
+        &mut self,
+        from: NanoId,
+        to: NanoId,
+        branch_type: BranchType,
+    ) {
         if self
             .connections
             .iter()
@@ -328,18 +334,40 @@ impl Scenario {
             return;
         }
 
-        self.connections.push(Connection {
-            id: nanoid!(8),
-            from_node: from.to_string(),
-            to_node: to.to_string(),
-            branch_type,
-        });
+        self.connections
+            .push(Connection::new_with_nanoid(from, to, branch_type));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Hash, Eq)]
+pub struct NanoId(Arc<str>);
+
+impl fmt::Display for NanoId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl NanoId {
+    pub fn new<S>(s: S) -> Self
+    where
+        S: AsRef<str>,
+    {
+        NanoId(Arc::from(s.as_ref()))
+    }
+
+    pub fn new_with_nanoid() -> Self {
+        NanoId(Arc::from(nanoid!(8)))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
-    pub id: String,
+    pub id: NanoId,
     pub activity: Activity,
     #[serde(with = "pos2_serde")]
     pub position: egui::Pos2,
@@ -542,10 +570,10 @@ impl Node {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Activity {
     Start {
-        scenario_id: String,
+        scenario_id: NanoId,
     },
     End {
-        scenario_id: String,
+        scenario_id: NanoId,
     },
     Log {
         level: LogLevel,
@@ -577,7 +605,7 @@ pub enum Activity {
         condition: String,
     },
     CallScenario {
-        scenario_id: String,
+        scenario_id: NanoId,
         #[serde(default)]
         parameters: Vec<VariablesBinding>,
     },
@@ -625,11 +653,31 @@ pub struct ScenarioParameter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
-    pub id: String,
-    pub from_node: String,
-    pub to_node: String,
+    pub id: NanoId,
+    pub from_node: NanoId,
+    pub to_node: NanoId,
     #[serde(default)]
     pub branch_type: BranchType,
+}
+
+impl Connection {
+    pub fn new(id: NanoId, from_node: NanoId, to_node: NanoId, branch_type: BranchType) -> Self {
+        Self {
+            id,
+            from_node,
+            to_node,
+            branch_type,
+        }
+    }
+
+    pub fn new_with_nanoid(from_node: NanoId, to_node: NanoId, branch_type: BranchType) -> Self {
+        Self {
+            id: NanoId::new_with_nanoid(),
+            from_node,
+            to_node,
+            branch_type,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

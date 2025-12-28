@@ -123,7 +123,7 @@ fn main() {
     }
 
     let scenario_variables = rpa_core::variables::Variables::new();
-    let current_scenario_id = project.main_scenario.id.clone();
+    let current_scenario_id = project.main_scenario.id.as_str().to_string();
     let mut context = ExecutionContext::new_without_sender(
         start_time,
         variables,

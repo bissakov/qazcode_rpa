@@ -105,7 +105,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         context: &'a mut ExecutionContext,
         log: &'a mut L,
     ) -> Self {
-        let current_scenario_id = project.main_scenario.id.clone();
+        let current_scenario_id = project.main_scenario.id.as_str().to_string();
         Self {
             program,
             project,
@@ -600,10 +600,6 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 scenario_id,
                 parameters,
             } => {
-                if scenario_id.is_empty() {
-                    return Ok(pc + 1);
-                }
-
                 if self.call_stack.len() >= 100 {
                     return Err("Maximum scenario call depth exceeded (100)".to_string());
                 }
@@ -674,8 +670,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         var_bindings: parameters.clone(),
                         saved_scenario_variables,
                     });
-                    self.current_scenario_id = scenario_id.clone();
-                    self.context.current_scenario_id = scenario_id.clone();
+                    self.current_scenario_id = scenario_id.as_str().to_string();
+                    self.context.current_scenario_id = scenario_id.as_str().to_string();
 
                     if let Some(&start_index) = self.program.scenario_start_index.get(scenario_id) {
                         Ok(start_index)
@@ -766,7 +762,7 @@ pub fn execute_project_with_typed_vars(
     stop_control: StopControl,
 ) {
     let scenario_variables = program.scenario_variables.clone();
-    let current_scenario_id = project.main_scenario.id.clone();
+    let current_scenario_id = project.main_scenario.id.as_str().to_string();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut context = ExecutionContext::new(

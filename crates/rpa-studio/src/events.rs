@@ -3,7 +3,7 @@ use crate::{
     ui::canvas,
 };
 use eframe::egui;
-use nanoid::nanoid;
+use rpa_core::NanoId;
 
 impl RpaApp {
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
@@ -62,7 +62,7 @@ impl RpaApp {
                 let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
                 let scenario = self.get_current_scenario_mut();
                 for node_id in nodes_to_remove {
-                    scenario.remove_node(&node_id);
+                    scenario.remove_node(node_id);
                 }
                 self.selected_nodes.clear();
                 handled = true;
@@ -106,7 +106,7 @@ impl RpaApp {
                     let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
                     let scenario = self.get_current_scenario_mut();
                     for node_id in nodes_to_remove {
-                        scenario.remove_node(&node_id);
+                        scenario.remove_node(node_id);
                     }
                     self.selected_nodes.clear();
                     let view = self.get_current_scenario_view_mut();
@@ -139,7 +139,7 @@ impl RpaApp {
             .cloned()
             .collect();
 
-        let clipboard_node_ids: std::collections::HashSet<String> =
+        let clipboard_node_ids: std::collections::HashSet<NanoId> =
             nodes_to_copy.iter().map(|n| n.id.clone()).collect();
 
         let connections_to_copy: Vec<_> = scenario
@@ -161,7 +161,7 @@ impl RpaApp {
     pub fn cut_selected_nodes(&mut self) {
         self.copy_selected_nodes();
 
-        let selected_ids: Vec<String> = self.selected_nodes.iter().cloned().collect();
+        let selected_ids: Vec<NanoId> = self.selected_nodes.iter().cloned().collect();
 
         let scenario = self.get_current_scenario_mut();
         scenario
@@ -198,12 +198,12 @@ impl RpaApp {
 
         let mut nodes_to_paste = Vec::new();
         let mut new_node_ids = Vec::new();
-        let mut old_to_new_id: std::collections::HashMap<String, String> =
+        let mut old_to_new_id: std::collections::HashMap<NanoId, NanoId> =
             std::collections::HashMap::new();
 
         for node in &self.clipboard.nodes {
             let mut new_node = node.clone();
-            let new_id = nanoid!(8);
+            let new_id = NanoId::new_with_nanoid();
             old_to_new_id.insert(new_node.id.clone(), new_id.clone());
             new_node.id = new_id;
             new_node.position = (new_node.position.to_vec2() + offset).to_pos2();
@@ -231,7 +231,7 @@ impl RpaApp {
         scenario.nodes.extend(nodes_to_paste);
 
         for (new_from, new_to, branch_type) in connections_to_add {
-            scenario.add_connection_with_branch(&new_from, &new_to, branch_type);
+            scenario.add_connection_with_branch(new_from, new_to, branch_type);
         }
 
         let view = self.get_current_scenario_view_mut();

@@ -15,8 +15,8 @@ pub use constants::{ActivityCategories, ActivityDefaults, UiConstants};
 pub use execution::{execute_project_with_typed_vars, get_timestamp};
 pub use ir::{Instruction, IrBuilder, IrProgram};
 pub use node_graph::{
-    Activity, BranchType, Connection, LogEntry, LogLevel, Node, Project, ProjectFile, Scenario,
-    UiState, VariableType, VariableValue,
+    Activity, BranchType, Connection, LogEntry, LogLevel, NanoId, Node, Project, ProjectFile,
+    Scenario, UiState, VariableType, VariableValue,
 };
 pub use stop_control::StopControl;
 pub use validation::{

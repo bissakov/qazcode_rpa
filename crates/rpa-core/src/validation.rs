@@ -1,5 +1,5 @@
 use crate::execution::LogOutput;
-use crate::node_graph::{Activity, BranchType, LogEntry, LogLevel, Project, Scenario};
+use crate::node_graph::{Activity, BranchType, LogEntry, LogLevel, NanoId, Project, Scenario};
 use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 
@@ -12,7 +12,7 @@ pub enum ValidationLevel {
 #[derive(Debug, Clone)]
 pub struct ValidationIssue {
     pub level: ValidationLevel,
-    pub node_id: Option<String>,
+    pub node_id: Option<NanoId>,
     pub message: String,
     pub code: String,
 }
@@ -21,7 +21,7 @@ pub struct ValidationIssue {
 pub struct ValidationResult {
     pub errors: Vec<ValidationIssue>,
     pub warnings: Vec<ValidationIssue>,
-    pub reachable_nodes: HashSet<String>,
+    pub reachable_nodes: HashSet<NanoId>,
 }
 
 impl Default for ValidationResult {
@@ -186,7 +186,7 @@ impl<'a> ScenarioValidator<'a> {
 
     fn check_connection_integrity(&self) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
-        let node_ids: HashSet<String> = self.scenario.nodes.iter().map(|n| n.id.clone()).collect();
+        let node_ids: HashSet<NanoId> = self.scenario.nodes.iter().map(|n| n.id.clone()).collect();
 
         for conn in &self.scenario.connections {
             if !node_ids.contains(&conn.from_node) {
@@ -226,7 +226,7 @@ impl<'a> ScenarioValidator<'a> {
         for node_id in reachable_from_start {
             if !can_reach_end.contains(&node_id)
                 && !loop_body_nodes.contains(&node_id)
-                && let Some(node) = self.scenario.get_node(&node_id)
+                && let Some(node) = self.scenario.get_node(node_id.clone())
                 && !matches!(node.activity, Activity::End { .. })
             {
                 let activity_name = get_activity_name(&node.activity);
@@ -256,7 +256,7 @@ impl<'a> ScenarioValidator<'a> {
 
             match &node.activity {
                 Activity::IfCondition { .. } => {
-                    if !self.has_connection(&node.id, BranchType::TrueBranch) {
+                    if !self.has_connection(node.id.clone(), BranchType::TrueBranch) {
                         issues.push(ValidationIssue {
                             level: ValidationLevel::Warning,
                             node_id: Some(node.id.clone()),
@@ -267,7 +267,7 @@ impl<'a> ScenarioValidator<'a> {
                             code: "W001".to_string(),
                         });
                     }
-                    if !self.has_connection(&node.id, BranchType::FalseBranch) {
+                    if !self.has_connection(node.id.clone(), BranchType::FalseBranch) {
                         issues.push(ValidationIssue {
                             level: ValidationLevel::Warning,
                             node_id: Some(node.id.clone()),
@@ -280,7 +280,7 @@ impl<'a> ScenarioValidator<'a> {
                     }
                 }
                 Activity::TryCatch => {
-                    if !self.has_connection(&node.id, BranchType::TryBranch) {
+                    if !self.has_connection(node.id.clone(), BranchType::TryBranch) {
                         issues.push(ValidationIssue {
                             level: ValidationLevel::Warning,
                             node_id: Some(node.id.clone()),
@@ -291,7 +291,7 @@ impl<'a> ScenarioValidator<'a> {
                             code: "W003".to_string(),
                         });
                     }
-                    if !self.has_connection(&node.id, BranchType::CatchBranch) {
+                    if !self.has_connection(node.id.clone(), BranchType::CatchBranch) {
                         issues.push(ValidationIssue {
                             level: ValidationLevel::Warning,
                             node_id: Some(node.id.clone()),
@@ -304,7 +304,7 @@ impl<'a> ScenarioValidator<'a> {
                     }
                 }
                 Activity::Loop { .. } | Activity::While { .. } => {
-                    if !self.has_connection(&node.id, BranchType::LoopBody) {
+                    if !self.has_connection(node.id.clone(), BranchType::LoopBody) {
                         issues.push(ValidationIssue {
                             level: ValidationLevel::Warning,
                             node_id: Some(node.id.clone()),
@@ -323,7 +323,7 @@ impl<'a> ScenarioValidator<'a> {
         issues
     }
 
-    fn validate_control_flow(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn validate_control_flow(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
 
         issues.extend(self.check_loop_parameters(reachable_nodes));
@@ -334,7 +334,7 @@ impl<'a> ScenarioValidator<'a> {
         issues
     }
 
-    fn check_loop_parameters(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn check_loop_parameters(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
 
         for node in &self.scenario.nodes {
@@ -383,7 +383,7 @@ impl<'a> ScenarioValidator<'a> {
         issues
     }
 
-    fn check_condition_syntax(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn check_condition_syntax(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
 
         for node in &self.scenario.nodes {
@@ -412,7 +412,7 @@ impl<'a> ScenarioValidator<'a> {
         issues
     }
 
-    fn check_scenario_references(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn check_scenario_references(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
 
         for node in &self.scenario.nodes {
@@ -421,7 +421,7 @@ impl<'a> ScenarioValidator<'a> {
             }
 
             if let Activity::CallScenario { scenario_id, .. } = &node.activity
-                && !scenario_id.is_empty()
+                && !scenario_id.as_str().is_empty()
             {
                 let scenario_exists = self.project.scenarios.iter().any(|s| s.id == *scenario_id)
                     || self.project.main_scenario.id == *scenario_id;
@@ -449,7 +449,7 @@ impl<'a> ScenarioValidator<'a> {
         let mut call_stack = Vec::new();
 
         if let Some(cycle) = self.find_scenario_call_chain(
-            &self.scenario.id,
+            self.scenario.id.clone(),
             &mut visited,
             &mut call_stack,
             depth_limit,
@@ -461,7 +461,7 @@ impl<'a> ScenarioValidator<'a> {
                     "Recursive scenario call detected: {} (depth limit: {})",
                     cycle
                         .iter()
-                        .map(|id| self.get_scenario_name(id))
+                        .map(|id| self.get_scenario_name(id.clone()))
                         .collect::<Vec<_>>()
                         .join(" -> "),
                     depth_limit
@@ -475,26 +475,26 @@ impl<'a> ScenarioValidator<'a> {
 
     fn find_scenario_call_chain(
         &self,
-        scenario_id: &str,
-        visited: &mut HashSet<String>,
-        call_stack: &mut Vec<String>,
+        scenario_id: NanoId,
+        visited: &mut HashSet<NanoId>,
+        call_stack: &mut Vec<NanoId>,
         depth_limit: usize,
-    ) -> Option<Vec<String>> {
+    ) -> Option<Vec<NanoId>> {
         if call_stack.len() >= depth_limit {
             return Some(call_stack.clone());
         }
 
-        if call_stack.iter().any(|id| id == scenario_id) {
-            let cycle_start = call_stack.iter().position(|id| id == scenario_id).unwrap();
+        if call_stack.iter().any(|id| *id == scenario_id) {
+            let cycle_start = call_stack.iter().position(|id| *id == scenario_id).unwrap();
             return Some(call_stack[cycle_start..].to_vec());
         }
 
-        if visited.contains(scenario_id) {
+        if visited.contains(&scenario_id) {
             return None;
         }
 
-        visited.insert(scenario_id.to_string());
-        call_stack.push(scenario_id.to_string());
+        visited.insert(scenario_id.clone());
+        call_stack.push(scenario_id.clone());
 
         let scenario = if self.project.main_scenario.id == scenario_id {
             &self.project.main_scenario
@@ -510,8 +510,12 @@ impl<'a> ScenarioValidator<'a> {
                 scenario_id: called_id,
                 ..
             } = &node.activity
-                && let Some(cycle) =
-                    self.find_scenario_call_chain(called_id, visited, call_stack, depth_limit)
+                && let Some(cycle) = self.find_scenario_call_chain(
+                    called_id.clone(),
+                    visited,
+                    call_stack,
+                    depth_limit,
+                )
             {
                 return Some(cycle);
             }
@@ -522,7 +526,7 @@ impl<'a> ScenarioValidator<'a> {
         None
     }
 
-    fn get_scenario_name(&self, scenario_id: &str) -> String {
+    fn get_scenario_name(&self, scenario_id: NanoId) -> String {
         if self.project.main_scenario.id == scenario_id {
             self.project.main_scenario.name.clone()
         } else {
@@ -535,7 +539,7 @@ impl<'a> ScenarioValidator<'a> {
         }
     }
 
-    fn validate_data_flow(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn validate_data_flow(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
 
         issues.extend(self.check_variable_names(reachable_nodes));
@@ -544,7 +548,7 @@ impl<'a> ScenarioValidator<'a> {
         issues
     }
 
-    fn check_variable_names(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn check_variable_names(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
 
         for node in &self.scenario.nodes {
@@ -583,7 +587,7 @@ impl<'a> ScenarioValidator<'a> {
         issues
     }
 
-    fn check_undefined_variables(&self, reachable_nodes: &HashSet<String>) -> Vec<ValidationIssue> {
+    fn check_undefined_variables(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
         let mut defined_vars: HashSet<String> = self.project.variables.names().cloned().collect();
         let mut used_vars: HashSet<String> = HashSet::new();
@@ -595,7 +599,7 @@ impl<'a> ScenarioValidator<'a> {
             .find(|n| matches!(n.activity, Activity::Start { .. }));
         if let Some(start) = start_node {
             self.collect_variable_usage(
-                &start.id,
+                start.id.clone(),
                 reachable_nodes,
                 &mut defined_vars,
                 &mut used_vars,
@@ -618,16 +622,16 @@ impl<'a> ScenarioValidator<'a> {
 
     fn collect_variable_usage(
         &self,
-        node_id: &str,
-        reachable_nodes: &HashSet<String>,
+        node_id: NanoId,
+        reachable_nodes: &HashSet<NanoId>,
         defined_vars: &mut HashSet<String>,
         used_vars: &mut HashSet<String>,
     ) {
-        if !reachable_nodes.contains(node_id) {
+        if !reachable_nodes.contains(&node_id) {
             return;
         }
 
-        let node = match self.scenario.get_node(node_id) {
+        let node = match self.scenario.get_node(node_id.clone()) {
             Some(n) => n,
             None => return,
         };
@@ -649,7 +653,7 @@ impl<'a> ScenarioValidator<'a> {
             _ => {}
         }
 
-        let next_nodes: Vec<String> = self
+        let next_nodes: Vec<NanoId> = self
             .scenario
             .connections
             .iter()
@@ -658,7 +662,7 @@ impl<'a> ScenarioValidator<'a> {
             .collect();
 
         for next_id in next_nodes {
-            self.collect_variable_usage(&next_id, reachable_nodes, defined_vars, used_vars);
+            self.collect_variable_usage(next_id, reachable_nodes, defined_vars, used_vars);
         }
     }
 
@@ -687,7 +691,7 @@ impl<'a> ScenarioValidator<'a> {
         }
     }
 
-    fn compute_reachable_from_start(&self) -> HashSet<String> {
+    fn compute_reachable_from_start(&self) -> HashSet<NanoId> {
         let start_node = self
             .scenario
             .nodes
@@ -695,21 +699,21 @@ impl<'a> ScenarioValidator<'a> {
             .find(|n| matches!(n.activity, Activity::Start { .. }));
         if let Some(start) = start_node {
             let mut reachable = HashSet::new();
-            self.compute_reachable_recursive(&start.id, &mut reachable);
+            self.compute_reachable_recursive(start.id.clone(), &mut reachable);
             reachable
         } else {
             HashSet::new()
         }
     }
 
-    fn compute_reachable_recursive(&self, node_id: &str, reachable: &mut HashSet<String>) {
-        if reachable.contains(node_id) {
+    fn compute_reachable_recursive(&self, node_id: NanoId, reachable: &mut HashSet<NanoId>) {
+        if reachable.contains(&node_id) {
             return;
         }
 
-        reachable.insert(node_id.to_string());
+        reachable.insert(node_id.clone());
 
-        let next_nodes: Vec<String> = self
+        let next_nodes: Vec<NanoId> = self
             .scenario
             .connections
             .iter()
@@ -718,11 +722,11 @@ impl<'a> ScenarioValidator<'a> {
             .collect();
 
         for next_id in next_nodes {
-            self.compute_reachable_recursive(&next_id, reachable);
+            self.compute_reachable_recursive(next_id, reachable);
         }
     }
 
-    fn compute_can_reach_end(&self) -> HashSet<String> {
+    fn compute_can_reach_end(&self) -> HashSet<NanoId> {
         let end_node = self
             .scenario
             .nodes
@@ -730,21 +734,21 @@ impl<'a> ScenarioValidator<'a> {
             .find(|n| matches!(n.activity, Activity::End { .. }));
         if let Some(end) = end_node {
             let mut can_reach = HashSet::new();
-            self.compute_reverse_reachable(&end.id, &mut can_reach);
+            self.compute_reverse_reachable(end.id.clone(), &mut can_reach);
             can_reach
         } else {
             HashSet::new()
         }
     }
 
-    fn compute_reverse_reachable(&self, node_id: &str, can_reach: &mut HashSet<String>) {
-        if can_reach.contains(node_id) {
+    fn compute_reverse_reachable(&self, node_id: NanoId, can_reach: &mut HashSet<NanoId>) {
+        if can_reach.contains(&node_id) {
             return;
         }
 
-        can_reach.insert(node_id.to_string());
+        can_reach.insert(node_id.clone());
 
-        let prev_nodes: Vec<String> = self
+        let prev_nodes: Vec<NanoId> = self
             .scenario
             .connections
             .iter()
@@ -753,11 +757,11 @@ impl<'a> ScenarioValidator<'a> {
             .collect();
 
         for prev_id in prev_nodes {
-            self.compute_reverse_reachable(&prev_id, can_reach);
+            self.compute_reverse_reachable(prev_id, can_reach);
         }
     }
 
-    fn get_connected_nodes(&self) -> HashSet<String> {
+    fn get_connected_nodes(&self) -> HashSet<NanoId> {
         let mut connected = HashSet::new();
 
         for conn in &self.scenario.connections {
@@ -768,14 +772,14 @@ impl<'a> ScenarioValidator<'a> {
         connected
     }
 
-    fn has_connection(&self, node_id: &str, branch_type: BranchType) -> bool {
+    fn has_connection(&self, node_id: NanoId, branch_type: BranchType) -> bool {
         self.scenario
             .connections
             .iter()
             .any(|c| c.from_node == node_id && c.branch_type == branch_type)
     }
 
-    fn compute_loop_body_nodes(&self) -> HashSet<String> {
+    fn compute_loop_body_nodes(&self) -> HashSet<NanoId> {
         let mut all_loop_bodies = HashSet::new();
 
         for node in &self.scenario.nodes {
@@ -792,7 +796,7 @@ impl<'a> ScenarioValidator<'a> {
                     .map(|c| c.to_node.clone());
 
                 for start in body_starts {
-                    self.collect_loop_body_recursive(&start, &node.id, &mut this_loop_body);
+                    self.collect_loop_body_recursive(start, node.id.clone(), &mut this_loop_body);
                 }
 
                 all_loop_bodies.extend(this_loop_body);
@@ -804,17 +808,17 @@ impl<'a> ScenarioValidator<'a> {
 
     fn collect_loop_body_recursive(
         &self,
-        node_id: &str,
-        loop_id: &str,
-        collected: &mut HashSet<String>,
+        node_id: NanoId,
+        loop_id: NanoId,
+        collected: &mut HashSet<NanoId>,
     ) {
-        if collected.contains(node_id) {
+        if collected.contains(&node_id) {
             return;
         }
 
-        collected.insert(node_id.to_string());
+        collected.insert(node_id.clone());
 
-        let next_nodes: Vec<String> = self
+        let next_nodes: Vec<NanoId> = self
             .scenario
             .connections
             .iter()
@@ -824,7 +828,7 @@ impl<'a> ScenarioValidator<'a> {
 
         for next_id in next_nodes {
             if next_id != loop_id {
-                self.collect_loop_body_recursive(&next_id, loop_id, collected);
+                self.collect_loop_body_recursive(next_id, loop_id.clone(), collected);
             }
         }
     }
@@ -880,7 +884,7 @@ fn validate_condition_syntax(condition: &str) -> Result<(), String> {
 }
 
 pub struct ValidationCache {
-    cache: HashMap<(String, u64), ValidationResult>,
+    cache: HashMap<(NanoId, u64), ValidationResult>,
 }
 
 impl Default for ValidationCache {
@@ -906,8 +910,8 @@ impl ValidationCache {
         self.cache.insert((scenario.id.clone(), hash), result);
     }
 
-    pub fn invalidate(&mut self, scenario_id: &str) {
-        self.cache.retain(|(id, _), _| id != scenario_id);
+    pub fn invalidate(&mut self, scenario_id: NanoId) {
+        self.cache.retain(|(id, _), _| *id != scenario_id);
     }
 
     fn compute_hash(scenario: &Scenario) -> u64 {
@@ -1019,30 +1023,30 @@ fn hash_branch_type(branch_type: &BranchType, hasher: &mut DefaultHasher) {
 
 pub fn compute_call_graph(
     project: &Project,
-) -> (HashMap<String, HashSet<String>>, HashSet<String>) {
-    let mut call_graph: HashMap<String, HashSet<String>> = HashMap::new();
+) -> (HashMap<NanoId, HashSet<NanoId>>, HashSet<NanoId>) {
+    let mut call_graph: HashMap<NanoId, HashSet<NanoId>> = HashMap::new();
     let mut visited = HashSet::new();
     let mut in_progress = HashSet::new();
     let mut recursive_scenarios = HashSet::new();
 
     fn dfs(
-        scenario_id: &str,
+        scenario_id: NanoId,
         project: &Project,
-        call_graph: &mut HashMap<String, HashSet<String>>,
-        visited: &mut HashSet<String>,
-        in_progress: &mut HashSet<String>,
-        recursive_scenarios: &mut HashSet<String>,
+        call_graph: &mut HashMap<NanoId, HashSet<NanoId>>,
+        visited: &mut HashSet<NanoId>,
+        in_progress: &mut HashSet<NanoId>,
+        recursive_scenarios: &mut HashSet<NanoId>,
     ) {
-        if visited.contains(scenario_id) {
+        if visited.contains(&scenario_id) {
             return;
         }
 
-        if in_progress.contains(scenario_id) {
-            recursive_scenarios.insert(scenario_id.to_string());
+        if in_progress.contains(&scenario_id) {
+            recursive_scenarios.insert(scenario_id);
             return;
         }
 
-        in_progress.insert(scenario_id.to_string());
+        in_progress.insert(scenario_id.clone());
 
         let scenario = if project.main_scenario.id == scenario_id {
             &project.main_scenario
@@ -1050,8 +1054,8 @@ pub fn compute_call_graph(
             match project.scenarios.iter().find(|s| s.id == scenario_id) {
                 Some(s) => s,
                 None => {
-                    in_progress.remove(scenario_id);
-                    visited.insert(scenario_id.to_string());
+                    in_progress.remove(&scenario_id);
+                    visited.insert(scenario_id);
                     return;
                 }
             }
@@ -1068,11 +1072,11 @@ pub fn compute_call_graph(
             }
         }
 
-        call_graph.insert(scenario_id.to_string(), called_scenarios.clone());
+        call_graph.insert(scenario_id.clone(), called_scenarios.clone());
 
         for called_id in called_scenarios {
             dfs(
-                &called_id,
+                called_id,
                 project,
                 call_graph,
                 visited,
@@ -1081,12 +1085,12 @@ pub fn compute_call_graph(
             );
         }
 
-        in_progress.remove(scenario_id);
-        visited.insert(scenario_id.to_string());
+        in_progress.remove(&scenario_id);
+        visited.insert(scenario_id);
     }
 
     dfs(
-        &project.main_scenario.id,
+        project.main_scenario.id.clone(),
         project,
         &mut call_graph,
         &mut visited,

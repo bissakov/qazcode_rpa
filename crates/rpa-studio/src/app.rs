@@ -1,10 +1,14 @@
 use crate::state::RpaApp;
 use eframe::egui;
 use rpa_core::UiConstants;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 impl eframe::App for RpaApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let now = Instant::now();
+        let frame_time = now - self.last_frame;
+        self.last_frame = now;
+
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
 
         self.process_execution_updates(ctx);
@@ -24,6 +28,11 @@ impl eframe::App for RpaApp {
         self.handle_context_menu_action(context_action, mouse_world_pos);
         self.render_dialogs(ctx);
         self.handle_keyboard_shortcuts(ctx);
+
+        let target_frame_time = Duration::from_secs_f64(1.0 / self.settings.target_fps as f64);
+        if frame_time < target_frame_time {
+            std::thread::sleep(target_frame_time - frame_time);
+        }
     }
 }
 

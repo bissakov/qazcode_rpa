@@ -25,6 +25,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
+    target_fps: usize,
     font_size: f32,
     show_minimap: bool,
     allow_node_resize: bool,
@@ -35,6 +36,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            target_fps: 60,
             font_size: UiConstants::DEFAULT_FONT_SIZE,
             show_minimap: true,
             allow_node_resize: false,
@@ -60,6 +62,8 @@ fn main() -> eframe::Result<()> {
     rust_i18n::set_locale("en");
 
     let options = eframe::NativeOptions {
+        vsync: false,
+        renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
             .with_visible(false)
             .with_maximized(true)

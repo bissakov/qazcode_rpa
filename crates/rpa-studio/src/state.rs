@@ -2,8 +2,11 @@ use crate::AppSettings;
 use crate::dialogs::DialogState;
 use crate::ui::canvas::ResizeHandle;
 use crate::undo_redo::UndoRedoManager;
-use rpa_core::{Connection, LogEntry, Node, Project, Scenario, StopControl, Variables};
-use std::collections::{HashMap, HashSet};
+use rpa_core::{Connection, LogEntry, NanoId, Node, Project, Scenario, StopControl, Variables};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 #[derive(Clone, Default)]
 pub struct ClipboardData {
@@ -13,31 +16,33 @@ pub struct ClipboardData {
 
 pub struct RpaApp {
     pub project: Project,
+    pub last_frame: Instant,
     pub is_executing: bool,
-    pub selected_nodes: HashSet<String>,
+    pub selected_nodes: HashSet<NanoId>,
     pub current_file: Option<std::path::PathBuf>,
     pub current_scenario_index: Option<usize>,
     pub opened_scenarios: Vec<usize>,
-    pub connection_from: Option<(String, usize)>,
+    pub connection_from: Option<(NanoId, usize)>,
     pub settings: AppSettings,
     pub log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
     pub clipboard: ClipboardData,
     pub global_variables: Variables,
     pub knife_tool_active: bool,
     pub knife_path: Vec<egui::Pos2>,
-    pub resizing_node: Option<(String, ResizeHandle)>,
+    pub resizing_node: Option<(NanoId, ResizeHandle)>,
     pub stop_control: StopControl,
     pub dialogs: DialogState,
     pub undo_redo: UndoRedoManager,
     #[allow(dead_code)]
     pub property_edit_debounce: f32,
-    pub scenario_views: HashMap<String, ScenarioViewState>,
+    pub scenario_views: HashMap<NanoId, ScenarioViewState>,
 }
 
 impl Default for RpaApp {
     fn default() -> Self {
         Self {
             project: Project::new("New Project", Variables::new()),
+            last_frame: Instant::now(),
             is_executing: false,
             selected_nodes: std::collections::HashSet::new(),
             current_file: None,
@@ -80,7 +85,7 @@ impl RpaApp {
         }
     }
 
-    pub fn get_current_scenario_id(&self) -> &String {
+    pub fn get_current_scenario_id(&self) -> &NanoId {
         match self.current_scenario_index {
             None => &self.project.main_scenario.id,
             Some(i) => &self.project.scenarios[i].id,
@@ -97,9 +102,7 @@ impl RpaApp {
 
     pub fn get_current_scenario_view_mut(&mut self) -> &mut ScenarioViewState {
         let scenario_id = self.get_current_scenario_id().clone();
-        self.scenario_views
-            .entry(scenario_id)
-            .or_default()
+        self.scenario_views.entry(scenario_id).or_default()
     }
 
     #[allow(dead_code)]
@@ -109,21 +112,19 @@ impl RpaApp {
     }
 
     #[allow(dead_code)]
-    pub fn get_scenario_view_mut(&mut self, scenario_id: String) -> &mut ScenarioViewState {
-        self.scenario_views
-            .entry(scenario_id)
-            .or_default()
+    pub fn get_scenario_view_mut(&mut self, scenario_id: NanoId) -> &mut ScenarioViewState {
+        self.scenario_views.entry(scenario_id).or_default()
     }
 
     #[allow(dead_code)]
-    pub fn get_scenario_view(&self, scenario_id: &str) -> Option<&ScenarioViewState> {
+    pub fn get_scenario_view(&self, scenario_id: &NanoId) -> Option<&ScenarioViewState> {
         self.scenario_views.get(scenario_id)
     }
 
     pub fn init_current_scenario_view(&mut self) {
         let scenario_id = self.get_current_scenario_id().clone();
         self.scenario_views
-            .insert(scenario_id.to_string(), ScenarioViewState::default());
+            .insert(scenario_id, ScenarioViewState::default());
     }
 
     #[allow(dead_code)]
@@ -136,7 +137,7 @@ impl RpaApp {
 pub struct ScenarioViewState {
     pub pan_offset: egui::Vec2,
     pub zoom: f32,
-    pub bezier_cache: HashMap<String, Vec<egui::Pos2>>,
+    pub bezier_cache: HashMap<NanoId, Vec<egui::Pos2>>,
 }
 
 impl Default for ScenarioViewState {

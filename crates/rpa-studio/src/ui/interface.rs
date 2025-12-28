@@ -238,6 +238,11 @@ impl RpaApp {
                         ui.heading(t!("settings_dialog.display_settings").as_ref());
                         ui.separator();
 
+                        ui.label(t!("settings_dialog.max_fps").as_ref());
+                        ui.add(egui::Slider::new(&mut temp.target_fps, 15..=540).text("FPS"));
+
+                        ui.separator();
+
                         ui.label(t!("settings_dialog.font_size").as_ref());
                         ui.add(egui::Slider::new(&mut temp.font_size, 6.0..=32.0).text("pt"));
 
@@ -699,7 +704,7 @@ impl RpaApp {
                 if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
                     let scenario_id_and_params = {
                         if let Some(node) =
-                            self.project.scenarios[current_idx].get_node_mut(&node_id)
+                            self.project.scenarios[current_idx].get_node_mut(node_id.clone())
                         {
                             if let rpa_core::Activity::CallScenario {
                                 scenario_id,
@@ -762,7 +767,7 @@ impl RpaApp {
 
                             // Now update the node activity with the modified parameters
                             if let Some(node) =
-                                self.project.scenarios[current_idx].get_node_mut(&node_id)
+                                self.project.scenarios[current_idx].get_node_mut(node_id.clone())
                             {
                                 if let rpa_core::Activity::CallScenario {
                                     parameters: node_params,
@@ -1137,7 +1142,7 @@ impl RpaApp {
                             let scenarios = self.project.scenarios.clone();
                             let (changed, param_action, activity) = {
                                 let scenario = self.get_current_scenario_mut();
-                                if let Some(node) = scenario.get_node_mut(&node_id) {
+                                if let Some(node) = scenario.get_node_mut(node_id.clone()) {
                                     let (changed, param_action) =
                                         canvas::render_node_properties(ui, node, &scenarios);
                                     (changed, param_action, Some(node.activity.clone()))

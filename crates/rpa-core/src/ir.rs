@@ -3,7 +3,7 @@ use crate::evaluator::{Expr, parse_expr};
 use crate::variables::VariableScope;
 use crate::{
     LogLevel, VariableValue,
-    node_graph::{Activity, BranchType, Project, Scenario},
+    node_graph::{Activity, BranchType, NanoId, Project, Scenario},
     variables::Variables,
 };
 use std::collections::{HashMap, HashSet};
@@ -11,10 +11,10 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Start {
-        scenario_id: String,
+        scenario_id: NanoId,
     },
     End {
-        scenario_id: String,
+        scenario_id: NanoId,
     },
     Log {
         level: LogLevel,
@@ -74,14 +74,14 @@ pub enum Instruction {
     },
     PopErrorHandler,
     CallScenario {
-        scenario_id: String,
+        scenario_id: NanoId,
         parameters: Vec<crate::node_graph::VariablesBinding>,
     },
     RunPowershell {
         code: String,
     },
     DebugMarker {
-        node_id: String,
+        node_id: NanoId,
         description: String,
     },
 }
@@ -90,9 +90,9 @@ pub enum Instruction {
 pub struct IrProgram {
     pub instructions: Vec<Instruction>,
     pub entry_point: usize,
-    pub scenario_start_index: HashMap<String, usize>,
-    pub scenario_call_graph: HashMap<String, HashSet<String>>,
-    pub recursive_scenarios: HashSet<String>,
+    pub scenario_start_index: HashMap<NanoId, usize>,
+    pub scenario_call_graph: HashMap<NanoId, HashSet<NanoId>>,
+    pub recursive_scenarios: HashSet<NanoId>,
     pub scenario_variables: Variables,
 }
 
@@ -131,15 +131,15 @@ pub struct IrBuilder<'a> {
     #[allow(dead_code)]
     project: &'a Project,
     program: IrProgram,
-    reachable_nodes: &'a HashSet<String>,
-    compiled_nodes: HashSet<String>,
-    node_start_index: HashMap<String, usize>,
+    reachable_nodes: &'a HashSet<NanoId>,
+    compiled_nodes: HashSet<NanoId>,
+    node_start_index: HashMap<NanoId, usize>,
     global_variables: &'a mut Variables,
     scenario_variables: Variables,
-    current_scenario_id: String,
-    compiled_scenarios: HashSet<String>,
-    call_graph: HashMap<String, HashSet<String>>,
-    recursive_scenarios: HashSet<String>,
+    current_scenario_id: NanoId,
+    compiled_scenarios: HashSet<NanoId>,
+    call_graph: HashMap<NanoId, HashSet<NanoId>>,
+    recursive_scenarios: HashSet<NanoId>,
     compilation_depth: usize,
 }
 
@@ -147,7 +147,7 @@ impl<'a> IrBuilder<'a> {
     pub fn new(
         scenario: &'a Scenario,
         project: &'a Project,
-        reachable_nodes: &'a HashSet<String>,
+        reachable_nodes: &'a HashSet<NanoId>,
         global_variables: &'a mut Variables,
     ) -> Self {
         let (call_graph, recursive_scenarios) = crate::validation::compute_call_graph(project);
@@ -185,7 +185,7 @@ impl<'a> IrBuilder<'a> {
             .insert(self.scenario.id.clone(), self.program.entry_point);
         self.compiled_scenarios.insert(self.scenario.id.clone());
 
-        self.compile_from_node(&start_node.id)?;
+        self.compile_from_node(start_node.id.clone())?;
 
         self.compile_all_called_scenarios()?;
 
@@ -208,13 +208,13 @@ impl<'a> IrBuilder<'a> {
         }
 
         for scenario_id in scenarios_to_compile {
-            self.compile_called_scenario(&scenario_id)?;
+            self.compile_called_scenario(scenario_id)?;
         }
 
         Ok(())
     }
 
-    fn first_next_node(&self, node_id: &str, branch: BranchType) -> Option<String> {
+    fn first_next_node(&self, node_id: NanoId, branch: BranchType) -> Option<NanoId> {
         self.scenario
             .connections
             .iter()
@@ -222,19 +222,19 @@ impl<'a> IrBuilder<'a> {
             .map(|c| c.to_node.clone())
     }
 
-    fn compile_default_next(&mut self, node_id: &str) -> Result<(), String> {
+    fn compile_default_next(&mut self, node_id: NanoId) -> Result<(), String> {
         if let Some(next) = self.first_next_node(node_id, BranchType::Default) {
-            self.compile_from_node(&next)?;
+            self.compile_from_node(next)?;
         }
         Ok(())
     }
 
-    fn compile_from_node(&mut self, node_id: &str) -> Result<(), String> {
-        if !self.reachable_nodes.contains(node_id) {
+    fn compile_from_node(&mut self, node_id: NanoId) -> Result<(), String> {
+        if !self.reachable_nodes.contains(&node_id) {
             return Ok(());
         }
 
-        if self.compiled_nodes.contains(node_id) {
+        if self.compiled_nodes.contains(&node_id) {
             return Ok(());
         }
 
@@ -252,19 +252,18 @@ impl<'a> IrBuilder<'a> {
         result
     }
 
-    fn compile_from_node_inner(&mut self, node_id: &str) -> Result<(), String> {
+    fn compile_from_node_inner(&mut self, node_id: NanoId) -> Result<(), String> {
         let node = self
             .scenario
-            .get_node(node_id)
+            .get_node(node_id.clone())
             .ok_or_else(|| format!("Node {} not found", node_id))?;
 
         let start_index = self.program.instructions.len();
-        self.node_start_index
-            .insert(node_id.to_string(), start_index);
-        self.compiled_nodes.insert(node_id.to_string());
+        self.node_start_index.insert(node_id.clone(), start_index);
+        self.compiled_nodes.insert(node_id.clone());
 
         self.program.add_instruction(Instruction::DebugMarker {
-            node_id: node_id.to_string(),
+            node_id: node_id.clone(),
             description: format!("{:?}", node.activity),
         });
 
@@ -397,9 +396,9 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn compile_if_node(&mut self, node_id: &str, condition: &str) -> Result<(), String> {
-        let true_target = self.first_next_node(node_id, BranchType::TrueBranch);
-        let false_target = self.first_next_node(node_id, BranchType::FalseBranch);
+    fn compile_if_node(&mut self, node_id: NanoId, condition: &str) -> Result<(), String> {
+        let true_target = self.first_next_node(node_id.clone(), BranchType::TrueBranch);
+        let false_target = self.first_next_node(node_id.clone(), BranchType::FalseBranch);
 
         let expr = parse_expr(condition, self.global_variables).map_err(|e| {
             format!(
@@ -414,7 +413,7 @@ impl<'a> IrBuilder<'a> {
         });
 
         if let Some(node) = true_target {
-            self.compile_from_node(&node)?;
+            self.compile_from_node(node)?;
         }
 
         let jump_over_false_idx = if false_target.is_some() {
@@ -428,7 +427,7 @@ impl<'a> IrBuilder<'a> {
 
         let false_start = self.program.instructions.len();
         if let Some(node) = false_target {
-            self.compile_from_node(&node)?;
+            self.compile_from_node(node)?;
         }
 
         let after_if = self.program.instructions.len();
@@ -450,18 +449,18 @@ impl<'a> IrBuilder<'a> {
 
     fn compile_loop_node(
         &mut self,
-        node_id: &str,
+        node_id: NanoId,
         start: i64,
         end: i64,
         step: i64,
         index: &str,
     ) -> Result<(), String> {
-        let body_node = self.first_next_node(node_id, BranchType::LoopBody);
-        let after_node = self.first_next_node(node_id, BranchType::Default);
+        let body_node = self.first_next_node(node_id.clone(), BranchType::LoopBody);
+        let after_node = self.first_next_node(node_id.clone(), BranchType::Default);
 
         if body_node.is_none() {
             if let Some(n) = after_node {
-                self.compile_from_node(&n)?;
+                self.compile_from_node(n)?;
             }
             return Ok(());
         }
@@ -495,7 +494,7 @@ impl<'a> IrBuilder<'a> {
         });
 
         let body_start = self.program.instructions.len();
-        self.compile_from_node(&body_node.unwrap())?;
+        self.compile_from_node(body_node.unwrap())?;
 
         self.program.add_instruction(Instruction::LoopNext {
             index: index_var.clone(),
@@ -505,7 +504,7 @@ impl<'a> IrBuilder<'a> {
 
         let after_loop_start = self.program.instructions.len();
         if let Some(n) = after_node {
-            self.compile_from_node(&n)?;
+            self.compile_from_node(n)?;
         }
 
         if let Instruction::LoopCheck {
@@ -521,13 +520,13 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn compile_while_node(&mut self, node_id: &str, condition: &str) -> Result<(), String> {
-        let body_nodes = self.get_next_nodes(node_id, BranchType::LoopBody);
-        let after_loop = self.get_next_nodes(node_id, BranchType::Default);
+    fn compile_while_node(&mut self, node_id: NanoId, condition: &str) -> Result<(), String> {
+        let body_nodes = self.get_next_nodes(node_id.clone(), BranchType::LoopBody);
+        let after_loop = self.get_next_nodes(node_id.clone(), BranchType::Default);
 
         if body_nodes.is_empty() {
             if let Some(after_node) = after_loop.first() {
-                self.compile_from_node(after_node)?;
+                self.compile_from_node(after_node.clone())?;
             }
             return Ok(());
         }
@@ -550,7 +549,7 @@ impl<'a> IrBuilder<'a> {
         let body_start = self.program.instructions.len();
 
         if let Some(body_node) = body_nodes.first() {
-            self.compile_from_node(body_node)?;
+            self.compile_from_node(body_node.clone())?;
         }
 
         self.program
@@ -559,7 +558,7 @@ impl<'a> IrBuilder<'a> {
         let after_loop_start = self.program.instructions.len();
 
         if let Some(after_node) = after_loop.first() {
-            self.compile_from_node(after_node)?;
+            self.compile_from_node(after_node.clone())?;
         }
 
         if let Instruction::WhileCheck {
@@ -575,16 +574,16 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn compile_try_catch_node(&mut self, node_id: &str) -> Result<(), String> {
-        let try_nodes = self.get_next_nodes(node_id, BranchType::TryBranch);
-        let catch_nodes = self.get_next_nodes(node_id, BranchType::CatchBranch);
+    fn compile_try_catch_node(&mut self, node_id: NanoId) -> Result<(), String> {
+        let try_nodes = self.get_next_nodes(node_id.clone(), BranchType::TryBranch);
+        let catch_nodes = self.get_next_nodes(node_id.clone(), BranchType::CatchBranch);
 
         let push_handler_idx = self
             .program
             .add_instruction(Instruction::PushErrorHandler { catch_target: 0 });
 
         if let Some(try_node) = try_nodes.first() {
-            self.compile_from_node(try_node)?;
+            self.compile_from_node(try_node.clone())?;
         }
 
         self.program.add_instruction(Instruction::PopErrorHandler);
@@ -596,7 +595,7 @@ impl<'a> IrBuilder<'a> {
         let catch_start = self.program.instructions.len();
 
         if let Some(catch_node) = catch_nodes.first() {
-            self.compile_from_node(catch_node)?;
+            self.compile_from_node(catch_node.clone())?;
         }
 
         let after_catch = self.program.instructions.len();
@@ -614,7 +613,7 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn get_next_nodes(&self, node_id: &str, branch: BranchType) -> Vec<String> {
+    fn get_next_nodes(&self, node_id: NanoId, branch: BranchType) -> Vec<NanoId> {
         self.scenario
             .connections
             .iter()
@@ -623,7 +622,7 @@ impl<'a> IrBuilder<'a> {
             .collect()
     }
 
-    fn compile_called_scenario(&mut self, scenario_id: &str) -> Result<(), String> {
+    fn compile_called_scenario(&mut self, scenario_id: NanoId) -> Result<(), String> {
         let scenario = self
             .project
             .scenarios
@@ -641,14 +640,14 @@ impl<'a> IrBuilder<'a> {
 
         self.program
             .scenario_start_index
-            .insert(scenario_id.to_string(), self.program.instructions.len());
-        self.compiled_scenarios.insert(scenario_id.to_string());
+            .insert(scenario_id.clone(), self.program.instructions.len());
+        self.compiled_scenarios.insert(scenario_id.clone());
 
         self.program.add_instruction(Instruction::Start {
-            scenario_id: scenario_id.to_string(),
+            scenario_id: scenario_id.clone(),
         });
 
-        self.compile_from_called_scenario(&scenario, &start_node.id)?;
+        self.compile_from_called_scenario(&scenario, start_node.id.clone())?;
 
         Ok(())
     }
@@ -656,9 +655,9 @@ impl<'a> IrBuilder<'a> {
     fn compile_from_called_scenario(
         &mut self,
         scenario: &Scenario,
-        node_id: &str,
+        node_id: NanoId,
     ) -> Result<(), String> {
-        if self.compiled_nodes.contains(node_id) {
+        if self.compiled_nodes.contains(&node_id) {
             return Ok(());
         }
 
@@ -680,19 +679,18 @@ impl<'a> IrBuilder<'a> {
     fn compile_from_called_scenario_inner(
         &mut self,
         scenario: &Scenario,
-        node_id: &str,
+        node_id: NanoId,
     ) -> Result<(), String> {
         let node = scenario
-            .get_node(node_id)
+            .get_node(node_id.clone())
             .ok_or_else(|| format!("Node {} not found", node_id))?;
 
         let start_index = self.program.instructions.len();
-        self.node_start_index
-            .insert(node_id.to_string(), start_index);
-        self.compiled_nodes.insert(node_id.to_string());
+        self.node_start_index.insert(node_id.clone(), start_index);
+        self.compiled_nodes.insert(node_id.clone());
 
         self.program.add_instruction(Instruction::DebugMarker {
-            node_id: node_id.to_string(),
+            node_id: node_id.clone(),
             description: format!("{:?}", node.activity),
         });
 
@@ -748,9 +746,9 @@ impl<'a> IrBuilder<'a> {
             }
             Activity::IfCondition { condition } => {
                 let true_next =
-                    self.first_next_node_called(scenario, node_id, BranchType::TrueBranch);
+                    self.first_next_node_called(scenario, node_id.clone(), BranchType::TrueBranch);
                 let false_next =
-                    self.first_next_node_called(scenario, node_id, BranchType::FalseBranch);
+                    self.first_next_node_called(scenario, node_id.clone(), BranchType::FalseBranch);
 
                 let expr = parse_expr(condition, self.global_variables)?;
 
@@ -760,7 +758,7 @@ impl<'a> IrBuilder<'a> {
                 });
 
                 if let Some(node) = true_next {
-                    self.compile_from_called_scenario(scenario, &node)?;
+                    self.compile_from_called_scenario(scenario, node)?;
                 }
 
                 let jump_over_false_idx = if false_next.is_some() {
@@ -774,7 +772,7 @@ impl<'a> IrBuilder<'a> {
 
                 let false_start = self.program.instructions.len();
                 if let Some(node) = false_next {
-                    self.compile_from_called_scenario(scenario, &node)?;
+                    self.compile_from_called_scenario(scenario, node)?;
                 }
 
                 let after_if = self.program.instructions.len();
@@ -812,9 +810,9 @@ impl<'a> IrBuilder<'a> {
     fn first_next_node_called(
         &self,
         scenario: &Scenario,
-        node_id: &str,
+        node_id: NanoId,
         branch: BranchType,
-    ) -> Option<String> {
+    ) -> Option<NanoId> {
         scenario
             .connections
             .iter()
@@ -825,10 +823,10 @@ impl<'a> IrBuilder<'a> {
     fn compile_default_next_called(
         &mut self,
         scenario: &Scenario,
-        node_id: &str,
+        node_id: NanoId,
     ) -> Result<(), String> {
         if let Some(next) = self.first_next_node_called(scenario, node_id, BranchType::Default) {
-            self.compile_from_called_scenario(scenario, &next)?;
+            self.compile_from_called_scenario(scenario, next)?;
         }
         Ok(())
     }

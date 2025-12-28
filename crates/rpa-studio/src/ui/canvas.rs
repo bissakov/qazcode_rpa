@@ -4,8 +4,8 @@ use egui::{
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::{
-    Activity, ActivityMetadata, BranchType, LogLevel, Node, PropertyType, Scenario, UiConstants,
-    VariableType, constants::FlowDirection,
+    Activity, ActivityMetadata, BranchType, LogLevel, NanoId, Node, PropertyType, Scenario,
+    UiConstants, VariableType, constants::FlowDirection,
 };
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
@@ -61,13 +61,13 @@ pub enum ParameterBindingAction {
 }
 
 pub struct RenderState<'a> {
-    pub selected_nodes: &'a mut HashSet<String>,
-    pub connection_from: &'a mut Option<(String, usize)>,
+    pub selected_nodes: &'a mut HashSet<NanoId>,
+    pub connection_from: &'a mut Option<(NanoId, usize)>,
     pub clipboard_empty: bool,
     pub show_minimap: bool,
     pub knife_tool_active: &'a mut bool,
     pub knife_path: &'a mut Vec<Pos2>,
-    pub resizing_node: &'a mut Option<(String, ResizeHandle)>,
+    pub resizing_node: &'a mut Option<(NanoId, ResizeHandle)>,
     pub allow_node_resize: bool,
 }
 
@@ -83,7 +83,7 @@ pub enum ResizeHandle {
     TopLeft,
 }
 
-type NodeIndex = HashMap<String, usize>;
+type NodeIndex = HashMap<NanoId, usize>;
 
 fn build_node_index(nodes: &[Node]) -> NodeIndex {
     nodes
@@ -93,7 +93,7 @@ fn build_node_index(nodes: &[Node]) -> NodeIndex {
         .collect()
 }
 
-fn get_node_from_index<'a>(nodes: &'a [Node], index: &NodeIndex, id: &str) -> Option<&'a Node> {
+fn get_node_from_index<'a>(nodes: &'a [Node], index: &NodeIndex, id: &NanoId) -> Option<&'a Node> {
     index.get(id).and_then(|&idx| nodes.get(idx))
 }
 
@@ -131,15 +131,15 @@ fn bezier_to_line_segments(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> 
 }
 
 fn get_or_compute_bezier(
-    cache: &mut HashMap<String, Vec<Pos2>>,
-    connection_id: &str,
+    cache: &mut HashMap<NanoId, Vec<Pos2>>,
+    connection_id: &NanoId,
     p0: Pos2,
     p1: Pos2,
     p2: Pos2,
     p3: Pos2,
 ) -> Vec<Pos2> {
     cache
-        .entry(connection_id.to_string())
+        .entry(connection_id.clone())
         .or_insert_with(|| bezier_to_line_segments(p0, p1, p2, p3))
         .clone()
 }
@@ -195,8 +195,8 @@ fn find_connection_near_point(
     pan_offset: Vec2,
     zoom: f32,
     threshold: f32,
-    cache: &mut HashMap<String, Vec<Pos2>>,
-) -> Option<(String, String)> {
+    cache: &mut HashMap<NanoId, Vec<Pos2>>,
+) -> Option<(NanoId, NanoId)> {
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
     for connection in &scenario.connections {
@@ -246,8 +246,8 @@ fn find_intersecting_connections(
     cut_path: &[Pos2],
     pan_offset: Vec2,
     zoom: f32,
-    cache: &mut HashMap<String, Vec<Pos2>>,
-) -> Vec<(String, String)> {
+    cache: &mut HashMap<NanoId, Vec<Pos2>>,
+) -> Vec<(NanoId, NanoId)> {
     let mut intersecting = Vec::new();
 
     if cut_path.len() < 2 {
@@ -486,9 +486,9 @@ pub fn render_node_graph(
         }
     }
 
-    let mut clicked_node: Option<String> = None;
+    let mut clicked_node: Option<NanoId> = None;
     let mut any_node_hovered = false;
-    let mut new_connection: Option<(String, usize, String)> = None;
+    let mut new_connection: Option<(NanoId, usize, NanoId)> = None;
     let shift_held = input_cache.shift_held;
 
     let box_select_start =
@@ -550,8 +550,8 @@ pub fn render_node_graph(
     }
 
     let mut drag_delta_to_apply: Option<Vec2> = None;
-    let mut node_being_dragged: Option<String> = None;
-    let mut node_drag_released: Option<String> = None;
+    let mut node_being_dragged: Option<NanoId> = None;
+    let mut node_drag_released: Option<NanoId> = None;
 
     let node_hovering_connection = if state.selected_nodes.len() == 1
         && let Some(selected_id) = state.selected_nodes.iter().next().cloned()
@@ -882,11 +882,11 @@ pub fn render_node_graph(
             any_node_hovered = true;
         }
 
-        let is_hovering_connection = node_hovering_connection.as_deref() == Some(node.id.as_str());
+        let is_hovering_connection = node_hovering_connection.as_ref() == Some(&node.id);
         let is_being_resized = state
             .resizing_node
             .as_ref()
-            .map(|(id, _)| id.as_str() == node.id.as_str())
+            .map(|(id, _)| id == &node.id)
             .unwrap_or(false);
 
         draw_node_transformed(
@@ -993,8 +993,8 @@ pub fn render_node_graph(
                 }
             }
 
-            scenario.add_connection_with_branch(&from_id, &released_node_id, branch_type);
-            scenario.add_connection_with_branch(&released_node_id, &to_id, BranchType::Default);
+            scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
+            scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
         }
     }
 
@@ -1193,7 +1193,7 @@ pub fn render_node_graph(
             scenario.connections.retain(|c| c.from_node != from);
         }
 
-        scenario.add_connection_with_branch(&from, &to, branch_type);
+        scenario.add_connection_with_branch(from, to, branch_type);
         connection_created = true;
     }
 
@@ -1278,14 +1278,11 @@ fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, 
     let grid_min_y = (world_min_y / world_grid_spacing).floor() * world_grid_spacing;
     let grid_max_y = (world_max_y / world_grid_spacing).ceil() * world_grid_spacing;
 
-    // Bound iterations to prevent unbounded loop on high-resolution displays
-    const MAX_GRID_LINES: usize = 500;
-
     let num_x_lines = ((grid_max_x - grid_min_x) / world_grid_spacing).ceil() as usize;
     let num_y_lines = ((grid_max_y - grid_min_y) / world_grid_spacing).ceil() as usize;
 
-    if num_x_lines > MAX_GRID_LINES || num_y_lines > MAX_GRID_LINES {
-        return; // Skip grid rendering if it would be too expensive
+    if num_x_lines > UiConstants::MAX_GRID_LINES || num_y_lines > UiConstants::MAX_GRID_LINES {
+        return;
     }
 
     let mut grid_x = grid_min_x;
@@ -1502,8 +1499,8 @@ fn draw_connection_transformed<F>(
     to_node: &Node,
     branch_type: &BranchType,
     to_screen: F,
-    connection_id: &str,
-    cache: &mut HashMap<String, Vec<Pos2>>,
+    connection_id: &NanoId,
+    cache: &mut HashMap<NanoId, Vec<Pos2>>,
 ) where
     F: Fn(Pos2) -> Pos2,
 {
@@ -1568,8 +1565,8 @@ fn draw_bezier(
     p2: Pos2,
     p3: Pos2,
     stroke: Stroke,
-    connection_id: &str,
-    cache: &mut HashMap<String, Vec<Pos2>>,
+    connection_id: &NanoId,
+    cache: &mut HashMap<NanoId, Vec<Pos2>>,
 ) {
     let points = get_or_compute_bezier(cache, connection_id, p0, p1, p2, p3);
     painter.add(egui::Shape::line(points, stroke));
