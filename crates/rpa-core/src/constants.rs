@@ -32,7 +32,7 @@ impl UiConstants {
     pub const BEZIER_STEPS: usize = 50;
     pub const BEZIER_CONTROL_OFFSET: f32 = 50.0;
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
-    pub const MIN_NODE_SPACING: f32 = 250.0;
+    pub const MIN_NODE_SPACING: f32 = 100.0;
 
     pub const ZOOM_MIN: f32 = 0.1;
     pub const ZOOM_MAX: f32 = 3.0;

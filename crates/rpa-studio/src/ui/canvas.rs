@@ -107,6 +107,24 @@ fn point_to_bezier_distance(point: Pos2, bezier_points: &[Pos2]) -> f32 {
     min_distance
 }
 
+fn get_out_pin_pos_by_branch(node: &Node, branch_type: &BranchType) -> egui::Pos2 {
+    match branch_type {
+        BranchType::TrueBranch => node.get_output_pin_pos_by_index(0),
+        BranchType::FalseBranch => node.get_output_pin_pos_by_index(1),
+        BranchType::LoopBody => node.get_output_pin_pos_by_index(0),
+        BranchType::ErrorBranch => node.get_output_pin_pos_by_index(1),
+        BranchType::TryBranch => node.get_output_pin_pos_by_index(0),
+        BranchType::CatchBranch => node.get_output_pin_pos_by_index(1),
+        BranchType::Default => {
+            if node.get_output_pin_count() > 1 {
+                node.get_output_pin_pos_by_index(0)
+            } else {
+                node.get_output_pin_pos()
+            }
+        }
+    }
+}
+
 fn find_connection_near_point(
     scenario: &Scenario,
     point: Pos2,
@@ -121,31 +139,8 @@ fn find_connection_near_point(
             scenario.get_node(&connection.from_node),
             scenario.get_node(&connection.to_node),
         ) {
-            use rpa_core::BranchType;
-
-            let start = match connection.branch_type {
-                BranchType::TrueBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
-                BranchType::FalseBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                BranchType::LoopBody => to_screen(from_node.get_output_pin_pos_by_index(0)),
-                BranchType::ErrorBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                BranchType::TryBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
-                BranchType::CatchBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                BranchType::Default => {
-                    if from_node.get_output_pin_count() > 1 {
-                        match &from_node.activity {
-                            Activity::Loop { .. } | Activity::While { .. } | Activity::TryCatch => {
-                                to_screen(from_node.get_output_pin_pos_by_index(1))
-                            }
-                            _ if from_node.activity.can_have_error_output() => {
-                                to_screen(from_node.get_output_pin_pos_by_index(0))
-                            }
-                            _ => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                        }
-                    } else {
-                        to_screen(from_node.get_output_pin_pos())
-                    }
-                }
-            };
+            let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, &connection.branch_type);
+            let start = to_screen(start_out_pin_pos);
             let end = to_screen(to_node.get_input_pin_pos());
 
             use rpa_core::constants::{FlowDirection, UiConstants};
@@ -199,31 +194,8 @@ fn find_intersecting_connections(
             scenario.get_node(&connection.from_node),
             scenario.get_node(&connection.to_node),
         ) {
-            use rpa_core::BranchType;
-
-            let start = match connection.branch_type {
-                BranchType::TrueBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
-                BranchType::FalseBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                BranchType::LoopBody => to_screen(from_node.get_output_pin_pos_by_index(0)),
-                BranchType::ErrorBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                BranchType::TryBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
-                BranchType::CatchBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                BranchType::Default => {
-                    if from_node.get_output_pin_count() > 1 {
-                        match &from_node.activity {
-                            Activity::Loop { .. } | Activity::While { .. } | Activity::TryCatch => {
-                                to_screen(from_node.get_output_pin_pos_by_index(1))
-                            }
-                            _ if from_node.activity.can_have_error_output() => {
-                                to_screen(from_node.get_output_pin_pos_by_index(0))
-                            }
-                            _ => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                        }
-                    } else {
-                        to_screen(from_node.get_output_pin_pos())
-                    }
-                }
-            };
+            let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, &connection.branch_type);
+            let start = to_screen(start_out_pin_pos);
             let end = to_screen(to_node.get_input_pin_pos());
 
             use rpa_core::constants::{FlowDirection, UiConstants};
@@ -888,76 +860,47 @@ pub fn render_node_graph(
                 let from_pos = from_node.position;
                 let to_pos = to_node.position;
 
-                use rpa_core::constants::{FlowDirection, UiConstants};
                 match UiConstants::FLOW_DIRECTION {
                     FlowDirection::Horizontal => {
-                        let horizontal_distance = to_pos.x - from_pos.x;
+                        let distance = to_pos.x - from_pos.x;
+                        let required = UiConstants::MIN_NODE_SPACING * 2.0;
 
-                        if horizontal_distance < UiConstants::MIN_NODE_SPACING * 2.0 {
-                            let total_needed = UiConstants::MIN_NODE_SPACING * 2.0;
-                            let expansion_needed = total_needed - horizontal_distance;
+                        if distance < required {
+                            let push = required - distance;
 
                             for node in &mut scenario.nodes {
-                                if node.id == from_id {
-                                    node.position.x -= expansion_needed * 0.5;
-                                } else if node.id == to_id {
-                                    node.position.x += expansion_needed * 0.5;
+                                if node.position.x >= to_pos.x {
+                                    node.position.x += push;
                                 }
                             }
                         }
                     }
                     FlowDirection::Vertical => {
-                        let vertical_distance = to_pos.y - from_pos.y;
+                        let distance = to_pos.y - from_pos.y;
+                        let required = UiConstants::MIN_NODE_SPACING * 2.0;
 
-                        if vertical_distance < UiConstants::MIN_NODE_SPACING * 2.0 {
-                            let total_needed = UiConstants::MIN_NODE_SPACING * 2.0;
-                            let expansion_needed = total_needed - vertical_distance;
+                        if distance < required {
+                            let push = required - distance;
 
                             for node in &mut scenario.nodes {
-                                if node.id == from_id {
-                                    node.position.y -= expansion_needed * 0.5;
-                                } else if node.id == to_id {
-                                    node.position.y += expansion_needed * 0.5;
+                                if node.position.y >= to_pos.y {
+                                    node.position.y += push;
                                 }
                             }
                         }
                     }
                 }
 
-                let from_x = scenario
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == from_id)
-                    .unwrap()
-                    .position
-                    .x;
-                let from_y = scenario
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == from_id)
-                    .unwrap()
-                    .position
-                    .y;
-                let to_x = scenario
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == to_id)
-                    .unwrap()
-                    .position
-                    .x;
-                let to_y = scenario
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == to_id)
-                    .unwrap()
-                    .position
-                    .y;
+                let from = scenario.nodes.iter().find(|n| n.id == from_id).unwrap();
+                let to = scenario.nodes.iter().find(|n| n.id == to_id).unwrap();
+                let mid_x = (from.position.x + to.position.x) * 0.5;
+                let mid_y = (from.position.y + to.position.y) * 0.5;
 
                 if let Some(inserted_node_mut) =
                     scenario.nodes.iter_mut().find(|n| n.id == released_node_id)
                 {
-                    inserted_node_mut.position.x = (from_x + to_x) / 2.0;
-                    inserted_node_mut.position.y = (from_y + to_y) / 2.0;
+                    inserted_node_mut.position.x = mid_x;
+                    inserted_node_mut.position.y = mid_y;
                 }
             }
 
@@ -1439,27 +1382,8 @@ fn draw_connection_transformed<F>(
 ) where
     F: Fn(Pos2) -> Pos2,
 {
-    let start = match branch_type {
-        BranchType::TrueBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
-        BranchType::FalseBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-        BranchType::LoopBody => to_screen(from_node.get_output_pin_pos_by_index(0)),
-        BranchType::ErrorBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-        BranchType::TryBranch => to_screen(from_node.get_output_pin_pos_by_index(0)),
-        BranchType::CatchBranch => to_screen(from_node.get_output_pin_pos_by_index(1)),
-        BranchType::Default => {
-            if from_node.get_output_pin_count() > 1 {
-                match &from_node.activity {
-                    Activity::Loop { .. } => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                    _ if from_node.activity.can_have_error_output() => {
-                        to_screen(from_node.get_output_pin_pos_by_index(0))
-                    }
-                    _ => to_screen(from_node.get_output_pin_pos_by_index(1)),
-                }
-            } else {
-                to_screen(from_node.get_output_pin_pos())
-            }
-        }
-    };
+    let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, branch_type);
+    let start = to_screen(start_out_pin_pos);
     let end = to_screen(to_node.get_input_pin_pos());
 
     let (control1, control2) = match UiConstants::FLOW_DIRECTION {
