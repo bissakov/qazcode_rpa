@@ -1,116 +1,184 @@
 # Agent Guidelines for QazCode RPA Platform
 
-Visual node-based RPA workflow editor built with Rust and egui. Create and execute automation workflows with a GUI designer (rpa-studio) and CLI runner (rpa-cli).
+Visual node-based RPA workflow editor built with Rust and egui. Create and execute automation workflows with a GUI designer (`rpa-studio`) and CLI runner (`rpa-cli`).
+
+---
 
 ## Interaction Rules
 - Minimize verbosity
 - Keep summarizations brief
 - Never announce the next task or subtask unless prompted
 
-## Issue Tracking
+---
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` for workflow context, or install hooks (`bd hooks install`) for auto-injection.
+## Issue Tracking (GitHub Issues via `gh`)
+
+This project uses **GitHub Issues** managed through the `gh` CLI.
+
+### Issue Title Convention (MANDATORY)
+
+All issues **must include the type prefix** in the title:
+
+- `[BUG] ...`
+- `[TASK] ...`
+- `[FEATURE] ...`
+- `[DOCS] ...`
+- `[CHORE] ...`
+
+Example:
+```
+[BUG] Crash when deleting connected node
+```
+
+Issues without a prefix are invalid.
+
+---
 
 ### Finding Work
-- `bd ready` - Show issues ready to work (no blockers)
-- `bd list --status=open` - All open issues
-- `bd list --status=in_progress` - Active work
-- `bd show <id>` - Detailed issue view with dependencies
+- `gh issue list` – List open issues
+- `gh issue list --label bug` – List bugs
+- `gh issue view <id>` – View issue details
+- `gh issue list --assignee @me` – Your assigned issues
 
-### Creating & Updating Issues
-- `bd create --title="..." --type=task|bug|feature --priority=2` - New issue
-  - Priority: 0-4 (0=critical, 2=medium, 4=backlog)
-- `bd update <id> --status=in_progress` - Claim work
-- `bd update <id> --assignee=username` - Assign to someone
-- `bd close <id>` - Mark complete
-- `bd close <id1> <id2> ...` - Close multiple issues at once
+---
 
-### Dependencies & Blocking
-- `bd dep add <issue> <depends-on>` - Add dependency
-- `bd blocked` - Show all blocked issues
+### Creating Issues
+```
 
-### Session Workflow
-- `bd daemon --stop` - Stop bd daemon (run at session end)
-- `bd daemon --start --auto-commit` - Restart daemon
-- `bd stats` - Project statistics
-- `bd doctor` - Check for issues
+gh issue create 
+--title "[BUG] ..." 
+--body "Description" 
+--label bug
+
+```
+
+Common labels:
+- `bug`
+- `task`
+- `feature`
+- `docs`
+- `chore`
+- `blocked`
+- `priority:critical`
+- `priority:high`
+- `priority:medium`
+- `priority:low`
+
+---
+
+### Claiming & Updating Work
+- Assign yourself:
+```
+gh issue edit <id> --add-assignee @me
+```
+- Add / remove labels:
+```
+gh issue edit <id> --add-label blocked
+gh issue edit <id> --remove-label blocked
+```
+- Close issue:
+```
+gh issue close <id>
+```
+
+Dependencies are tracked via:
+- Linked issues (`blocked by #ID`)
+- `blocked` label
+- Explicit references in the issue body
+
+---
 
 ## Project Structure
 
-**rpa-core** (library) - Core shared library:
-- `node_graph.rs` - Data structures: Project, Scenario, Node, Activity, Connection, LogEntry, LogLevel, UiState, VariableValue
-- `execution.rs` - Execution engine, IrExecutor, ExecutionContext, variable resolution, LogOutput trait
-- `validation.rs` - Pre-execution validation with hash-based caching
-- `ir.rs` - IR compilation (node graph → linear instructions)
-- `evaluator.rs` - Expression parser/evaluator with arithmetic, comparison, boolean logic
-- `variables.rs` - Variable storage with ID-based indexing
-- `activity_metadata.rs` - Metadata system driving UI generation
-- `constants.rs` - UI constants and defaults
-- `utils.rs` - Interruptible sleep function
+### **rpa-core** (library)
+- `node_graph.rs` – Project, Scenario, Node, Activity, Connection, logs, UI state
+- `execution.rs` – Execution engine, IR executor, variable resolution
+- `validation.rs` – Pre-execution validation with hash caching
+- `ir.rs` – Node graph → linear IR
+- `evaluator.rs` – Expression parser and evaluator
+- `variables.rs` – Variable storage (ID-based)
+- `activity_metadata.rs` – Metadata driving UI generation
+- `constants.rs` – UI constants and defaults
+- `utils.rs` – Interruptible sleep
 
-**rpa-studio** (binary) - Visual GUI application:
-- `main.rs` - App state, menu bars, panels, execution management, dialogs
-- `ui.rs` - Canvas rendering, node/connection drawing, property panels, context menus, knife tool, minimap
-- `activity_ext.rs` - Extension trait for Activity (name, color)
-- `colors.rs` - ColorPalette for activity and connection colors
-- `loglevel_ext.rs` - Extension trait for LogLevel colors
-- `locales/` - en.yml, ru.yml, kz.yml (English, Russian, Kazakh)
+### **rpa-studio** (binary)
+- `main.rs` – App state, panels, dialogs, execution control
+- `ui.rs` – Canvas, nodes, connections, minimap, tools
+- `activity_ext.rs` – Activity extensions (name, color)
+- `colors.rs` – ColorPalette
+- `loglevel_ext.rs` – LogLevel color mapping
+- `locales/` – en.yml, ru.yml, kz.yml
 
-**rpa-cli** (binary) - Command-line runner:
-- Executes `.rpa` projects headless
-- Supports verbose mode (`-v`), scenario selection (`-s`), variable overrides (`--var`)
-- Exit codes: 0 (success), 1 (error)
+### **rpa-cli** (binary)
+- Headless execution of `.rpa` projects
+- Flags:
+- `-v` verbose
+- `-s` scenario
+- `--var` variable overrides
+- Exit codes:
+- `0` success
+- `1` error
 
-**validate_locale** (tool) - Localization validator:
-- Scans activity_metadata.rs for required keys
-- Validates all locale files for completeness
-- Reports missing keys per language
+### **validate_locale** (tool)
+- Validates locale completeness against `activity_metadata.rs`
+
+---
 
 ## Build
-- Build all: `cargo build --release`
-- Build specific: `cargo build --release --bin rpa-studio` (or `rpa-cli`, `validate_locale`)
-- Lint: `cargo clippy` (run after each big task, fix all warnings)
-- Validate i18n: `cargo run --bin validate_locale`
+- Build all:
+```
+cargo build --release
+```
+- Build specific:
+```
+cargo build --release --bin rpa-studio
+```
+- Lint:
+```
+cargo clippy
+```
+- Validate i18n:
+```
+cargo run --bin validate_locale
+```
+
+---
 
 ## Code Rules
-- No comments unless necessary
-- No hardcoding unless necessary
-- All constants in constants.rs
-- Extract duplicated logic into methods
+- No comments unless strictly necessary
+- No hardcoding unless unavoidable
+- All constants go in `constants.rs`
+- Extract duplicated logic
 - Fix all errors and warnings immediately
-- Run `cargo clippy` after each big task
-- Update CLAUDE.md and/or README.md if necessary otherwise finish
-- Update version in the root's Cargo.toml after every significant change
+- Run `cargo clippy` after each major task
+- Update `CLAUDE.md` and/or `README.md` if architecture or features change
+- Bump version in root `Cargo.toml` after every significant change
+
+---
 
 ## After Changes
 - Update version in root `Cargo.toml` after significant changes
-- Update `CLAUDE.md` and/or `README.md` if architecture/features change
+- Update documentation if behavior or architecture changes
+
+---
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**Work is not complete until pushed.**
 
-**SESSION CLOSE PROTOCOL:**
-
+### SESSION CLOSE PROTOCOL
 ```
-[ ] 1. cargo fmt               (format the entire codebase)
-[ ] 2. git status              (check what changed)
-[ ] 3. git add <files>         (stage code changes)
-[ ] 4. git commit -m "..."     (commit code, no attribution, one line of message)
-[ ] 5. git push                (push to remote)
+[ ] 1. cargo fmt
+[ ] 2. git status
+[ ] 3. git add <files>
+[ ] 4. git commit -m "..."
+[ ] 5. git push
 ```
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-- Track strategic work in beads (multi-session, dependencies, discovered work)
-- Use TodoWrite for simple single-session execution tasks
-
-### Core Workflow Principles
-- **When in doubt**, prefer bd—persistence you don't need beats lost context
-- **Git workflow**: Hooks auto-sync
-- **Session management**: Check `bd ready` for available work
-- Track dependencies explicitly with `bd dep add` when work blocks other work
+### Critical Rules
+- Never stop before `git push`
+- Never say “ready to push”
+- If push fails, fix and retry
+- Track multi-session or discovered work as GitHub issues
+- Use local TODOs only for trivial, single-session work
 
