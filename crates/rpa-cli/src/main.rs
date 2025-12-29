@@ -5,6 +5,7 @@ use rpa_core::{
     VariableValue,
 };
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
 #[derive(Parser)]
@@ -124,27 +125,28 @@ fn main() {
 
     let scenario_variables = rpa_core::variables::Variables::new();
     let current_scenario_id = project.main_scenario.id.as_str().to_string();
-    let mut context = ExecutionContext::new_without_sender(
+    let context = Arc::new(RwLock::new(ExecutionContext::new_without_sender(
         start_time,
         variables,
         scenario_variables,
         current_scenario_id,
         stop_control,
-    );
+    )));
 
     let mut log_output = CliLogOutput {
         verbose,
         entries: Vec::new(),
     };
 
-    let mut executor = IrExecutor::new(&program, &project, &mut context, &mut log_output);
+    let mut executor = IrExecutor::new(&program, &project, context.clone(), &mut log_output);
     if let Err(e) = executor.execute() {
         eprintln!("Execution error: {}", e);
         std::process::exit(1);
     }
 
     if verbose {
-        let var_list: Vec<(String, VariableValue)> = context
+        let ctx = context.read().unwrap();
+        let var_list: Vec<(String, VariableValue)> = ctx
             .global_variables
             .iter()
             .filter_map(|(name, value, _)| {

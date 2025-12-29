@@ -2,7 +2,9 @@ use crate::AppSettings;
 use crate::dialogs::DialogState;
 use crate::ui::canvas::ResizeHandle;
 use crate::undo_redo::UndoRedoManager;
+use rpa_core::execution::ExecutionContext;
 use rpa_core::{Connection, LogEntry, NanoId, Node, Project, Scenario, StopControl, Variables};
+use std::sync::{Arc, RwLock};
 use std::{
     collections::{HashMap, HashSet},
     time::Instant,
@@ -36,6 +38,7 @@ pub struct RpaApp {
     #[allow(dead_code)]
     pub property_edit_debounce: f32,
     pub scenario_views: HashMap<NanoId, ScenarioViewState>,
+    pub execution_context: Option<Arc<RwLock<ExecutionContext>>>,
 }
 
 impl Default for RpaApp {
@@ -61,6 +64,7 @@ impl Default for RpaApp {
             undo_redo: UndoRedoManager::new(),
             property_edit_debounce: 0.0,
             scenario_views: HashMap::new(),
+            execution_context: None,
         }
     }
 }

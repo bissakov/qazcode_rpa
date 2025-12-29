@@ -12,13 +12,12 @@ mod undo_redo;
 
 use eframe::egui;
 use egui::IconData;
-use rpa_core::{
-    IrBuilder, LogEntry, LogLevel, ScenarioValidator, UiConstants, execute_project_with_typed_vars,
-    get_timestamp,
-};
+use rpa_core::execution::ExecutionContext;
+use rpa_core::{IrBuilder, LogEntry, LogLevel, ScenarioValidator, UiConstants, get_timestamp};
 use rust_i18n::t;
 use state::RpaApp;
 use std::sync::mpsc::channel;
+use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -168,18 +167,72 @@ impl RpaApp {
 
         let stop_control = self.stop_control.clone();
         let variables = self.global_variables.clone();
+        let scenario_variables = program.scenario_variables.clone();
+        let current_scenario_id = self.project.main_scenario.id.as_str().to_string();
+
+        let context = Arc::new(RwLock::new(ExecutionContext::new_without_sender(
+            start_time,
+            variables,
+            scenario_variables,
+            current_scenario_id,
+            stop_control,
+        )));
+
+        self.execution_context = Some(context.clone());
 
         let project = std::sync::Arc::new(self.project.clone());
 
         std::thread::spawn(move || {
-            execute_project_with_typed_vars(
-                &project,
-                &log_sender,
-                start_time,
-                &program,
-                variables,
-                stop_control,
-            );
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut log = log_sender.clone();
+                let mut executor = rpa_core::execution::IrExecutor::new(
+                    &program,
+                    &project,
+                    context.clone(),
+                    &mut log,
+                );
+
+                if let Err(e) = executor.execute()
+                    && e != "Execution stopped by user"
+                {
+                    let _ = log_sender.send(LogEntry {
+                        timestamp: get_timestamp(context.read().unwrap().start_time),
+                        level: LogLevel::Error,
+                        activity: "SYSTEM".to_string(),
+                        message: format!("Execution error: {e}"),
+                    });
+                }
+            }));
+
+            if let Err(panic) = result {
+                let panic_msg = if let Some(s) = panic.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = panic.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "Unknown panic occurred".to_string()
+                };
+
+                let _ = log_sender.send(LogEntry {
+                    timestamp: get_timestamp(start_time),
+                    level: LogLevel::Error,
+                    activity: "SYSTEM".to_string(),
+                    message: format!("Execution interrupted: {panic_msg}"),
+                });
+            }
+
+            let _ = log_sender.send(LogEntry {
+                timestamp: get_timestamp(start_time),
+                level: LogLevel::Info,
+                activity: "SYSTEM".to_string(),
+                message: "Execution completed.".to_string(),
+            });
+            let _ = log_sender.send(LogEntry {
+                timestamp: get_timestamp(start_time),
+                level: LogLevel::Info,
+                activity: "SYSTEM".to_string(),
+                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+            });
         });
     }
 }
