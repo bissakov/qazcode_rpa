@@ -776,15 +776,15 @@ pub fn execute_project_with_typed_vars(
         let mut log = log_sender.clone();
 
         let mut executor = IrExecutor::new(program, project, &mut context, &mut log);
-        if let Err(e) = executor.execute() {
-            if e != "Execution stopped by user" {
-                let _ = log_sender.send(LogEntry {
-                    timestamp: get_timestamp(context.start_time),
-                    level: LogLevel::Error,
-                    activity: "SYSTEM".to_string(),
-                    message: format!("Execution error: {e}"),
-                });
-            }
+        if let Err(e) = executor.execute()
+            && e != "Execution stopped by user"
+        {
+            let _ = log_sender.send(LogEntry {
+                timestamp: get_timestamp(context.start_time),
+                level: LogLevel::Error,
+                activity: "SYSTEM".to_string(),
+                message: format!("Execution error: {e}"),
+            });
         }
     }));
 

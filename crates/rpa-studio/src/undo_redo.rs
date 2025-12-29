@@ -20,9 +20,6 @@ impl UndoRedoManager {
         self.undoer.feed_state(time, project);
     }
 
-    /// Force an immediate undo point without waiting for stable_time.
-    /// Used for discrete user actions that should each be a separate undo step
-    /// (e.g., creating a scenario, dropping an activity, creating a connection, dragging a node).
     pub fn add_undo(&mut self, project: &Project) {
         self.undoer.add_undo(project);
     }

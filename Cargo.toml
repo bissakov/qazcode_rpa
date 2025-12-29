@@ -19,5 +19,15 @@ rust-i18n = "3"
 version = "0.4.0"
 edition = "2024"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused = { level = "deny", priority = -1 }
+dead_code = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "warn"
+nursery = "warn"
+
 [profile.release]
 debug = true

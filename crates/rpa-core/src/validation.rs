@@ -484,7 +484,7 @@ impl<'a> ScenarioValidator<'a> {
             return Some(call_stack.clone());
         }
 
-        if call_stack.iter().any(|id| *id == scenario_id) {
+        if call_stack.contains(&scenario_id) {
             let cycle_start = call_stack.iter().position(|id| *id == scenario_id).unwrap();
             return Some(call_stack[cycle_start..].to_vec());
         }

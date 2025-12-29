@@ -200,10 +200,10 @@ impl<'a> IrBuilder<'a> {
         for scenario in
             std::iter::once(&self.project.main_scenario).chain(self.project.scenarios.iter())
         {
-            if !self.compiled_scenarios.contains(&scenario.id) {
-                if self.call_graph.contains_key(&scenario.id) {
-                    scenarios_to_compile.push(scenario.id.clone());
-                }
+            if !self.compiled_scenarios.contains(&scenario.id)
+                && self.call_graph.contains_key(&scenario.id)
+            {
+                scenarios_to_compile.push(scenario.id.clone());
             }
         }
 

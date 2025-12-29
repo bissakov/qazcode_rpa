@@ -1,6 +1,6 @@
+use crate::loglevel_ext::LogLevelExt;
 use crate::state::RpaApp;
 use crate::ui::canvas;
-use crate::{loglevel_ext::LogLevelExt, state::ScenarioViewState};
 use eframe::egui;
 use egui::{DragValue, Slider};
 use egui_extras::{Column, TableBuilder};
@@ -43,10 +43,7 @@ impl RpaApp {
                     allow_node_resize,
                 };
 
-                let view = self
-                    .scenario_views
-                    .entry(scenario.id.clone())
-                    .or_insert_with(ScenarioViewState::default);
+                let view = self.scenario_views.entry(scenario.id.clone()).or_default();
 
                 let (canvas_result, dropped_activity) = ui
                     .dnd_drop_zone::<Activity, _>(egui::Frame::default(), |ui| {
@@ -699,85 +696,83 @@ impl RpaApp {
         self.dialogs.var_binding_dialog = dialog_state.clone();
         self.dialogs.var_binding_dialog.error_message = error_message;
 
-        if close_window && self.dialogs.var_binding_dialog.error_message.is_none() {
-            if let Some(current_idx) = self.current_scenario_index {
-                if let Some(node_id) = self.selected_nodes.iter().next().cloned() {
-                    let scenario_id_and_params = {
-                        if let Some(node) =
-                            self.project.scenarios[current_idx].get_node_mut(node_id.clone())
-                        {
-                            if let rpa_core::Activity::CallScenario {
-                                scenario_id,
-                                parameters,
-                            } = &mut node.activity
-                            {
-                                let _source_var_type = self
-                                    .project
-                                    .variables
-                                    .get(&dialog_state.source_var_name)
-                                    .map(|v| v.get_type());
+        if close_window
+            && self.dialogs.var_binding_dialog.error_message.is_none()
+            && let Some(current_idx) = self.current_scenario_index
+            && let Some(node_id) = self.selected_nodes.iter().next().cloned()
+        {
+            let scenario_id_and_params = {
+                if let Some(node) =
+                    self.project.scenarios[current_idx].get_node_mut(node_id.clone())
+                {
+                    if let rpa_core::Activity::CallScenario {
+                        scenario_id,
+                        parameters,
+                    } = &mut node.activity
+                    {
+                        let _source_var_type = self
+                            .project
+                            .variables
+                            .get(&dialog_state.source_var_name)
+                            .map(|v| v.get_type());
 
-                                Some((scenario_id.clone(), parameters.clone()))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                        Some((scenario_id.clone(), parameters.clone()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some((scenario_id, mut parameters)) = scenario_id_and_params {
+                // Find the called scenario to add the parameter to it
+                if let Some(called_scenario) = self
+                    .project
+                    .scenarios
+                    .iter_mut()
+                    .find(|s| s.id == scenario_id)
+                {
+                    // Create or find the parameter in the called scenario
+                    let target_var_exists = called_scenario
+                        .parameters
+                        .iter()
+                        .any(|p| p.var_name == dialog_state.target_var_name);
+
+                    if !target_var_exists {
+                        // Parameter doesn't exist, create it
+                        called_scenario
+                            .parameters
+                            .push(rpa_core::node_graph::ScenarioParameter {
+                                var_name: dialog_state.target_var_name.clone(),
+                                direction: dialog_state.direction,
+                            });
+                    }
+
+                    let binding = rpa_core::node_graph::VariablesBinding {
+                        target_var_name: dialog_state.target_var_name.clone(),
+                        source_var_name: dialog_state.source_var_name.clone(),
+                        direction: dialog_state.direction,
+                        source_scope: None,
                     };
 
-                    if let Some((scenario_id, mut parameters)) = scenario_id_and_params {
-                        // Find the called scenario to add the parameter to it
-                        if let Some(called_scenario) = self
-                            .project
-                            .scenarios
-                            .iter_mut()
-                            .find(|s| s.id == scenario_id)
-                        {
-                            // Create or find the parameter in the called scenario
-                            let target_var_exists = called_scenario
-                                .parameters
-                                .iter()
-                                .any(|p| p.var_name == dialog_state.target_var_name);
-
-                            if !target_var_exists {
-                                // Parameter doesn't exist, create it
-                                called_scenario.parameters.push(
-                                    rpa_core::node_graph::ScenarioParameter {
-                                        var_name: dialog_state.target_var_name.clone(),
-                                        direction: dialog_state.direction,
-                                    },
-                                );
-                            }
-
-                            let binding = rpa_core::node_graph::VariablesBinding {
-                                target_var_name: dialog_state.target_var_name.clone(),
-                                source_var_name: dialog_state.source_var_name.clone(),
-                                direction: dialog_state.direction,
-                                source_scope: None,
-                            };
-
-                            if let Some(idx) = dialog_state.editing_index {
-                                if idx < parameters.len() {
-                                    parameters[idx] = binding;
-                                }
-                            } else {
-                                parameters.push(binding);
-                            }
-
-                            // Now update the node activity with the modified parameters
-                            if let Some(node) =
-                                self.project.scenarios[current_idx].get_node_mut(node_id.clone())
-                            {
-                                if let rpa_core::Activity::CallScenario {
-                                    parameters: node_params,
-                                    ..
-                                } = &mut node.activity
-                                {
-                                    *node_params = parameters;
-                                }
-                            }
+                    if let Some(idx) = dialog_state.editing_index {
+                        if idx < parameters.len() {
+                            parameters[idx] = binding;
                         }
+                    } else {
+                        parameters.push(binding);
+                    }
+
+                    // Now update the node activity with the modified parameters
+                    if let Some(node) =
+                        self.project.scenarios[current_idx].get_node_mut(node_id.clone())
+                        && let rpa_core::Activity::CallScenario {
+                            parameters: node_params,
+                            ..
+                        } = &mut node.activity
+                    {
+                        *node_params = parameters;
                     }
                 }
             }
@@ -1180,22 +1175,20 @@ impl RpaApp {
                                             scenario_id,
                                             parameters,
                                         } = &activity
+                                            && let Some(binding) = parameters.get(idx)
                                         {
-                                            if let Some(binding) = parameters.get(idx) {
-                                                self.dialogs.var_binding_dialog.show = true;
-                                                self.dialogs.var_binding_dialog.scenario_id =
-                                                    scenario_id.clone();
-                                                self.dialogs.var_binding_dialog.source_var_name =
-                                                    binding.source_var_name.clone();
-                                                self.dialogs.var_binding_dialog.target_var_name =
-                                                    binding.target_var_name.clone();
-                                                self.dialogs.var_binding_dialog.direction =
-                                                    binding.direction;
-                                                self.dialogs.var_binding_dialog.editing_index =
-                                                    Some(idx);
-                                                self.dialogs.var_binding_dialog.error_message =
-                                                    None;
-                                            }
+                                            self.dialogs.var_binding_dialog.show = true;
+                                            self.dialogs.var_binding_dialog.scenario_id =
+                                                scenario_id.clone();
+                                            self.dialogs.var_binding_dialog.source_var_name =
+                                                binding.source_var_name.clone();
+                                            self.dialogs.var_binding_dialog.target_var_name =
+                                                binding.target_var_name.clone();
+                                            self.dialogs.var_binding_dialog.direction =
+                                                binding.direction;
+                                            self.dialogs.var_binding_dialog.editing_index =
+                                                Some(idx);
+                                            self.dialogs.var_binding_dialog.error_message = None;
                                         }
                                     }
                                     canvas::ParameterBindingAction::None => {}

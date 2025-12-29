@@ -1392,33 +1392,29 @@ pub fn draw_node_transformed<F>(
 
         let galley = painter.layout_job(job);
         painter.galley(text_rect.min, galley, Color32::from_rgb(60, 60, 60));
-    } else {
-        if zoom >= UiConstants::GRID_MIN_ZOOM {
-            let text_pos = rect.min + Vec2::new(10.0 * zoom, 10.0 * zoom);
-            painter.text(
-                text_pos,
-                egui::Align2::LEFT_TOP,
-                node.activity.get_name(),
-                egui::FontId::proportional(14.0 * zoom),
-                Color32::WHITE,
-            );
-        }
+    } else if zoom >= UiConstants::GRID_MIN_ZOOM {
+        let text_pos = rect.min + Vec2::new(10.0 * zoom, 10.0 * zoom);
+        painter.text(
+            text_pos,
+            egui::Align2::LEFT_TOP,
+            node.activity.get_name(),
+            egui::FontId::proportional(14.0 * zoom),
+            Color32::WHITE,
+        );
     }
 
-    if zoom >= UiConstants::GRID_MIN_ZOOM {
-        if node.has_input_pin() {
-            let input_pin = to_screen(node.get_input_pin_pos());
-            painter.circle_filled(
-                input_pin,
-                UiConstants::PIN_RADIUS * zoom,
-                Color32::from_rgb(150, 150, 150),
-            );
-            painter.circle_stroke(
-                input_pin,
-                UiConstants::PIN_RADIUS * zoom,
-                Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
-            );
-        }
+    if zoom >= UiConstants::GRID_MIN_ZOOM && node.has_input_pin() {
+        let input_pin = to_screen(node.get_input_pin_pos());
+        painter.circle_filled(
+            input_pin,
+            UiConstants::PIN_RADIUS * zoom,
+            Color32::from_rgb(150, 150, 150),
+        );
+        painter.circle_stroke(
+            input_pin,
+            UiConstants::PIN_RADIUS * zoom,
+            Stroke::new(1.0 * zoom, Color32::from_rgb(80, 80, 80)),
+        );
     }
 
     if node.has_output_pin() {
@@ -1558,6 +1554,7 @@ fn draw_connection_transformed<F>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_bezier(
     painter: &egui::Painter,
     p0: Pos2,

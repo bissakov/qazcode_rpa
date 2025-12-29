@@ -174,10 +174,10 @@ unsafe fn invoke_method(
             )
             .map_err(|e| format!("GetIDsOfNames failed for {}: {}", method, e))?;
 
-        let mut params: Vec<VARIANT> = args.iter().cloned().collect();
+        let mut params: Vec<VARIANT> = args.to_vec();
         params.reverse();
 
-        let mut dispparams = DISPPARAMS {
+        let dispparams = DISPPARAMS {
             rgvarg: if params.is_empty() {
                 std::ptr::null_mut()
             } else {
@@ -197,7 +197,7 @@ unsafe fn invoke_method(
                 &GUID::zeroed(),
                 0,
                 DISPATCH_METHOD,
-                &mut dispparams,
+                &dispparams,
                 Some(&mut result),
                 Some(&mut excepinfo),
                 None,
@@ -233,7 +233,7 @@ unsafe fn get_property(
             )
             .map_err(|e| format!("GetIDsOfNames failed for {}: {}", property, e))?;
 
-        let mut dispparams = DISPPARAMS::default();
+        let dispparams = DISPPARAMS::default();
         let mut result = VARIANT::default();
         let mut excepinfo = EXCEPINFO::default();
 
@@ -243,7 +243,7 @@ unsafe fn get_property(
                 &GUID::zeroed(),
                 0,
                 DISPATCH_PROPERTYGET,
-                &mut dispparams,
+                &dispparams,
                 Some(&mut result),
                 Some(&mut excepinfo),
                 None,
@@ -282,7 +282,7 @@ unsafe fn set_property(
         let mut value_copy = value.clone();
         let dispid_propertyput = DISPID_PROPERTYPUT;
 
-        let mut dispparams = DISPPARAMS {
+        let dispparams = DISPPARAMS {
             rgvarg: &mut value_copy,
             rgdispidNamedArgs: &dispid_propertyput as *const _ as *mut _,
             cArgs: 1,
@@ -297,7 +297,7 @@ unsafe fn set_property(
                 &GUID::zeroed(),
                 0,
                 DISPATCH_PROPERTYPUT,
-                &mut dispparams,
+                &dispparams,
                 None,
                 Some(&mut excepinfo),
                 None,
@@ -410,67 +410,49 @@ fn get_emails_impl(folder: &str) -> Result<Vec<EmailMessage>, String> {
             for i in 1..=count.min(50) {
                 let item_result = invoke_method(&items_dispatch, "Item", &[VARIANT::from(i)]);
 
-                if let Ok(item_var) = item_result {
-                    if let Some(item_dispatch) =
+                if let Ok(item_var) = item_result
+                    && let Some(item_dispatch) =
                         item_var.Anonymous.Anonymous.Anonymous.pdispVal.as_ref()
+                {
+                    let to = get_string_property(item_dispatch, "To").unwrap_or_default();
+                    let subject = get_string_property(item_dispatch, "Subject").unwrap_or_default();
+                    let body = get_string_property(item_dispatch, "Body").unwrap_or_default();
+                    let received_time = get_string_property(item_dispatch, "ReceivedTime")
+                        .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
+
+                    let attachments_obj = get_property(item_dispatch, "Attachments");
+                    let mut attachment_names = Vec::new();
+
+                    if let Ok(attachments_var) = attachments_obj
+                        && let Some(attachments_dispatch) = attachments_var
+                            .Anonymous
+                            .Anonymous
+                            .Anonymous
+                            .pdispVal
+                            .as_ref()
+                        && let Ok(att_count_var) = get_property(attachments_dispatch, "Count")
                     {
-                        let to = get_string_property(item_dispatch, "To").unwrap_or_default();
-                        let subject =
-                            get_string_property(item_dispatch, "Subject").unwrap_or_default();
-                        let body = get_string_property(item_dispatch, "Body").unwrap_or_default();
-                        let received_time = get_string_property(item_dispatch, "ReceivedTime")
-                            .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
+                        let att_count = att_count_var.Anonymous.Anonymous.Anonymous.lVal;
 
-                        let attachments_obj = get_property(item_dispatch, "Attachments");
-                        let mut attachment_names = Vec::new();
-
-                        if let Ok(attachments_var) = attachments_obj {
-                            if let Some(attachments_dispatch) = attachments_var
-                                .Anonymous
-                                .Anonymous
-                                .Anonymous
-                                .pdispVal
-                                .as_ref()
+                        for j in 1..=att_count {
+                            if let Ok(att_item) =
+                                invoke_method(attachments_dispatch, "Item", &[VARIANT::from(j)])
+                                && let Some(att_dispatch) =
+                                    att_item.Anonymous.Anonymous.Anonymous.pdispVal.as_ref()
+                                && let Ok(filename) = get_string_property(att_dispatch, "FileName")
                             {
-                                if let Ok(att_count_var) =
-                                    get_property(attachments_dispatch, "Count")
-                                {
-                                    let att_count =
-                                        att_count_var.Anonymous.Anonymous.Anonymous.lVal;
-
-                                    for j in 1..=att_count {
-                                        if let Ok(att_item) = invoke_method(
-                                            attachments_dispatch,
-                                            "Item",
-                                            &[VARIANT::from(j)],
-                                        ) {
-                                            if let Some(att_dispatch) = att_item
-                                                .Anonymous
-                                                .Anonymous
-                                                .Anonymous
-                                                .pdispVal
-                                                .as_ref()
-                                            {
-                                                if let Ok(filename) =
-                                                    get_string_property(att_dispatch, "FileName")
-                                                {
-                                                    attachment_names.push(filename);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                attachment_names.push(filename);
                             }
                         }
-
-                        messages.push(EmailMessage {
-                            to,
-                            subject,
-                            body,
-                            timestamp: received_time,
-                            attachments: attachment_names,
-                        });
                     }
+
+                    messages.push(EmailMessage {
+                        to,
+                        subject,
+                        body,
+                        timestamp: received_time,
+                        attachments: attachment_names,
+                    });
                 }
             }
 
