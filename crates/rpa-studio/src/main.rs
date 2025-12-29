@@ -36,7 +36,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            target_fps: 60,
+            target_fps: UiConstants::DEFAULT_FPS,
             font_size: UiConstants::DEFAULT_FONT_SIZE,
             show_minimap: true,
             allow_node_resize: false,
