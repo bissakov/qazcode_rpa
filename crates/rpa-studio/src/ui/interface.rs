@@ -1061,7 +1061,10 @@ impl RpaApp {
                         .show(ui, |ui| {
                             for (metadata, activity) in activities {
                                 let response = ui.dnd_drag_source(
-                                    egui::Id::new(format!("activity_{:?}", activity)),
+                                    egui::Id::new(format!(
+                                        "activity_{:?}",
+                                        std::mem::discriminant(&activity)
+                                    )),
                                     activity.clone(),
                                     |ui| {
                                         let _ = ui.button(t!(metadata.button_key).as_ref());
