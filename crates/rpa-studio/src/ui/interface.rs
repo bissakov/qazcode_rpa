@@ -1226,18 +1226,46 @@ impl RpaApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.add_space(5.0);
-                self.render_variables(
-                    ui,
-                    t!("panels.global_variables").as_ref(),
-                    &self.global_variables,
-                );
 
-                let scenario = self.get_current_scenario();
-                self.render_variables(
-                    ui,
-                    t!("panels.local_variables").as_ref(),
-                    &scenario.variables,
-                );
+                if self.is_executing {
+                    if let Some(ref context) = self.execution_context {
+                        let ctx = context.read().unwrap();
+                        self.render_variables(
+                            ui,
+                            t!("panels.global_variables").as_ref(),
+                            &ctx.global_variables,
+                        );
+                        self.render_variables(
+                            ui,
+                            t!("panels.local_variables").as_ref(),
+                            &ctx.scenario_variables,
+                        );
+                    } else {
+                        self.render_variables(
+                            ui,
+                            t!("panels.global_variables").as_ref(),
+                            &self.global_variables,
+                        );
+                        let scenario = self.get_current_scenario();
+                        self.render_variables(
+                            ui,
+                            t!("panels.local_variables").as_ref(),
+                            &scenario.variables,
+                        );
+                    }
+                } else {
+                    self.render_variables(
+                        ui,
+                        t!("panels.global_variables").as_ref(),
+                        &self.global_variables,
+                    );
+                    let scenario = self.get_current_scenario();
+                    self.render_variables(
+                        ui,
+                        t!("panels.local_variables").as_ref(),
+                        &scenario.variables,
+                    );
+                }
             });
     }
 
