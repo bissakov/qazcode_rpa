@@ -66,7 +66,7 @@ impl VisibilityGraph {
         }
 
         // Create initial waypoint based on preferred direction
-        let offset = 30.0;
+        let offset = 50.0;
         let initial_waypoint = match preferred_direction {
             OutputDirection::Down => Pos2::new(start.x, start.y + offset),
             OutputDirection::Right => Pos2::new(start.x + offset, start.y),
@@ -82,7 +82,14 @@ impl VisibilityGraph {
             // Combine paths, avoiding duplicate waypoint
             let mut combined = path_to_waypoint;
             combined.extend_from_slice(&path_from_waypoint[1..]);
-            return simplify_path(&combined, &self.obstacles);
+            // Only simplify from the second waypoint onwards to preserve initial direction
+            if combined.len() > 2 {
+                let first_segment = combined[0];
+                let mut simplified = vec![first_segment];
+                simplified.extend_from_slice(&simplify_path(&combined[1..], &self.obstacles));
+                return simplified;
+            }
+            return combined;
         }
 
         // Fallback to regular pathfinding
