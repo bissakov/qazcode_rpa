@@ -1,4 +1,7 @@
 use crate::{activity_ext::ActivityExt, colors::ColorPalette, state::ScenarioViewState};
+use crate::ui::connection_renderer::{
+    ConnectionPath, ConnectionRenderer, calculate_bezier_control_points, bezier_to_line_segments,
+};
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -109,82 +112,15 @@ fn line_segments_intersect(p1: Pos2, p2: Pos2, p3: Pos2, p4: Pos2) -> bool {
     (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)
 }
 
-fn bezier_to_line_segments(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> {
-    let steps = UiConstants::BEZIER_STEPS;
-    let mut points = Vec::with_capacity(steps + 1);
-
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let t2 = t * t;
-        let t3 = t2 * t;
-        let mt = 1.0 - t;
-        let mt2 = mt * mt;
-        let mt3 = mt2 * mt;
-
-        let x = mt3 * p0.x + 3.0 * mt2 * t * p1.x + 3.0 * mt * t2 * p2.x + t3 * p3.x;
-        let y = mt3 * p0.y + 3.0 * mt2 * t * p1.y + 3.0 * mt * t2 * p2.y + t3 * p3.y;
-
-        points.push(Pos2::new(x, y));
-    }
-
-    points
-}
-
-fn get_or_compute_bezier(
-    cache: &mut HashMap<NanoId, Vec<Pos2>>,
-    connection_id: &NanoId,
-    p0: Pos2,
-    p1: Pos2,
-    p2: Pos2,
-    p3: Pos2,
-) -> Vec<Pos2> {
-    cache
-        .entry(connection_id.clone())
-        .or_insert_with(|| bezier_to_line_segments(p0, p1, p2, p3))
-        .clone()
-}
-
-fn point_to_bezier_distance(point: Pos2, bezier_points: &[Pos2]) -> f32 {
-    let mut min_distance = f32::MAX;
-
-    for i in 0..bezier_points.len() - 1 {
-        let segment_start = bezier_points[i];
-        let segment_end = bezier_points[i + 1];
-
-        let segment = segment_end - segment_start;
-        let point_vec = point - segment_start;
-
-        let segment_length_sq = segment.length_sq();
-        if segment_length_sq < 0.0001 {
-            min_distance = min_distance.min(point_vec.length());
-            continue;
-        }
-
-        let t = (point_vec.dot(segment) / segment_length_sq).clamp(0.0, 1.0);
-        let projection = segment_start + segment * t;
-        let distance = (point - projection).length();
-
-        min_distance = min_distance.min(distance);
-    }
-
-    min_distance
-}
-
-fn get_out_pin_pos_by_branch(node: &Node, branch_type: &BranchType) -> egui::Pos2 {
+fn get_connection_color(branch_type: &BranchType, _from_node: &Node) -> Color32 {
     match branch_type {
-        BranchType::TrueBranch => node.get_output_pin_pos_by_index(0),
-        BranchType::FalseBranch => node.get_output_pin_pos_by_index(1),
-        BranchType::LoopBody => node.get_output_pin_pos_by_index(1),
-        BranchType::ErrorBranch => node.get_output_pin_pos_by_index(1),
-        BranchType::TryBranch => node.get_output_pin_pos_by_index(0),
-        BranchType::CatchBranch => node.get_output_pin_pos_by_index(1),
-        BranchType::Default => {
-            if node.get_output_pin_count() > 1 {
-                node.get_output_pin_pos_by_index(0)
-            } else {
-                node.get_output_pin_pos()
-            }
-        }
+        BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
+        BranchType::FalseBranch => ColorPalette::CONNECTION_FALSE,
+        BranchType::LoopBody => ColorPalette::CONNECTION_LOOP_BODY,
+        BranchType::ErrorBranch => ColorPalette::CONNECTION_ERROR,
+        BranchType::TryBranch => ColorPalette::CONNECTION_DEFAULT,
+        BranchType::CatchBranch => ColorPalette::CONNECTION_ERROR,
+        BranchType::Default => ColorPalette::CONNECTION_DEFAULT,
     }
 }
 
@@ -195,7 +131,7 @@ fn find_connection_near_point(
     pan_offset: Vec2,
     zoom: f32,
     threshold: f32,
-    cache: &mut HashMap<NanoId, Vec<Pos2>>,
+    renderer: &mut ConnectionRenderer,
 ) -> Option<(NanoId, NanoId)> {
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
@@ -204,34 +140,8 @@ fn find_connection_near_point(
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, &connection.branch_type);
-            let start = to_screen(start_out_pin_pos);
-            let end = to_screen(to_node.get_input_pin_pos());
-
-            let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-                FlowDirection::Horizontal => {
-                    let distance = (end.x - start.x).abs();
-                    let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (
-                        start + Vec2::new(control_offset, 0.0),
-                        end - Vec2::new(control_offset, 0.0),
-                    )
-                }
-                FlowDirection::Vertical => {
-                    let distance = (end.y - start.y).abs();
-                    let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (
-                        start + Vec2::new(0.0, control_offset),
-                        end - Vec2::new(0.0, control_offset),
-                    )
-                }
-            };
-
-            let bezier_points =
-                get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
-            let dist = point_to_bezier_distance(point, &bezier_points);
-
-            if dist < threshold {
+            let path = ConnectionPath::new(from_node, to_node, &connection.branch_type, to_screen);
+            if path.hit_test(point, renderer, &connection.id, threshold) {
                 return Some((connection.from_node.clone(), connection.to_node.clone()));
             }
         }
@@ -246,7 +156,7 @@ fn find_intersecting_connections(
     cut_path: &[Pos2],
     pan_offset: Vec2,
     zoom: f32,
-    cache: &mut HashMap<NanoId, Vec<Pos2>>,
+    renderer: &mut ConnectionRenderer,
 ) -> Vec<(NanoId, NanoId)> {
     let mut intersecting = Vec::new();
 
@@ -261,51 +171,14 @@ fn find_intersecting_connections(
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, &connection.branch_type);
-            let start = to_screen(start_out_pin_pos);
-            let end = to_screen(to_node.get_input_pin_pos());
-
-            let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-                FlowDirection::Horizontal => {
-                    let distance = (end.x - start.x).abs();
-                    let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (
-                        start + Vec2::new(control_offset, 0.0),
-                        end - Vec2::new(control_offset, 0.0),
-                    )
-                }
-                FlowDirection::Vertical => {
-                    let distance = (end.y - start.y).abs();
-                    let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                    (
-                        start + Vec2::new(0.0, control_offset),
-                        end - Vec2::new(0.0, control_offset),
-                    )
-                }
-            };
-
-            let bezier_points =
-                get_or_compute_bezier(cache, &connection.id, start, control1, control2, end);
+            let path = ConnectionPath::new(from_node, to_node, &connection.branch_type, to_screen);
 
             for i in 0..cut_path.len() - 1 {
                 let cut_start = cut_path[i];
                 let cut_end = cut_path[i + 1];
 
-                for j in 0..bezier_points.len() - 1 {
-                    let bezier_start = bezier_points[j];
-                    let bezier_end = bezier_points[j + 1];
-
-                    if line_segments_intersect(cut_start, cut_end, bezier_start, bezier_end) {
-                        intersecting
-                            .push((connection.from_node.clone(), connection.to_node.clone()));
-                        break;
-                    }
-                }
-
-                if intersecting
-                    .iter()
-                    .any(|(f, t)| *f == connection.from_node && *t == connection.to_node)
-                {
+                if path.intersects_line(cut_start, cut_end, renderer, &connection.id) {
+                    intersecting.push((connection.from_node.clone(), connection.to_node.clone()));
                     break;
                 }
             }
@@ -406,7 +279,7 @@ pub fn render_node_graph(
             view.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
 
             if zoom_delta != 0.0 {
-                view.bezier_cache.clear();
+                view.connection_renderer.clear_cache();
             }
         }
     }
@@ -417,11 +290,7 @@ pub fn render_node_graph(
         let pan_delta = response.drag_delta();
         view.pan_offset += pan_delta;
 
-        for bezier_points in view.bezier_cache.values_mut() {
-            for point in bezier_points.iter_mut() {
-                *point += pan_delta;
-            }
-        }
+        view.connection_renderer.update_pan_offset(pan_delta);
 
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
@@ -441,7 +310,7 @@ pub fn render_node_graph(
                 state.knife_path,
                 view.pan_offset,
                 view.zoom,
-                &mut view.bezier_cache,
+                &mut view.connection_renderer,
             );
             for (from_node, to_node) in connections_to_remove {
                 scenario
@@ -474,15 +343,9 @@ pub fn render_node_graph(
             get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
         ) {
-            draw_connection_transformed(
-                &painter,
-                from_node,
-                to_node,
-                &connection.branch_type,
-                to_screen,
-                &connection.id,
-                &mut view.bezier_cache,
-            );
+            let path = ConnectionPath::new(from_node, to_node, &connection.branch_type, to_screen);
+            let color = get_connection_color(&connection.branch_type, from_node);
+            path.draw(&painter, color, &mut view.connection_renderer, &connection.id);
         }
     }
 
@@ -567,7 +430,7 @@ pub fn render_node_graph(
             view.pan_offset,
             view.zoom,
             UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
-            &mut view.bezier_cache,
+            &mut view.connection_renderer,
         )
         .is_some()
         {
@@ -913,7 +776,7 @@ pub fn render_node_graph(
                 node.position += drag_delta;
             }
         }
-        view.bezier_cache.clear();
+        view.connection_renderer.clear_cache();
     }
 
     if let Some(released_node_id) = node_drag_released
@@ -929,7 +792,7 @@ pub fn render_node_graph(
             view.pan_offset,
             view.zoom,
             UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
-            &mut view.bezier_cache,
+            &mut view.connection_renderer,
         ) && released_node_id != from_id
             && released_node_id != to_id
             && let Some(conn_to_remove) = scenario
@@ -1103,63 +966,20 @@ pub fn render_node_graph(
 
             let is_error_branch = from_node.activity.can_have_error_output() && *pin_index == 1;
 
-            let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-                FlowDirection::Horizontal => {
-                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * view.zoom;
-                    (
-                        start + Vec2::new(control_offset, 0.0),
-                        end - Vec2::new(control_offset, 0.0),
-                    )
-                }
-                FlowDirection::Vertical => {
-                    let control_offset = UiConstants::BEZIER_CONTROL_OFFSET * view.zoom;
-                    if is_error_branch {
-                        (
-                            start + Vec2::new(control_offset, 0.0),
-                            end - Vec2::new(control_offset, 0.0),
-                        )
-                    } else {
-                        (
-                            start + Vec2::new(0.0, control_offset),
-                            end - Vec2::new(0.0, control_offset),
-                        )
-                    }
-                }
-            };
+            let (control_offset1, control_offset2) =
+                calculate_bezier_control_points(start, end, is_error_branch);
+            let control1 = start + control_offset1 * view.zoom;
+            let control2 = end - control_offset2 * view.zoom;
 
-            let preview_color = match &from_node.activity {
-                Activity::IfCondition { .. } => {
-                    if *pin_index == 0 {
-                        ColorPalette::CONNECTION_TRUE
-                    } else {
-                        ColorPalette::CONNECTION_FALSE
-                    }
-                }
-                Activity::Loop { .. } | Activity::While { .. } => {
-                    if *pin_index == 0 {
-                        ColorPalette::CONNECTION_LOOP_BODY
-                    } else {
-                        ColorPalette::CONNECTION_DEFAULT
-                    }
-                }
-                Activity::TryCatch => {
-                    if *pin_index == 0 {
-                        ColorPalette::CONNECTION_DEFAULT
-                    } else {
-                        ColorPalette::CONNECTION_ERROR
-                    }
-                }
-                _ => {
-                    if from_node.activity.can_have_error_output() {
-                        if *pin_index == 0 {
-                            ColorPalette::CONNECTION_DEFAULT
-                        } else {
-                            ColorPalette::CONNECTION_ERROR
-                        }
-                    } else {
-                        ColorPalette::CONNECTION_DEFAULT
-                    }
-                }
+            let branch_type = from_node.get_branch_type_for_pin(*pin_index);
+            let preview_color = match branch_type {
+                BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
+                BranchType::FalseBranch => ColorPalette::CONNECTION_FALSE,
+                BranchType::LoopBody => ColorPalette::CONNECTION_LOOP_BODY,
+                BranchType::ErrorBranch => ColorPalette::CONNECTION_ERROR,
+                BranchType::TryBranch => ColorPalette::CONNECTION_DEFAULT,
+                BranchType::CatchBranch => ColorPalette::CONNECTION_ERROR,
+                BranchType::Default => ColorPalette::CONNECTION_DEFAULT,
             };
 
             draw_bezier_uncached(
@@ -1487,86 +1307,6 @@ pub fn draw_node_transformed<F>(
             }
         }
     }
-}
-
-fn draw_connection_transformed<F>(
-    painter: &egui::Painter,
-    from_node: &Node,
-    to_node: &Node,
-    branch_type: &BranchType,
-    to_screen: F,
-    connection_id: &NanoId,
-    cache: &mut HashMap<NanoId, Vec<Pos2>>,
-) where
-    F: Fn(Pos2) -> Pos2,
-{
-    let start_out_pin_pos = get_out_pin_pos_by_branch(from_node, branch_type);
-    let start = to_screen(start_out_pin_pos);
-    let end = to_screen(to_node.get_input_pin_pos());
-
-    let (control1, control2) = match UiConstants::FLOW_DIRECTION {
-        FlowDirection::Horizontal => {
-            let distance = (end.x - start.x).abs();
-            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-            (
-                start + Vec2::new(control_offset, 0.0),
-                end - Vec2::new(control_offset, 0.0),
-            )
-        }
-        FlowDirection::Vertical => {
-            if *branch_type == BranchType::ErrorBranch {
-                let distance = (end.x - start.x).abs();
-                let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                (
-                    start + Vec2::new(control_offset, 0.0),
-                    end - Vec2::new(control_offset, 0.0),
-                )
-            } else {
-                let distance = (end.y - start.y).abs();
-                let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
-                (
-                    start + Vec2::new(0.0, control_offset),
-                    end - Vec2::new(0.0, control_offset),
-                )
-            }
-        }
-    };
-
-    let color = match branch_type {
-        BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
-        BranchType::FalseBranch => ColorPalette::CONNECTION_FALSE,
-        BranchType::LoopBody => ColorPalette::CONNECTION_LOOP_BODY,
-        BranchType::ErrorBranch => ColorPalette::CONNECTION_ERROR,
-        BranchType::TryBranch => ColorPalette::CONNECTION_DEFAULT,
-        BranchType::CatchBranch => ColorPalette::CONNECTION_ERROR,
-        BranchType::Default => ColorPalette::CONNECTION_DEFAULT,
-    };
-
-    draw_bezier(
-        painter,
-        start,
-        control1,
-        control2,
-        end,
-        Stroke::new(2.0, color),
-        connection_id,
-        cache,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn draw_bezier(
-    painter: &egui::Painter,
-    p0: Pos2,
-    p1: Pos2,
-    p2: Pos2,
-    p3: Pos2,
-    stroke: Stroke,
-    connection_id: &NanoId,
-    cache: &mut HashMap<NanoId, Vec<Pos2>>,
-) {
-    let points = get_or_compute_bezier(cache, connection_id, p0, p1, p2, p3);
-    painter.add(egui::Shape::line(points, stroke));
 }
 
 fn draw_bezier_uncached(

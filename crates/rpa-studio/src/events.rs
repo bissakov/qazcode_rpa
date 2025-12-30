@@ -110,7 +110,7 @@ impl RpaApp {
                     }
                     self.selected_nodes.clear();
                     let view = self.get_current_scenario_view_mut();
-                    view.bezier_cache.clear();
+                    view.connection_renderer.clear_cache();
                     self.undo_redo.add_undo(&self.project);
                 }
             }
@@ -173,7 +173,7 @@ impl RpaApp {
 
         self.selected_nodes.clear();
         let view = self.get_current_scenario_view_mut();
-        view.bezier_cache.clear();
+        view.connection_renderer.clear_cache();
     }
 
     pub fn paste_clipboard_nodes(&mut self, mouse_world_pos: egui::Vec2) {
@@ -235,6 +235,6 @@ impl RpaApp {
         }
 
         let view = self.get_current_scenario_view_mut();
-        view.bezier_cache.clear();
+        view.connection_renderer.clear_cache();
     }
 }
