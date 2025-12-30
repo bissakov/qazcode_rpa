@@ -83,4 +83,12 @@ impl Variables {
     pub fn clear(&mut self) {
         self.values.clear();
     }
+
+    pub fn merge(&self, other: &Variables) -> Variables {
+        let mut merged = self.clone();
+        for (name, var) in &other.values {
+            merged.values.insert(name.clone(), var.clone());
+        }
+        merged
+    }
 }

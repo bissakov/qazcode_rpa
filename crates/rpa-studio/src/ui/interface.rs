@@ -1224,7 +1224,10 @@ impl RpaApp {
         }
 
         egui::ScrollArea::vertical()
-            .id_salt("variables_scroll")
+            .id_salt(format!(
+                "variables_scroll_{}",
+                self.get_current_scenario_id()
+            ))
             .max_height(max_height - 40.0)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
@@ -1238,11 +1241,22 @@ impl RpaApp {
                             t!("panels.global_variables").as_ref(),
                             &ctx.global_variables,
                         );
-                        self.render_variables(
-                            ui,
-                            t!("panels.local_variables").as_ref(),
-                            &ctx.scenario_variables,
-                        );
+                        let scenario = self.get_current_scenario();
+                        let scenario_id = self.get_current_scenario_id();
+                        if let Some(runtime_vars) = ctx.find_scenario_variables(scenario_id) {
+                            let merged = scenario.variables.merge(runtime_vars);
+                            self.render_variables(
+                                ui,
+                                t!("panels.local_variables").as_ref(),
+                                &merged,
+                            );
+                        } else {
+                            self.render_variables(
+                                ui,
+                                t!("panels.local_variables").as_ref(),
+                                &scenario.variables,
+                            );
+                        }
                     } else {
                         self.render_variables(
                             ui,
@@ -1283,39 +1297,41 @@ impl RpaApp {
             .show(ui, |ui| {
                 if self.is_executing || !variables.is_empty() {
                     if !variables.is_empty() {
-                        egui::Grid::new("runtime_vars_grid")
-                            .striped(true)
-                            .spacing([10.0, 4.0])
-                            .min_col_width(60.0)
-                            .show(ui, |ui| {
-                                ui.strong(t!("variables.scope").as_ref());
-                                ui.strong(t!("variables.name").as_ref());
-                                ui.strong(t!("variables.type").as_ref());
-                                ui.strong(t!("variables.value").as_ref());
-                                ui.end_row();
+                        egui::Grid::new(format!(
+                            "runtime_vars_grid_{}",
+                            self.get_current_scenario_id()
+                        ))
+                        .striped(true)
+                        .spacing([10.0, 4.0])
+                        .min_col_width(60.0)
+                        .show(ui, |ui| {
+                            ui.strong(t!("variables.scope").as_ref());
+                            ui.strong(t!("variables.name").as_ref());
+                            ui.strong(t!("variables.type").as_ref());
+                            ui.strong(t!("variables.value").as_ref());
+                            ui.end_row();
 
-                                for (name, value, scope) in variables.iter() {
-                                    ui.label(if *scope == VariableScope::Global {
-                                        "Global"
-                                    } else {
-                                        "Local"
-                                    });
-                                    ui.label(name);
-                                    ui.label(value.get_type().as_str());
-                                    let value_str = value.to_string();
-                                    let display_value = if value_str.len() > 20 {
-                                        format!("{}...", &value_str[..20])
-                                    } else {
-                                        value_str
-                                    };
-                                    ui.label(display_value);
-                                    ui.end_row();
-                                }
-                            });
+                            for (name, value, scope) in variables.iter() {
+                                ui.label(if *scope == VariableScope::Global {
+                                    "Global"
+                                } else {
+                                    "Local"
+                                });
+                                ui.label(name);
+                                ui.label(value.get_type().as_str());
+                                let value_str = value.to_string();
+                                let display_value = if value_str.len() > 20 {
+                                    format!("{}...", &value_str[..20])
+                                } else {
+                                    value_str
+                                };
+                                ui.label(display_value);
+                                ui.end_row();
+                            }
+                        });
                     } else if self.is_executing {
                         ui.vertical_centered(|ui| {
                             ui.add_space(5.0);
-                            ui.spinner();
                             ui.label(t!("variables.runtime_waiting").as_ref());
                         });
                     }

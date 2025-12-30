@@ -1,5 +1,5 @@
 use clap::Parser;
-use rpa_core::execution::{ExecutionContext, IrExecutor, LogOutput};
+use rpa_core::execution::{ExecutionContext, IrExecutor, LogOutput, ScopeFrame};
 use rpa_core::{
     IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, StopControl,
     VariableValue,
@@ -123,13 +123,16 @@ fn main() {
         std::process::exit(1);
     }
 
-    let scenario_variables = rpa_core::variables::Variables::new();
     let current_scenario_id = project.main_scenario.id.as_str().to_string();
+    let scope_stack = vec![ScopeFrame {
+        scenario_id: current_scenario_id.clone(),
+        variables: project.main_scenario.variables.clone(),
+    }];
+
     let context = Arc::new(RwLock::new(ExecutionContext::new_without_sender(
         start_time,
+        scope_stack,
         variables,
-        scenario_variables,
-        current_scenario_id,
         stop_control,
     )));
 

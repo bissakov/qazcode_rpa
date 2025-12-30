@@ -12,7 +12,7 @@ mod undo_redo;
 
 use eframe::egui;
 use egui::IconData;
-use rpa_core::execution::ExecutionContext;
+use rpa_core::execution::{ExecutionContext, ScopeFrame};
 use rpa_core::{IrBuilder, LogEntry, LogLevel, ScenarioValidator, UiConstants, get_timestamp};
 use rust_i18n::t;
 use state::RpaApp;
@@ -167,14 +167,18 @@ impl RpaApp {
 
         let stop_control = self.stop_control.clone();
         let variables = self.global_variables.clone();
-        let scenario_variables = program.scenario_variables.clone();
-        let current_scenario_id = self.project.main_scenario.id.as_str().to_string();
+
+        // Create initial scope stack with main scenario
+        let main_scenario_id = self.project.main_scenario.id.as_str().to_string();
+        let scope_stack = vec![ScopeFrame {
+            scenario_id: main_scenario_id.clone(),
+            variables: self.project.main_scenario.variables.clone(),
+        }];
 
         let context = Arc::new(RwLock::new(ExecutionContext::new_without_sender(
             start_time,
+            scope_stack,
             variables,
-            scenario_variables,
-            current_scenario_id,
             stop_control,
         )));
 
