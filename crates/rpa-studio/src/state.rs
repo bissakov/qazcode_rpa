@@ -1,6 +1,7 @@
 use crate::AppSettings;
 use crate::dialogs::DialogState;
 use crate::ui::canvas::ResizeHandle;
+use crate::ui::connection_renderer::ConnectionRenderer;
 use crate::undo_redo::UndoRedoManager;
 use rpa_core::execution::ExecutionContext;
 use rpa_core::{Connection, LogEntry, NanoId, Node, Project, Scenario, StopControl, Variables};
@@ -141,7 +142,7 @@ impl RpaApp {
 pub struct ScenarioViewState {
     pub pan_offset: egui::Vec2,
     pub zoom: f32,
-    pub bezier_cache: HashMap<NanoId, Vec<egui::Pos2>>,
+    pub connection_renderer: ConnectionRenderer,
 }
 
 impl Default for ScenarioViewState {
@@ -149,7 +150,7 @@ impl Default for ScenarioViewState {
         Self {
             pan_offset: egui::Vec2::ZERO,
             zoom: 1.0,
-            bezier_cache: HashMap::new(),
+            connection_renderer: ConnectionRenderer::new(),
         }
     }
 }
@@ -160,7 +161,7 @@ impl ScenarioViewState {
         Self {
             pan_offset,
             zoom,
-            bezier_cache: HashMap::new(),
+            connection_renderer: ConnectionRenderer::new(),
         }
     }
 }
