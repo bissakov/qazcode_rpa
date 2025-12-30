@@ -799,6 +799,24 @@ impl<'a> IrBuilder<'a> {
                 });
                 self.compile_default_next_called(scenario, node_id)?;
             }
+            Activity::Loop {
+                start,
+                end,
+                step,
+                index,
+            } => {
+                self.compile_loop_node_called(
+                    scenario,
+                    node_id,
+                    *start,
+                    *end,
+                    *step,
+                    index,
+                )?;
+            }
+            Activity::While { condition } => {
+                self.compile_while_node_called(scenario, node_id, condition)?;
+            }
             _ => {
                 self.compile_default_next_called(scenario, node_id)?;
             }
@@ -828,6 +846,136 @@ impl<'a> IrBuilder<'a> {
         if let Some(next) = self.first_next_node_called(scenario, node_id, BranchType::Default) {
             self.compile_from_called_scenario(scenario, next)?;
         }
+        Ok(())
+    }
+
+    fn compile_loop_node_called(
+        &mut self,
+        scenario: &Scenario,
+        node_id: NanoId,
+        start: i64,
+        end: i64,
+        step: i64,
+        index: &str,
+    ) -> Result<(), String> {
+        let body_node = self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
+        let after_node = self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
+
+        if body_node.is_none() {
+            if let Some(n) = after_node {
+                self.compile_from_called_scenario(scenario, n)?;
+            }
+            return Ok(());
+        }
+
+        let index_var = index.to_string();
+        self.scenario_variables.set(
+            &index_var,
+            VariableValue::Number(start as f64),
+            VariableScope::Scenario,
+        );
+
+        self.program.add_instruction(Instruction::LoopInit {
+            index: index_var.clone(),
+            start,
+        });
+
+        self.program.add_instruction(Instruction::LoopLog {
+            index: index_var.clone(),
+            start,
+            end,
+            step,
+        });
+
+        let check_idx = self.program.instructions.len();
+        let loop_check_idx = self.program.add_instruction(Instruction::LoopCheck {
+            index: index_var.clone(),
+            end,
+            step,
+            body_target: 0,
+            end_target: 0,
+        });
+
+        let body_start = self.program.instructions.len();
+        self.compile_from_called_scenario(scenario, body_node.unwrap())?;
+
+        self.program.add_instruction(Instruction::LoopNext {
+            index: index_var.clone(),
+            step,
+            check_target: check_idx,
+        });
+
+        let after_loop_start = self.program.instructions.len();
+        if let Some(n) = after_node {
+            self.compile_from_called_scenario(scenario, n)?;
+        }
+
+        if let Instruction::LoopCheck {
+            body_target,
+            end_target,
+            ..
+        } = &mut self.program.instructions[loop_check_idx]
+        {
+            *body_target = body_start;
+            *end_target = after_loop_start;
+        }
+
+        Ok(())
+    }
+
+    fn compile_while_node_called(
+        &mut self,
+        scenario: &Scenario,
+        node_id: NanoId,
+        condition: &str,
+    ) -> Result<(), String> {
+        let body_node = self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
+        let after_loop = self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
+
+        if body_node.is_none() {
+            if let Some(after_node) = after_loop {
+                self.compile_from_called_scenario(scenario, after_node)?;
+            }
+            return Ok(());
+        }
+
+        let check_idx = self.program.instructions.len();
+
+        let expr = parse_expr(condition, self.global_variables).map_err(|e| {
+            format!(
+                "Error in node {} while parsing expression '{}': {}",
+                node_id, condition, e
+            )
+        })?;
+
+        let while_check_idx = self.program.add_instruction(Instruction::WhileCheck {
+            condition: expr,
+            body_target: 0,
+            end_target: 0,
+        });
+
+        let body_start = self.program.instructions.len();
+        self.compile_from_called_scenario(scenario, body_node.unwrap())?;
+
+        self.program
+            .add_instruction(Instruction::Jump { target: check_idx });
+
+        let after_loop_start = self.program.instructions.len();
+
+        if let Some(after_node) = after_loop {
+            self.compile_from_called_scenario(scenario, after_node)?;
+        }
+
+        if let Instruction::WhileCheck {
+            body_target,
+            end_target,
+            ..
+        } = &mut self.program.instructions[while_check_idx]
+        {
+            *body_target = body_start;
+            *end_target = after_loop_start;
+        }
+
         Ok(())
     }
 }
