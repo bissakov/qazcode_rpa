@@ -1,4 +1,4 @@
-use crate::constants::{FlowDirection, UiConstants};
+use crate::constants::{OutputDirection, UiConstants};
 use crate::variables::Variables;
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
@@ -410,17 +410,11 @@ impl Node {
     }
 
     pub fn get_input_pin_pos(&self) -> egui::Pos2 {
-        match UiConstants::FLOW_DIRECTION {
-            FlowDirection::Horizontal => self.position + egui::vec2(0.0, self.height / 2.0),
-            FlowDirection::Vertical => self.position + egui::vec2(self.width / 2.0, 0.0),
-        }
+        self.position + egui::vec2(self.width / 2.0, 0.0)
     }
 
     pub fn get_output_pin_pos(&self) -> egui::Pos2 {
-        match UiConstants::FLOW_DIRECTION {
-            FlowDirection::Horizontal => self.position + egui::vec2(self.width, self.height / 2.0),
-            FlowDirection::Vertical => self.position + egui::vec2(self.width / 2.0, self.height),
-        }
+        self.position + egui::vec2(self.width / 2.0, self.height)
     }
 
     pub fn has_input_pin(&self) -> bool {
@@ -451,34 +445,54 @@ impl Node {
         }
     }
 
-    pub fn get_output_pin_positions(&self) -> Vec<egui::Pos2> {
-        match UiConstants::FLOW_DIRECTION {
-            FlowDirection::Horizontal => self.get_output_pin_positions_horizontal(),
-            FlowDirection::Vertical => self.get_output_pin_positions_vertical(),
+    pub fn get_preferred_output_direction(&self) -> OutputDirection {
+        match &self.activity {
+            Activity::IfCondition { .. }
+            | Activity::Loop { .. }
+            | Activity::While { .. }
+            | Activity::TryCatch => OutputDirection::Down,
+            Activity::CallScenario { .. } | Activity::RunPowershell { .. } => OutputDirection::Down,
+            _ => OutputDirection::Down,
         }
     }
 
-    fn get_output_pin_positions_vertical(&self) -> Vec<egui::Pos2> {
-        let pin_offset_left = self.width / 4.0;
-        let pin_offset_center = self.width / 2.0;
-        let bottom = self.height;
-        let right_middle = self.width;
-        let center_middle = self.height / 2.0;
+    pub fn get_output_pin_positions(&self) -> Vec<egui::Pos2> {
+        self.get_output_pin_positions_vertical()
+    }
 
-        match &self.activity {
-            Activity::End { .. } | Activity::Note { .. } => vec![],
-            Activity::IfCondition { .. }
+    fn get_output_pin_positions_vertical(&self) -> Vec<egui::Pos2> {
+        let pin_count = self.get_output_pin_count();
+        if pin_count == 0 {
+            return vec![];
+        }
+
+        let preferred_direction = self.get_preferred_output_direction();
+
+        match (&self.activity, preferred_direction) {
+            (Activity::End { .. } | Activity::Note { .. }, _) => vec![],
+            (Activity::IfCondition { .. }
             | Activity::Loop { .. }
             | Activity::While { .. }
             | Activity::TryCatch
             | Activity::CallScenario { .. }
-            | Activity::RunPowershell { .. } => {
+            | Activity::RunPowershell { .. }, _) => {
+                let pin_offset_center = self.width / 2.0;
+                let bottom = self.height;
+                let right_middle = self.width;
+                let center_middle = self.height / 2.0;
+
                 vec![
                     self.position + egui::vec2(pin_offset_center, bottom),
                     self.position + egui::vec2(right_middle, center_middle),
                 ]
             }
-            _ => {
+            (_, _) => {
+                let pin_offset_left = self.width / 4.0;
+                let pin_offset_center = self.width / 2.0;
+                let bottom = self.height;
+                let right_middle = self.width;
+                let center_middle = self.height / 2.0;
+
                 if self.activity.can_have_error_output() {
                     vec![
                         self.position + egui::vec2(pin_offset_left, bottom),
@@ -491,6 +505,7 @@ impl Node {
         }
     }
 
+    #[allow(dead_code)]
     fn get_output_pin_positions_horizontal(&self) -> Vec<egui::Pos2> {
         let pin_count = self.get_output_pin_count();
         if pin_count == 0 {

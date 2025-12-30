@@ -1,20 +1,14 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlowDirection {
-    Horizontal,
-    Vertical,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoutingMode {
-    Manhattan,
-    Bezier,
+pub enum OutputDirection {
+    Down,
+    Left,
+    Right,
+    Up,
 }
 
 pub struct UiConstants;
 
 impl UiConstants {
-    pub const FLOW_DIRECTION: FlowDirection = FlowDirection::Vertical;
-    pub const ROUTING_MODE: RoutingMode = RoutingMode::Manhattan;
     pub const NODE_WIDTH: f32 = 180.0;
     pub const NODE_HEIGHT: f32 = 60.0;
     pub const NODE_ROUNDING: f32 = 5.0;
@@ -38,10 +32,9 @@ impl UiConstants {
     pub const MINIMAP_PADDING: f32 = 10.0;
     pub const MINIMAP_WORLD_PADDING: f32 = 20.0;
 
-    pub const BEZIER_STEPS: usize = 20;
-    pub const BEZIER_CONTROL_OFFSET: f32 = 20.0;
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
     pub const MIN_NODE_SPACING: f32 = 100.0;
+    pub const ROUTING_OBSTACLE_PADDING: f32 = 15.0;
 
     pub const ZOOM_MIN: f32 = 0.1;
     pub const ZOOM_MAX: f32 = 3.0;

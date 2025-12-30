@@ -1,6 +1,6 @@
 use crate::{activity_ext::ActivityExt, colors::ColorPalette, state::ScenarioViewState};
 use crate::ui::connection_renderer::{
-    ConnectionPath, ConnectionRenderer, calculate_bezier_control_points, bezier_to_line_segments,
+    ConnectionPath, ConnectionRenderer,
 };
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
@@ -8,7 +8,7 @@ use egui::{
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::{
     Activity, ActivityMetadata, BranchType, LogLevel, NanoId, Node, PropertyType, Scenario,
-    UiConstants, VariableType, constants::FlowDirection,
+    UiConstants, VariableType,
 };
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
@@ -100,6 +100,7 @@ fn get_node_from_index<'a>(nodes: &'a [Node], index: &NodeIndex, id: &NanoId) ->
     index.get(id).and_then(|&idx| nodes.get(idx))
 }
 
+#[allow(dead_code)]
 fn line_segments_intersect(p1: Pos2, p2: Pos2, p3: Pos2, p4: Pos2) -> bool {
     let d = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
     if d.abs() < 0.0001 {
@@ -140,7 +141,7 @@ fn find_connection_near_point(
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &connection.branch_type, to_screen);
+            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
             if path.hit_test(point, renderer, &connection.id, threshold) {
                 return Some((connection.from_node.clone(), connection.to_node.clone()));
             }
@@ -171,7 +172,7 @@ fn find_intersecting_connections(
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &connection.branch_type, to_screen);
+            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
 
             for i in 0..cut_path.len() - 1 {
                 let cut_start = cut_path[i];
@@ -343,7 +344,7 @@ pub fn render_node_graph(
             get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &connection.branch_type, to_screen);
+            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
             let color = get_connection_color(&connection.branch_type, from_node);
             path.draw(&painter, color, &mut view.connection_renderer, &connection.id);
         }
@@ -816,33 +817,15 @@ pub fn render_node_graph(
                 let mid_x = (from_pos.x + to_pos.x) * 0.5;
                 let mid_y = (from_pos.y + to_pos.y) * 0.5;
 
-                match UiConstants::FLOW_DIRECTION {
-                    FlowDirection::Horizontal => {
-                        let distance = to_pos.x - from_pos.x;
-                        let required = UiConstants::MIN_NODE_SPACING * 2.0;
+                let distance = to_pos.y - from_pos.y;
+                let required = UiConstants::MIN_NODE_SPACING * 2.0;
 
-                        if distance < required {
-                            let push = required - distance;
+                if distance < required {
+                    let push = required - distance;
 
-                            for node in &mut scenario.nodes {
-                                if node.position.x >= to_pos.x {
-                                    node.position.x += push;
-                                }
-                            }
-                        }
-                    }
-                    FlowDirection::Vertical => {
-                        let distance = to_pos.y - from_pos.y;
-                        let required = UiConstants::MIN_NODE_SPACING * 2.0;
-
-                        if distance < required {
-                            let push = required - distance;
-
-                            for node in &mut scenario.nodes {
-                                if node.position.y >= to_pos.y {
-                                    node.position.y += push;
-                                }
-                            }
+                    for node in &mut scenario.nodes {
+                        if node.position.y >= to_pos.y {
+                            node.position.y += push;
                         }
                     }
                 }
@@ -964,13 +947,6 @@ pub fn render_node_graph(
             let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
             let end = pointer_pos;
 
-            let is_error_branch = from_node.activity.can_have_error_output() && *pin_index == 1;
-
-            let (control_offset1, control_offset2) =
-                calculate_bezier_control_points(start, end, is_error_branch);
-            let control1 = start + control_offset1 * view.zoom;
-            let control2 = end - control_offset2 * view.zoom;
-
             let branch_type = from_node.get_branch_type_for_pin(*pin_index);
             let preview_color = match branch_type {
                 BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
@@ -982,14 +958,7 @@ pub fn render_node_graph(
                 BranchType::Default => ColorPalette::CONNECTION_DEFAULT,
             };
 
-            draw_bezier_uncached(
-                &painter,
-                start,
-                control1,
-                control2,
-                end,
-                Stroke::new(2.0 * view.zoom, preview_color),
-            );
+            painter.line_segment([start, end], Stroke::new(2.0 * view.zoom, preview_color));
         }
 
         if input_cache.key_escape || response.secondary_clicked() {
@@ -1288,14 +1257,7 @@ pub fn draw_node_transformed<F>(
                 );
 
                 if !label.is_empty() {
-                    let (label_offset, label_align) = match UiConstants::FLOW_DIRECTION {
-                        FlowDirection::Horizontal => {
-                            (Vec2::new(12.0 * zoom, 0.0), egui::Align2::LEFT_CENTER)
-                        }
-                        FlowDirection::Vertical => {
-                            (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM)
-                        }
-                    };
+                    let (label_offset, label_align) = (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM);
                     painter.text(
                         pin_screen + label_offset,
                         label_align,
@@ -1307,18 +1269,6 @@ pub fn draw_node_transformed<F>(
             }
         }
     }
-}
-
-fn draw_bezier_uncached(
-    painter: &egui::Painter,
-    p0: Pos2,
-    p1: Pos2,
-    p2: Pos2,
-    p3: Pos2,
-    stroke: Stroke,
-) {
-    let points = bezier_to_line_segments(p0, p1, p2, p3);
-    painter.add(egui::Shape::line(points, stroke));
 }
 
 fn render_minimap_internal(
