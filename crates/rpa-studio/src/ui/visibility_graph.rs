@@ -1,5 +1,5 @@
 use egui::Pos2;
-use rpa_core::Node;
+use rpa_core::{constants::OutputDirection, Node};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy)]
@@ -43,11 +43,49 @@ impl VisibilityGraph {
         Self { obstacles }
     }
 
-    pub fn find_path(&self, start: Pos2, end: Pos2) -> Vec<Pos2> {
+    #[allow(dead_code)]
+    fn find_path(&self, start: Pos2, end: Pos2) -> Vec<Pos2> {
         if start == end {
             return vec![start, end];
         }
 
+        match self.find_path_astar(start, end) {
+            Some(path) => simplify_path(&path, &self.obstacles),
+            None => fallback_manhattan(start, end),
+        }
+    }
+
+    pub fn find_path_with_direction(
+        &self,
+        start: Pos2,
+        end: Pos2,
+        preferred_direction: OutputDirection,
+    ) -> Vec<Pos2> {
+        if start == end {
+            return vec![start, end];
+        }
+
+        // Create initial waypoint based on preferred direction
+        let offset = 30.0;
+        let initial_waypoint = match preferred_direction {
+            OutputDirection::Down => Pos2::new(start.x, start.y + offset),
+            OutputDirection::Right => Pos2::new(start.x + offset, start.y),
+            OutputDirection::Left => Pos2::new(start.x - offset, start.y),
+            OutputDirection::Up => Pos2::new(start.x, start.y - offset),
+        };
+
+        // Try to route with the initial waypoint
+        if let (Some(path_to_waypoint), Some(path_from_waypoint)) = (
+            self.find_path_astar(start, initial_waypoint),
+            self.find_path_astar(initial_waypoint, end),
+        ) {
+            // Combine paths, avoiding duplicate waypoint
+            let mut combined = path_to_waypoint;
+            combined.extend_from_slice(&path_from_waypoint[1..]);
+            return simplify_path(&combined, &self.obstacles);
+        }
+
+        // Fallback to regular pathfinding
         match self.find_path_astar(start, end) {
             Some(path) => simplify_path(&path, &self.obstacles),
             None => fallback_manhattan(start, end),

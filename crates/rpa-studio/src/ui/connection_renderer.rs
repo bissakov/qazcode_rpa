@@ -71,7 +71,8 @@ impl ConnectionPath {
         let end = PinPosition::input(to_node).screen_pos(&transform);
 
         let visibility_graph = VisibilityGraph::new(nodes, UiConstants::ROUTING_OBSTACLE_PADDING);
-        let waypoints = visibility_graph.find_path(start, end);
+        let preferred_direction = from_node.get_preferred_output_direction(branch_type);
+        let waypoints = visibility_graph.find_path_with_direction(start, end, preferred_direction);
 
         Self {
             start,
