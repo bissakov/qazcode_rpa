@@ -451,7 +451,7 @@ impl Node {
             Activity::IfCondition { .. }
             | Activity::Loop { .. }
             | Activity::While { .. }
-            | Activity::TryCatch { .. }
+            | Activity::TryCatch
             | Activity::CallScenario { .. }
             | Activity::RunPowershell { .. } => {
                 vec![
