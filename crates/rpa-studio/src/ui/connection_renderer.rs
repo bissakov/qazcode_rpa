@@ -1,5 +1,5 @@
 use egui::{Color32, Painter, Pos2, Stroke, Vec2};
-use rpa_core::{BranchType, NanoId, Node, UiConstants, constants::FlowDirection};
+use rpa_core::{BranchType, NanoId, Node, UiConstants, constants::{FlowDirection, RoutingMode}};
 use std::collections::HashMap;
 
 pub struct PinPosition {
@@ -46,8 +46,7 @@ impl PinPosition {
 pub struct ConnectionPath {
     start: Pos2,
     end: Pos2,
-    control1: Pos2,
-    control2: Pos2,
+    waypoints: Vec<Pos2>,
 }
 
 impl ConnectionPath {
@@ -65,30 +64,27 @@ impl ConnectionPath {
             | BranchType::CatchBranch => true,
             _ => false,
         };
-        let (offset1, offset2) = calculate_bezier_control_points(start, end, is_error_branch);
 
-        let control1 = start + offset1;
-        let control2 = end - offset2;
+        let waypoints = match UiConstants::ROUTING_MODE {
+            RoutingMode::Manhattan => calculate_manhattan_waypoints(start, end, is_error_branch),
+            RoutingMode::Bezier => calculate_bezier_waypoints(start, end, is_error_branch),
+        };
 
         Self {
             start,
             end,
-            control1,
-            control2,
+            waypoints,
         }
     }
 
-    pub fn get_bezier_points(
+    pub fn get_path_points(
         &self,
         renderer: &mut ConnectionRenderer,
         connection_id: &NanoId,
     ) -> Vec<Pos2> {
-        renderer.get_or_compute_bezier(
+        renderer.get_or_compute_path(
             connection_id,
-            self.start,
-            self.control1,
-            self.control2,
-            self.end,
+            &self.waypoints,
         )
     }
 
@@ -99,8 +95,8 @@ impl ConnectionPath {
         connection_id: &NanoId,
         threshold: f32,
     ) -> bool {
-        let bezier_points = self.get_bezier_points(renderer, connection_id);
-        let dist = point_to_bezier_distance(point, &bezier_points);
+        let path_points = self.get_path_points(renderer, connection_id);
+        let dist = point_to_line_distance(point, &path_points);
         dist < threshold
     }
 
@@ -111,13 +107,13 @@ impl ConnectionPath {
         renderer: &mut ConnectionRenderer,
         connection_id: &NanoId,
     ) -> bool {
-        let bezier_points = self.get_bezier_points(renderer, connection_id);
+        let path_points = self.get_path_points(renderer, connection_id);
 
-        for i in 0..bezier_points.len() - 1 {
-            let bezier_start = bezier_points[i];
-            let bezier_end = bezier_points[i + 1];
+        for i in 0..path_points.len() - 1 {
+            let path_start = path_points[i];
+            let path_end = path_points[i + 1];
 
-            if line_segments_intersect(p1, p2, bezier_start, bezier_end) {
+            if line_segments_intersect(p1, p2, path_start, path_end) {
                 return true;
             }
         }
@@ -132,78 +128,63 @@ impl ConnectionPath {
         renderer: &mut ConnectionRenderer,
         connection_id: &NanoId,
     ) {
-        let points = self.get_bezier_points(renderer, connection_id);
+        let points = self.get_path_points(renderer, connection_id);
         painter.add(egui::Shape::line(points, Stroke::new(2.0, color)));
     }
 
     pub fn debug_draw(&self, painter: &Painter, zoom: f32) {
-        let control_radius = 4.0 * zoom;
-        let line_stroke = Stroke::new(1.0 * zoom, Color32::from_rgb(255, 200, 100));
+        let point_radius = 4.0 * zoom;
         let point_color = Color32::from_rgb(255, 150, 0);
 
-        painter.line_segment([self.start, self.control1], line_stroke);
-        painter.circle_filled(self.control1, control_radius, point_color);
-
-        painter.line_segment([self.control2, self.end], line_stroke);
-        painter.circle_filled(self.control2, control_radius, point_color);
-
-        painter.text(
-            self.control1 + Vec2::new(10.0 * zoom, 0.0),
-            egui::Align2::LEFT_CENTER,
-            "C1",
-            egui::FontId::proportional(10.0 * zoom),
-            point_color,
-        );
-
-        painter.text(
-            self.control2 + Vec2::new(10.0 * zoom, 0.0),
-            egui::Align2::LEFT_CENTER,
-            "C2",
-            egui::FontId::proportional(10.0 * zoom),
-            point_color,
-        );
+        for (i, waypoint) in self.waypoints.iter().enumerate() {
+            painter.circle_filled(*waypoint, point_radius, point_color);
+            painter.text(
+                *waypoint + Vec2::new(10.0 * zoom, 0.0),
+                egui::Align2::LEFT_CENTER,
+                &format!("W{}", i),
+                egui::FontId::proportional(10.0 * zoom),
+                point_color,
+            );
+        }
     }
 }
 
 pub struct ConnectionRenderer {
-    bezier_cache: HashMap<NanoId, Vec<Pos2>>,
+    path_cache: HashMap<NanoId, Vec<Pos2>>,
 }
 
 impl ConnectionRenderer {
     pub fn new() -> Self {
         Self {
-            bezier_cache: HashMap::new(),
+            path_cache: HashMap::new(),
         }
     }
 
-    pub fn get_or_compute_bezier(
+    pub fn get_or_compute_path(
         &mut self,
         connection_id: &NanoId,
-        p0: Pos2,
-        p1: Pos2,
-        p2: Pos2,
-        p3: Pos2,
+        waypoints: &[Pos2],
     ) -> Vec<Pos2> {
-        self.bezier_cache
+        self.path_cache
             .entry(connection_id.clone())
-            .or_insert_with(|| bezier_to_line_segments(p0, p1, p2, p3))
+            .or_insert_with(|| waypoints_to_line_segments(waypoints))
             .clone()
     }
 
     pub fn clear_cache(&mut self) {
-        self.bezier_cache.clear();
+        self.path_cache.clear();
     }
 
     pub fn invalidate_connection(&mut self, connection_id: &NanoId) {
-        self.bezier_cache.remove(connection_id);
+        self.path_cache.remove(connection_id);
     }
 
     pub fn cache_size(&self) -> usize {
-        self.bezier_cache.len()
+        self.path_cache.len()
     }
 
     pub fn update_pan_offset(&mut self, pan_delta: Vec2) {
-        for points in self.bezier_cache.values_mut() {
+        for points in self.path_cache.values_mut() {
             for point in points.iter_mut() {
                 *point += pan_delta;
             }
@@ -215,6 +196,74 @@ impl Default for ConnectionRenderer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn calculate_manhattan_waypoints(
+    start: Pos2,
+    end: Pos2,
+    is_error_branch: bool,
+) -> Vec<Pos2> {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    
+    match UiConstants::FLOW_DIRECTION {
+        FlowDirection::Horizontal => {
+            vec![start, Pos2::new(end.x, start.y), end]
+        }
+        FlowDirection::Vertical => {
+            if is_error_branch {
+                let horizontal_distance = dx.abs().max(80.0);
+                let mid_x = start.x + dx.signum() * horizontal_distance;
+                vec![start, Pos2::new(mid_x, start.y), end]
+            } else {
+                let mid_y = start.y + dy * 0.5;
+                vec![start, Pos2::new(start.x, mid_y), Pos2::new(end.x, mid_y), end]
+            }
+        }
+    }
+}
+
+fn calculate_bezier_waypoints(
+    start: Pos2,
+    end: Pos2,
+    is_error_branch: bool,
+) -> Vec<Pos2> {
+    let (offset1, offset2) = match UiConstants::FLOW_DIRECTION {
+        FlowDirection::Horizontal => {
+            let distance = (end.x - start.x).abs();
+            let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+            (
+                Vec2::new(control_offset, 0.0),
+                Vec2::new(control_offset, 0.0),
+            )
+        }
+        FlowDirection::Vertical => {
+            if is_error_branch {
+                let dx = end.x - start.x;
+                let dy = end.y - start.y;
+
+                let h = dx.abs().clamp(80.0, 200.0);
+                let v = dy.abs().clamp(80.0, 200.0);
+
+                (
+                    Vec2::new(dx.signum() * h, 0.0),
+                    Vec2::new(0.0, dy.signum() * v),
+                )
+            } else {
+                let distance = (end.y - start.y).abs();
+                let control_offset = (distance * 0.5).max(UiConstants::BEZIER_CONTROL_OFFSET);
+                (
+                    Vec2::new(0.0, control_offset),
+                    Vec2::new(0.0, control_offset),
+                )
+            }
+        }
+    };
+
+    let control1 = start + offset1;
+    let control2 = end - offset2;
+
+    bezier_to_line_segments(start, control1, control2, end)
 }
 
 pub fn calculate_bezier_control_points(
@@ -276,12 +325,16 @@ pub fn bezier_to_line_segments(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Po
     points
 }
 
-fn point_to_bezier_distance(point: Pos2, bezier_points: &[Pos2]) -> f32 {
+fn waypoints_to_line_segments(waypoints: &[Pos2]) -> Vec<Pos2> {
+    waypoints.to_vec()
+}
+
+fn point_to_line_distance(point: Pos2, line_points: &[Pos2]) -> f32 {
     let mut min_distance = f32::MAX;
 
-    for i in 0..bezier_points.len() - 1 {
-        let segment_start = bezier_points[i];
-        let segment_end = bezier_points[i + 1];
+    for i in 0..line_points.len() - 1 {
+        let segment_start = line_points[i];
+        let segment_end = line_points[i + 1];
 
         let segment = segment_end - segment_start;
         let point_vec = point - segment_start;
@@ -338,13 +391,8 @@ mod tests {
         assert_eq!(renderer.cache_size(), 0);
 
         let id = NanoId::new("test123");
-        let points = renderer.get_or_compute_bezier(
-            &id,
-            Pos2::ZERO,
-            Pos2::new(1.0, 1.0),
-            Pos2::new(2.0, 2.0),
-            Pos2::new(3.0, 3.0),
-        );
+        let waypoints = vec![Pos2::ZERO, Pos2::new(1.0, 1.0), Pos2::new(2.0, 2.0), Pos2::new(3.0, 3.0)];
+        let points = renderer.get_or_compute_path(&id, &waypoints);
         assert!(!points.is_empty());
         assert_eq!(renderer.cache_size(), 1);
 
@@ -390,5 +438,35 @@ mod tests {
             width: 180.0,
             height: 60.0,
         }
+    }
+
+    #[test]
+    fn test_manhattan_waypoints_vertical() {
+        let start = Pos2::new(0.0, 0.0);
+        let end = Pos2::new(100.0, 200.0);
+        
+        let waypoints = calculate_manhattan_waypoints(start, end, false);
+        
+        assert_eq!(waypoints.len(), 4);
+        assert_eq!(waypoints[0], start);
+        assert_eq!(waypoints[3], end);
+        
+        assert_eq!(waypoints[1].x, start.x);
+        assert_eq!(waypoints[2].x, end.x);
+        assert_eq!(waypoints[1].y, waypoints[2].y);
+    }
+
+    #[test]
+    fn test_manhattan_waypoints_error_branch() {
+        let start = Pos2::new(0.0, 0.0);
+        let end = Pos2::new(100.0, 200.0);
+        
+        let waypoints = calculate_manhattan_waypoints(start, end, true);
+        
+        assert_eq!(waypoints.len(), 3);
+        assert_eq!(waypoints[0], start);
+        assert_eq!(waypoints[2], end);
+        assert_eq!(waypoints[1].x, end.x);
+        assert_eq!(waypoints[1].y, start.y);
     }
 }

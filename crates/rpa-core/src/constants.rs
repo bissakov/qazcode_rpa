@@ -4,10 +4,17 @@ pub enum FlowDirection {
     Vertical,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingMode {
+    Manhattan,
+    Bezier,
+}
+
 pub struct UiConstants;
 
 impl UiConstants {
     pub const FLOW_DIRECTION: FlowDirection = FlowDirection::Vertical;
+    pub const ROUTING_MODE: RoutingMode = RoutingMode::Manhattan;
     pub const NODE_WIDTH: f32 = 180.0;
     pub const NODE_HEIGHT: f32 = 60.0;
     pub const NODE_ROUNDING: f32 = 5.0;
