@@ -445,14 +445,32 @@ impl Node {
         }
     }
 
-    pub fn get_preferred_output_direction(&self) -> OutputDirection {
+    pub fn get_preferred_output_direction(&self, branch_type: &BranchType) -> OutputDirection {
         match &self.activity {
-            Activity::IfCondition { .. }
-            | Activity::Loop { .. }
-            | Activity::While { .. }
-            | Activity::TryCatch => OutputDirection::Down,
-            Activity::CallScenario { .. } | Activity::RunPowershell { .. } => OutputDirection::Down,
-            _ => OutputDirection::Down,
+            Activity::IfCondition { .. } => match branch_type {
+                BranchType::TrueBranch => OutputDirection::Down,
+                BranchType::FalseBranch => OutputDirection::Right,
+                _ => OutputDirection::Down,
+            },
+            Activity::Loop { .. } => match branch_type {
+                BranchType::Default => OutputDirection::Down,
+                BranchType::LoopBody => OutputDirection::Right,
+                _ => OutputDirection::Down,
+            },
+            Activity::While { .. } => match branch_type {
+                BranchType::Default => OutputDirection::Down,
+                BranchType::LoopBody => OutputDirection::Right,
+                _ => OutputDirection::Down,
+            },
+            Activity::TryCatch => match branch_type {
+                BranchType::TryBranch => OutputDirection::Down,
+                BranchType::CatchBranch => OutputDirection::Right,
+                _ => OutputDirection::Down,
+            },
+            _ => match branch_type {
+                BranchType::ErrorBranch => OutputDirection::Right,
+                _ => OutputDirection::Down,
+            },
         }
     }
 
@@ -466,42 +484,74 @@ impl Node {
             return vec![];
         }
 
-        let preferred_direction = self.get_preferred_output_direction();
-
-        match (&self.activity, preferred_direction) {
-            (Activity::End { .. } | Activity::Note { .. }, _) => vec![],
-            (Activity::IfCondition { .. }
-            | Activity::Loop { .. }
-            | Activity::While { .. }
-            | Activity::TryCatch
-            | Activity::CallScenario { .. }
-            | Activity::RunPowershell { .. }, _) => {
-                let pin_offset_center = self.width / 2.0;
-                let bottom = self.height;
-                let right_middle = self.width;
-                let center_middle = self.height / 2.0;
-
+        match &self.activity {
+            Activity::End { .. } | Activity::Note { .. } => vec![],
+            Activity::IfCondition { .. } => {
+                let true_dir = self.get_preferred_output_direction(&BranchType::TrueBranch);
+                let false_dir = self.get_preferred_output_direction(&BranchType::FalseBranch);
                 vec![
-                    self.position + egui::vec2(pin_offset_center, bottom),
-                    self.position + egui::vec2(right_middle, center_middle),
+                    self.get_pin_pos_for_direction(true_dir),
+                    self.get_pin_pos_for_direction(false_dir),
                 ]
             }
-            (_, _) => {
-                let pin_offset_left = self.width / 4.0;
-                let pin_offset_center = self.width / 2.0;
-                let bottom = self.height;
-                let right_middle = self.width;
-                let center_middle = self.height / 2.0;
-
+            Activity::Loop { .. } => {
+                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
+                let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
+                vec![
+                    self.get_pin_pos_for_direction(default_dir),
+                    self.get_pin_pos_for_direction(loop_dir),
+                ]
+            }
+            Activity::While { .. } => {
+                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
+                let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
+                vec![
+                    self.get_pin_pos_for_direction(default_dir),
+                    self.get_pin_pos_for_direction(loop_dir),
+                ]
+            }
+            Activity::TryCatch => {
+                let try_dir = self.get_preferred_output_direction(&BranchType::TryBranch);
+                let catch_dir = self.get_preferred_output_direction(&BranchType::CatchBranch);
+                vec![
+                    self.get_pin_pos_for_direction(try_dir),
+                    self.get_pin_pos_for_direction(catch_dir),
+                ]
+            }
+            Activity::CallScenario { .. } | Activity::RunPowershell { .. } => {
+                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
+                let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
+                vec![
+                    self.get_pin_pos_for_direction(default_dir),
+                    self.get_pin_pos_for_direction(error_dir),
+                ]
+            }
+            _ => {
+                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
                 if self.activity.can_have_error_output() {
+                    let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
                     vec![
-                        self.position + egui::vec2(pin_offset_left, bottom),
-                        self.position + egui::vec2(right_middle, center_middle),
+                        self.get_pin_pos_for_direction(default_dir),
+                        self.get_pin_pos_for_direction(error_dir),
                     ]
                 } else {
-                    vec![self.position + egui::vec2(pin_offset_center, bottom)]
+                    vec![self.get_pin_pos_for_direction(default_dir)]
                 }
             }
+        }
+    }
+
+    fn get_pin_pos_for_direction(&self, direction: OutputDirection) -> egui::Pos2 {
+        let center_x = self.width / 2.0;
+        let center_y = self.height / 2.0;
+        let bottom = self.height;
+        let right = self.width;
+
+        match direction {
+            OutputDirection::Down => self.position + egui::vec2(center_x, bottom),
+            OutputDirection::Right => self.position + egui::vec2(right, center_y),
+            OutputDirection::Left => self.position + egui::vec2(0.0, center_y),
+            OutputDirection::Up => self.position + egui::vec2(center_x, 0.0),
         }
     }
 
