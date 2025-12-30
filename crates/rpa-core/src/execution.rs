@@ -9,18 +9,22 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
+#[derive(Debug, Clone)]
+pub struct ScopeFrame {
+    pub scenario_id: String,
+    pub variables: Variables,
+}
+
 pub struct CallFrame {
     pub scenario_id: String,
     pub return_address: usize,
     pub var_bindings: Vec<crate::node_graph::VariablesBinding>,
-    pub saved_scenario_variables: Variables,
 }
 
 pub struct ExecutionContext {
     pub start_time: SystemTime,
     pub global_variables: Variables,
-    pub scenario_variables: Variables,
-    pub current_scenario_id: String,
+    pub scope_stack: Vec<ScopeFrame>,
     pub stop_control: StopControl,
 }
 
@@ -64,33 +68,72 @@ pub fn get_timestamp(start_time: SystemTime) -> String {
 impl ExecutionContext {
     fn new(
         start_time: SystemTime,
+        scope_stack: Vec<ScopeFrame>,
         global_variables: Variables,
-        scenario_variables: Variables,
-        current_scenario_id: String,
         stop_control: StopControl,
     ) -> Self {
         Self {
             start_time,
             global_variables,
-            scenario_variables,
-            current_scenario_id,
+            scope_stack,
             stop_control,
         }
     }
 
     pub fn new_without_sender(
         start_time: SystemTime,
+        scope_stack: Vec<ScopeFrame>,
         global_variables: Variables,
-        scenario_variables: Variables,
-        current_scenario_id: String,
         stop_control: StopControl,
     ) -> Self {
         Self {
             start_time,
             global_variables,
-            scenario_variables,
-            current_scenario_id,
+            scope_stack,
             stop_control,
+        }
+    }
+
+    pub fn current_scenario_id(&self) -> Option<&str> {
+        self.scope_stack.last().map(|f| f.scenario_id.as_str())
+    }
+
+    pub fn get_scenario_variables(&self) -> Option<&Variables> {
+        self.scope_stack.last().map(|f| &f.variables)
+    }
+
+    pub fn get_scenario_variables_mut(&mut self) -> Option<&mut Variables> {
+        self.scope_stack.last_mut().map(|f| &mut f.variables)
+    }
+
+    pub fn find_scenario_variables(&self, scenario_id: &crate::node_graph::NanoId) -> Option<&Variables> {
+        self.scope_stack
+            .iter()
+            .find(|f| f.scenario_id == scenario_id.as_str())
+            .map(|f| &f.variables)
+    }
+
+    pub fn resolve_variable(&self, name: &str) -> Option<VariableValue> {
+        // Check current scope first
+        if let Some(frame) = self.scope_stack.last()
+            && let Some(val) = frame.variables.get(name)
+        {
+            return Some(val.clone());
+        }
+        // Fall back to global
+        self.global_variables.get(name).cloned()
+    }
+
+    pub fn set_variable(&mut self, name: &str, value: VariableValue, scope: VariableScope) {
+        match scope {
+            VariableScope::Global => {
+                self.global_variables.set(name, value, scope);
+            }
+            VariableScope::Scenario => {
+                if let Some(frame) = self.scope_stack.last_mut() {
+                    frame.variables.set(name, value, scope);
+                }
+            }
         }
     }
 
@@ -181,7 +224,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
     fn get_variable_value(&mut self, name: &str) -> VariableValue {
         let ctx = self.context.read().unwrap();
-        let scenario = ctx.scenario_variables.get(name);
+        let scenario = ctx.get_scenario_variables().and_then(|v| v.get(name));
         let global = ctx.global_variables.get(name);
 
         match (scenario, global) {
@@ -205,8 +248,10 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     fn get_combined_variables(&self) -> Variables {
         let ctx = self.context.read().unwrap();
         let mut combined = ctx.global_variables.clone();
-        for (name, val, scope) in ctx.scenario_variables.iter() {
-            combined.set(name, val.clone(), scope.clone());
+        if let Some(vars) = ctx.get_scenario_variables() {
+            for (name, val, scope) in vars.iter() {
+                combined.set(name, val.clone(), scope.clone());
+            }
         }
         combined
     }
@@ -273,31 +318,29 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     });
 
                     if let Some(frame) = self.call_stack.pop() {
+                        // Collect OUT/INOUT parameter values from child scope before popping
+                        let mut param_values: Vec<(String, VariableValue)> = Vec::new();
                         for binding in &frame.var_bindings {
-                            match binding.direction {
-                                VariableDirection::Out | VariableDirection::InOut => {
-                                    let param_value = {
-                                        let ctx = self.context.read().unwrap();
-                                        ctx.scenario_variables
-                                            .get(&binding.target_var_name)
-                                            .cloned()
-                                    };
-                                    if let Some(param_value) = param_value {
-                                        self.context.write().unwrap().scenario_variables.set(
-                                            &binding.source_var_name,
-                                            param_value,
-                                            VariableScope::Scenario,
-                                        );
-                                    }
-                                }
-                                VariableDirection::In => {}
+                            if matches!(binding.direction, VariableDirection::Out | VariableDirection::InOut)
+                                && let Some(val) = self.context.read().unwrap().resolve_variable(&binding.target_var_name)
+                            {
+                                param_values.push((binding.source_var_name.clone(), val));
                             }
                         }
-                        self.context.write().unwrap().scenario_variables =
-                            frame.saved_scenario_variables;
+
+                        // Pop the child scope
+                        self.context.write().unwrap().scope_stack.pop();
+
+                        // Now set the collected values in parent scope
+                        for (var_name, value) in param_values {
+                            self.context.write().unwrap().set_variable(
+                                &var_name,
+                                value,
+                                VariableScope::Scenario,
+                            );
+                        }
+
                         self.current_scenario_id = frame.scenario_id.clone();
-                        self.context.write().unwrap().current_scenario_id =
-                            frame.scenario_id.clone();
                         Ok(frame.return_address)
                     } else {
                         Ok(self.program.instructions.len())
@@ -357,7 +400,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         );
                     }
                     VariableScope::Scenario => {
-                        self.context.write().unwrap().scenario_variables.set(
+                        self.context.write().unwrap().set_variable(
                             var,
                             value.clone(),
                             scope.clone(),
@@ -475,7 +518,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 Ok(next_pc)
             }
             Instruction::LoopInit { index, start } => {
-                self.context.write().unwrap().scenario_variables.set(
+                self.context.write().unwrap().set_variable(
                     index,
                     VariableValue::Number(*start as f64),
                     VariableScope::Scenario,
@@ -517,9 +560,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 let current = {
                     let ctx = self.context.read().unwrap();
-                    ctx.scenario_variables
-                        .get(index)
-                        .and_then(|v| v.as_number())
+                    ctx.resolve_variable(index)
+                        .and_then(|v: VariableValue| v.as_number())
                         .map_or(*end, |n| n as i64)
                 };
 
@@ -542,15 +584,14 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             } => {
                 let current = {
                     let ctx = self.context.read().unwrap();
-                    ctx.scenario_variables
-                        .get(index)
-                        .and_then(|v| v.as_number())
+                    ctx.resolve_variable(index)
+                        .and_then(|v: VariableValue| v.as_number())
                         .unwrap() as i64
                 };
 
                 let next = current + step;
 
-                self.context.write().unwrap().scenario_variables.set(
+                self.context.write().unwrap().set_variable(
                     index,
                     VariableValue::Number(next as f64),
                     VariableScope::Scenario,
@@ -645,6 +686,13 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         message: format!("Entering scenario: {}", _scenario.name),
                     });
 
+                    // Create new scope with child's design-time variables
+                    let mut child_scope = ScopeFrame {
+                        scenario_id: scenario_id.as_str().to_string(),
+                        variables: _scenario.variables.clone(),
+                    };
+
+                    // Handle IN/INOUT bindings to the child scope
                     for binding in parameters {
                         match binding.direction {
                             VariableDirection::In | VariableDirection::InOut => {
@@ -655,13 +703,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                                     {
                                         ctx.global_variables.get(&binding.source_var_name).cloned()
                                     } else {
-                                        ctx.scenario_variables
-                                            .get(&binding.source_var_name)
-                                            .cloned()
+                                        ctx.resolve_variable(&binding.source_var_name)
                                     }
                                 };
                                 if let Some(val) = source_value {
-                                    self.context.write().unwrap().scenario_variables.set(
+                                    child_scope.variables.set(
                                         &binding.target_var_name,
                                         val,
                                         VariableScope::Scenario,
@@ -669,7 +715,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                                 }
                             }
                             VariableDirection::Out => {
-                                self.context.write().unwrap().scenario_variables.set(
+                                child_scope.variables.set(
                                     &binding.target_var_name,
                                     VariableValue::Undefined,
                                     VariableScope::Scenario,
@@ -678,25 +724,24 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         }
                     }
 
-                    let return_address = pc + 1;
-                    let saved_scenario_variables =
-                        self.context.read().unwrap().scenario_variables.clone();
-                    self.context.write().unwrap().scenario_variables = _scenario.variables.clone();
+                    // Push prepared scope
+                    self.context.write().unwrap().scope_stack.push(child_scope);
 
+                    // Push call frame (simplified - no variable save needed)
                     self.call_stack.push(CallFrame {
                         scenario_id: self.current_scenario_id.clone(),
-                        return_address,
+                        return_address: pc + 1,
                         var_bindings: parameters.clone(),
-                        saved_scenario_variables,
                     });
+
+                    // Update current scenario tracking
                     self.current_scenario_id = scenario_id.as_str().to_string();
-                    self.context.write().unwrap().current_scenario_id =
-                        scenario_id.as_str().to_string();
 
                     if let Some(&start_index) = self.program.scenario_start_index.get(scenario_id) {
                         Ok(start_index)
                     } else {
                         self.call_stack.pop();
+                        self.context.write().unwrap().scope_stack.pop();
                         Err(format!("Scenario {} not found in IR program", scenario_id))
                     }
                 } else {
@@ -781,15 +826,16 @@ pub fn execute_project_with_typed_vars(
     global_variables: Variables,
     stop_control: StopControl,
 ) {
-    let scenario_variables = program.scenario_variables.clone();
-    let current_scenario_id = project.main_scenario.id.as_str().to_string();
+    let scope_stack = vec![ScopeFrame {
+        scenario_id: project.main_scenario.id.as_str().to_string(),
+        variables: project.main_scenario.variables.clone(),
+    }];
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let context = Arc::new(RwLock::new(ExecutionContext::new(
             start_time,
+            scope_stack,
             global_variables,
-            scenario_variables,
-            current_scenario_id,
             stop_control,
         )));
 

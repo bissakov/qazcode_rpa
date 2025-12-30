@@ -93,7 +93,6 @@ pub struct IrProgram {
     pub scenario_start_index: HashMap<NanoId, usize>,
     pub scenario_call_graph: HashMap<NanoId, HashSet<NanoId>>,
     pub recursive_scenarios: HashSet<NanoId>,
-    pub scenario_variables: Variables,
 }
 
 impl Default for IrProgram {
@@ -110,7 +109,6 @@ impl IrProgram {
             scenario_start_index: HashMap::new(),
             scenario_call_graph: HashMap::new(),
             recursive_scenarios: HashSet::new(),
-            scenario_variables: Variables::new(),
         }
     }
 
@@ -135,8 +133,6 @@ pub struct IrBuilder<'a> {
     compiled_nodes: HashSet<NanoId>,
     node_start_index: HashMap<NanoId, usize>,
     global_variables: &'a mut Variables,
-    scenario_variables: Variables,
-    current_scenario_id: NanoId,
     compiled_scenarios: HashSet<NanoId>,
     call_graph: HashMap<NanoId, HashSet<NanoId>>,
     recursive_scenarios: HashSet<NanoId>,
@@ -159,8 +155,6 @@ impl<'a> IrBuilder<'a> {
             compiled_nodes: HashSet::new(),
             node_start_index: HashMap::new(),
             global_variables,
-            scenario_variables: scenario.variables.clone(),
-            current_scenario_id: scenario.id.clone(),
             compiled_scenarios: HashSet::new(),
             call_graph,
             recursive_scenarios,
@@ -188,8 +182,6 @@ impl<'a> IrBuilder<'a> {
         self.compile_from_node(start_node.id.clone())?;
 
         self.compile_all_called_scenarios()?;
-
-        self.program.scenario_variables = self.scenario_variables;
 
         Ok(self.program)
     }
@@ -357,33 +349,7 @@ impl<'a> IrBuilder<'a> {
                     parameters: parameters.clone(),
                 });
 
-                let saved_scenario_variables = self.scenario_variables.clone();
-                let saved_scenario_id = self.current_scenario_id.clone();
-
-                let callee = self
-                    .project
-                    .scenarios
-                    .iter()
-                    .find(|s| s.id == *scenario_id)
-                    .or_else(|| {
-                        if self.project.main_scenario.id == *scenario_id {
-                            Some(&self.project.main_scenario)
-                        } else {
-                            None
-                        }
-                    });
-
-                if let Some(callee_scenario) = callee {
-                    self.scenario_variables = callee_scenario.variables.clone();
-                    self.current_scenario_id = scenario_id.clone();
-
-                    self.compile_default_next(node_id)?;
-
-                    self.scenario_variables = saved_scenario_variables;
-                    self.current_scenario_id = saved_scenario_id;
-                } else {
-                    return Err(format!("Scenario {} not found", scenario_id));
-                }
+                self.compile_default_next(node_id)?;
             }
             Activity::RunPowershell { code } => {
                 self.program
@@ -466,11 +432,6 @@ impl<'a> IrBuilder<'a> {
         }
 
         let index_var = index.to_string();
-        self.scenario_variables.set(
-            &index_var,
-            VariableValue::Number(start as f64),
-            VariableScope::Scenario,
-        );
 
         self.program.add_instruction(Instruction::LoopInit {
             index: index_var.clone(),
@@ -869,11 +830,6 @@ impl<'a> IrBuilder<'a> {
         }
 
         let index_var = index.to_string();
-        self.scenario_variables.set(
-            &index_var,
-            VariableValue::Number(start as f64),
-            VariableScope::Scenario,
-        );
 
         self.program.add_instruction(Instruction::LoopInit {
             index: index_var.clone(),
