@@ -6,20 +6,51 @@ pub enum OutputDirection {
     Up,
 }
 
+pub fn snap_to_grid(value: f32, grid_size: f32) -> f32 {
+    (value / grid_size).floor() * grid_size
+}
+
+pub fn snap_to_grid_outward(min: f32, max: f32, grid_size: f32) -> (f32, f32) {
+    let snapped_min = (min / grid_size).floor() * grid_size;
+    let snapped_max = (max / grid_size).ceil() * grid_size;
+    (snapped_min, snapped_max)
+}
+
+pub fn grid_cells(logical_size: f32, grid_size: f32) -> u32 {
+    (logical_size / grid_size).ceil() as u32
+}
+
+pub fn enforce_minimum_cells(min: f32, max: f32, grid_size: f32, min_cells: u32) -> (f32, f32) {
+    let (snapped_min, snapped_max) = snap_to_grid_outward(min, max, grid_size);
+    let size = snapped_max - snapped_min;
+    let min_size = (min_cells as f32) * grid_size;
+
+    if size < min_size {
+        (snapped_min, snapped_min + min_size)
+    } else {
+        (snapped_min, snapped_max)
+    }
+}
+
 pub struct UiConstants;
 
 impl UiConstants {
-    pub const NODE_WIDTH: f32 = 120.0;
-    pub const NODE_HEIGHT: f32 = 60.0;
+    pub const NODE_WIDTH: f32 = 128.0;
+    pub const NODE_HEIGHT: f32 = 64.0;
     pub const NODE_ROUNDING: f32 = 5.0;
     pub const NODE_SHADOW_OFFSET: f32 = 2.0;
 
     pub const PIN_RADIUS: f32 = 5.0;
     pub const PIN_INTERACT_SIZE: f32 = 12.0;
 
-    pub const GRID_SPACING: f32 = 30.0;
-    pub const GRID_MIN_ZOOM: f32 = 0.5;
-    pub const MAX_GRID_LINES: usize = 100;
+    pub const GRID_CELL_SIZE: f32 = 32.0;
+    pub const GRID_SPACING: f32 = 32.0;
+    pub const GRID_MIN_ZOOM: f32 = 0.1;
+    pub const MAX_GRID_LINES: usize = 200;
+    pub const MIN_NODE_CELLS: u32 = 2;
+
+    pub const DEBUG_GRID_VISUALIZATION: bool = true;
+    pub const DEBUG_CIRCLE_RADIUS: f32 = 2.0;
 
     pub const LEFT_PANEL_WIDTH: f32 = 200.0;
     pub const PROPERTIES_PANEL_WIDTH: f32 = 280.0;
@@ -38,7 +69,8 @@ impl UiConstants {
     pub const ROUTING_GHOST_PIN_DISTANCE: f32 = 20.0;
     pub const ROUTING_EXPANDED_PADDING: f32 = 35.0;
     pub const ROUTING_SOURCE_EXIT_PADDING: f32 = 35.0;
-    pub const DEBUG_ROUTING_VISUALIZATION: bool = false;
+    pub const ROUTING_GRID_SIZE: f32 = 8.0;
+    pub const ROUTING_EXIT_CELLS: i32 = 3;
 
     pub const ZOOM_MIN: f32 = 0.1;
     pub const ZOOM_MAX: f32 = 3.0;

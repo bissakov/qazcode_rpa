@@ -1,4 +1,5 @@
 pub mod activity_metadata;
+pub mod canvas_grid;
 pub mod constants;
 pub mod evaluator;
 pub mod execution;
@@ -11,7 +12,10 @@ pub mod variables;
 pub use activity_metadata::{
     ActivityCategory, ActivityMetadata, ColorCategory, PinConfig, PropertyDef, PropertyType,
 };
-pub use constants::{ActivityCategories, ActivityDefaults, UiConstants};
+pub use canvas_grid::{CellState, CanvasObstacleGrid};
+pub use constants::{
+    ActivityCategories, ActivityDefaults, UiConstants, enforce_minimum_cells, snap_to_grid,
+};
 pub use execution::{execute_project_with_typed_vars, get_timestamp};
 pub use ir::{Instruction, IrBuilder, IrProgram};
 pub use node_graph::{

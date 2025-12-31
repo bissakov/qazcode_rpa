@@ -168,7 +168,6 @@ impl RpaApp {
         let stop_control = self.stop_control.clone();
         let variables = self.global_variables.clone();
 
-        // Create initial scope stack with main scenario
         let main_scenario_id = self.project.main_scenario.id.as_str().to_string();
         let scope_stack = vec![ScopeFrame {
             scenario_id: main_scenario_id.clone(),

@@ -3074,7 +3074,7 @@ dependencies = [
 
 [[package]]
 name = "office"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "calamine",
  "chrono",
@@ -3752,7 +3752,7 @@ checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
 
 [[package]]
 name = "rpa-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "dhat",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "rpa-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "egui",
  "indexmap",
@@ -3776,7 +3776,7 @@ dependencies = [
 
 [[package]]
 name = "rpa-studio"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4628,7 +4628,7 @@ dependencies = [
 
 [[package]]
 name = "validate_locale"
-version = "0.6.0"
+version = "0.7.0"
 
 [[package]]
 name = "version_check"

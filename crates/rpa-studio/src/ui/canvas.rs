@@ -1,14 +1,12 @@
+use crate::ui::connection_renderer::{ConnectionPath, ConnectionRenderer};
 use crate::{activity_ext::ActivityExt, colors::ColorPalette, state::ScenarioViewState};
-use crate::ui::connection_renderer::{
-    ConnectionPath, ConnectionRenderer,
-};
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::{
     Activity, ActivityMetadata, BranchType, LogLevel, NanoId, Node, PropertyType, Scenario,
-    UiConstants, VariableType,
+    UiConstants, VariableType, snap_to_grid,
 };
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
@@ -139,7 +137,8 @@ fn find_connection_near_point(
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
+            let path =
+                ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
             if path.hit_test(point, renderer, &connection.id, threshold) {
                 return Some((connection.from_node.clone(), connection.to_node.clone()));
             }
@@ -164,7 +163,8 @@ fn find_intersecting_connections(
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
+            let path =
+                ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
 
             for i in 0..cut_path.len() - 1 {
                 let cut_start = cut_path[i];
@@ -229,6 +229,7 @@ pub fn render_node_graph(
     scenario: &mut Scenario,
     state: &mut RenderState,
     view: &mut ScenarioViewState,
+    show_grid_debug: bool,
 ) -> (ContextMenuAction, Vec2, bool, bool, bool, bool, bool) {
     let mut context_action = ContextMenuAction::None;
     let mut connection_created = false;
@@ -242,8 +243,6 @@ pub fn render_node_graph(
     let input_cache = InputCache::capture(ui, &response);
 
     let node_index = build_node_index(&scenario.nodes);
-
-    // let scenario_view = scenario.get_scenario_view(scenario.id);
 
     let rect = response.rect;
     painter.rect_filled(rect, 0.0, Color32::from_rgb(40, 40, 40));
@@ -309,6 +308,7 @@ pub fn render_node_graph(
                     .retain(|c| !(c.from_node == from_node && c.to_node == to_node));
                 connection_created = true;
             }
+            scenario.obstacle_grid.invalidate();
         }
         *state.knife_tool_active = false;
         state.knife_path.clear();
@@ -329,7 +329,27 @@ pub fn render_node_graph(
 
     draw_grid_transformed(&painter, rect, view.pan_offset, view.zoom);
 
-    // Clear cache before recomputing connection paths to ensure fresh routing
+    if scenario.obstacle_grid.is_dirty() {
+        let connection_segments: Vec<_> = scenario
+            .connections
+            .iter()
+            .filter_map(|conn| {
+                let from_node = get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)?;
+                let to_node = get_node_from_index(&scenario.nodes, &node_index, &conn.to_node)?;
+                Some((from_node.get_output_pin_pos(), to_node.get_input_pin_pos()))
+            })
+            .collect();
+        scenario
+            .obstacle_grid
+            .rebuild(&scenario.nodes, &connection_segments);
+    }
+
+    if show_grid_debug {
+        scenario
+            .obstacle_grid
+            .paint_debug(&painter, to_screen, rect);
+    }
+
     view.connection_renderer.clear_cache();
 
     for connection in &scenario.connections {
@@ -337,10 +357,16 @@ pub fn render_node_graph(
             get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
         ) {
-             let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
-             let color = get_connection_color(&connection.branch_type, from_node);
-             path.draw(&painter, color, &mut view.connection_renderer, &connection.id, to_screen);
-             path.draw_debug_info(&painter, to_screen);
+            let path =
+                ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
+            let color = get_connection_color(&connection.branch_type, from_node);
+            path.draw(
+                &painter,
+                color,
+                &mut view.connection_renderer,
+                &connection.id,
+                to_screen,
+            );
         }
     }
 
@@ -441,6 +467,21 @@ pub fn render_node_graph(
         && let Some(node) = scenario.nodes.iter_mut().find(|n| n.id == *resizing_id)
     {
         if input_cache.pointer_any_released {
+            if node.is_routable() {
+                let (snapped_pos, snapped_w, snapped_h) =
+                    node.snap_bounds(UiConstants::GRID_CELL_SIZE);
+                if (snapped_pos.x - node.position.x).abs() > 0.001
+                    || (snapped_pos.y - node.position.y).abs() > 0.001
+                    || (snapped_w - node.width).abs() > 0.001
+                    || (snapped_h - node.height).abs() > 0.001
+                {
+                    node.position = snapped_pos;
+                    node.width = snapped_w;
+                    node.height = snapped_h;
+                    view.connection_renderer.increment_generation();
+                    scenario.obstacle_grid.invalidate();
+                }
+            }
             *state.resizing_node = None;
             resize_ended = true;
         } else {
@@ -779,70 +820,96 @@ pub fn render_node_graph(
                 node.position += drag_delta;
             }
         }
+
         view.connection_renderer.increment_generation();
     }
 
-    if let Some(released_node_id) = node_drag_released
-        && let Some(released_node) =
+    if let Some(released_node_id) = node_drag_released {
+        let mut reroute_needed = false;
+
+        for node in &mut scenario.nodes {
+            if state.selected_nodes.contains(&node.id) && node.is_routable() {
+                let snapped_x = snap_to_grid(node.position.x, UiConstants::GRID_CELL_SIZE);
+                let snapped_y = snap_to_grid(node.position.y, UiConstants::GRID_CELL_SIZE);
+
+                if (snapped_x - node.position.x).abs() > 0.001
+                    || (snapped_y - node.position.y).abs() > 0.001
+                {
+                    reroute_needed = true;
+                }
+
+                node.position.x = snapped_x;
+                node.position.y = snapped_y;
+            }
+        }
+
+        if reroute_needed {
+            view.connection_renderer.increment_generation();
+            scenario.obstacle_grid.invalidate();
+        }
+
+        if let Some(released_node) =
             get_node_from_index(&scenario.nodes, &node_index, &released_node_id)
-    {
-        let node_center_screen = to_screen(released_node.get_rect().center());
-
-        if let Some((from_id, to_id)) = find_connection_near_point(
-            scenario,
-            &node_index,
-            node_center_screen,
-            view.pan_offset,
-            view.zoom,
-            UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
-            &mut view.connection_renderer,
-        ) && released_node_id != from_id
-            && released_node_id != to_id
-            && let Some(conn_to_remove) = scenario
-                .connections
-                .iter()
-                .find(|c| c.from_node == from_id && c.to_node == to_id)
-                .cloned()
         {
-            let branch_type = conn_to_remove.branch_type.clone();
+            let node_center_screen = to_screen(released_node.get_rect().center());
 
-            scenario
-                .connections
-                .retain(|c| !(c.from_node == from_id && c.to_node == to_id));
+            if let Some((from_id, to_id)) = find_connection_near_point(
+                scenario,
+                &node_index,
+                node_center_screen,
+                view.pan_offset,
+                view.zoom,
+                UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
+                &mut view.connection_renderer,
+            ) && released_node_id != from_id
+                && released_node_id != to_id
+                && let Some(conn_to_remove) = scenario
+                    .connections
+                    .iter()
+                    .find(|c| c.from_node == from_id && c.to_node == to_id)
+                    .cloned()
+            {
+                let branch_type = conn_to_remove.branch_type.clone();
 
-            if let (Some(from_node), Some(to_node)) = (
-                get_node_from_index(&scenario.nodes, &node_index, &from_id),
-                get_node_from_index(&scenario.nodes, &node_index, &to_id),
-            ) {
-                let from_pos = from_node.position;
-                let to_pos = to_node.position;
-                let mid_x = (from_pos.x + to_pos.x) * 0.5;
-                let mid_y = (from_pos.y + to_pos.y) * 0.5;
+                scenario
+                    .connections
+                    .retain(|c| !(c.from_node == from_id && c.to_node == to_id));
 
-                let distance = to_pos.y - from_pos.y;
-                let required = UiConstants::MIN_NODE_SPACING * 2.0;
+                if let (Some(from_node), Some(to_node)) = (
+                    get_node_from_index(&scenario.nodes, &node_index, &from_id),
+                    get_node_from_index(&scenario.nodes, &node_index, &to_id),
+                ) {
+                    let from_pos = from_node.position;
+                    let to_pos = to_node.position;
+                    let mid_x = (from_pos.x + to_pos.x) * 0.5;
+                    let mid_y = (from_pos.y + to_pos.y) * 0.5;
 
-                if distance < required {
-                    let push = required - distance;
+                    let distance = to_pos.y - from_pos.y;
+                    let required = UiConstants::MIN_NODE_SPACING * 2.0;
+
+                    if distance < required {
+                        let push = required - distance;
+
+                        for node in &mut scenario.nodes {
+                            if node.position.y >= to_pos.y {
+                                node.position.y += push;
+                            }
+                        }
+                    }
 
                     for node in &mut scenario.nodes {
-                        if node.position.y >= to_pos.y {
-                            node.position.y += push;
+                        if node.id == released_node_id {
+                            node.position.x = mid_x;
+                            node.position.y = mid_y;
+                            break;
                         }
                     }
                 }
 
-                for node in &mut scenario.nodes {
-                    if node.id == released_node_id {
-                        node.position.x = mid_x;
-                        node.position.y = mid_y;
-                        break;
-                    }
-                }
+                scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
+                scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
+                scenario.obstacle_grid.invalidate();
             }
-
-            scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
-            scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
         }
     }
 
@@ -879,6 +946,7 @@ pub fn render_node_graph(
                     } else {
                         scenario.connections.retain(|c| c.from_node != node.id);
                     }
+                    scenario.obstacle_grid.invalidate();
                 }
             }
         }
@@ -985,6 +1053,7 @@ pub fn render_node_graph(
         }
 
         scenario.add_connection_with_branch(from, to, branch_type);
+        scenario.obstacle_grid.invalidate();
         connection_created = true;
     }
 
@@ -1259,7 +1328,8 @@ pub fn draw_node_transformed<F>(
                 );
 
                 if !label.is_empty() {
-                    let (label_offset, label_align) = (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM);
+                    let (label_offset, label_align) =
+                        (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM);
                     painter.text(
                         pin_screen + label_offset,
                         label_align,
@@ -1552,7 +1622,7 @@ pub fn render_node_properties(
                             ui.label(t!("variable_binding.parameter").as_ref());
                             ui.label(t!("variable_binding.source_variable").as_ref());
                             ui.label(t!("variable_binding.direction").as_ref());
-                            ui.label(""); // Actions column
+                            ui.label("");
                         });
 
                         for (idx, binding) in parameters.iter().enumerate() {
