@@ -337,10 +337,10 @@ pub fn render_node_graph(
             get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
-            let color = get_connection_color(&connection.branch_type, from_node);
-            path.draw(&painter, color, &mut view.connection_renderer, &connection.id, to_screen);
-            path.draw_debug_info(&painter);
+             let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
+             let color = get_connection_color(&connection.branch_type, from_node);
+             path.draw(&painter, color, &mut view.connection_renderer, &connection.id, to_screen);
+             path.draw_debug_info(&painter, to_screen);
         }
     }
 

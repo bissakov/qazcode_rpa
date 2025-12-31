@@ -34,11 +34,11 @@ impl UiConstants {
 
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
     pub const MIN_NODE_SPACING: f32 = 100.0;
-     pub const ROUTING_OBSTACLE_PADDING: f32 = 15.0;
-     pub const ROUTING_GHOST_PIN_DISTANCE: f32 = 20.0;
-     pub const ROUTING_EXPANDED_PADDING: f32 = 35.0;
-     pub const ROUTING_SOURCE_EXIT_PADDING: f32 = 35.0;
-     pub const DEBUG_ROUTING_VISUALIZATION: bool = true;
+    pub const ROUTING_OBSTACLE_PADDING: f32 = 15.0;
+    pub const ROUTING_GHOST_PIN_DISTANCE: f32 = 20.0;
+    pub const ROUTING_EXPANDED_PADDING: f32 = 35.0;
+    pub const ROUTING_SOURCE_EXIT_PADDING: f32 = 35.0;
+    pub const DEBUG_ROUTING_VISUALIZATION: bool = false;
 
     pub const ZOOM_MIN: f32 = 0.1;
     pub const ZOOM_MAX: f32 = 3.0;

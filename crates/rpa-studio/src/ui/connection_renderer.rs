@@ -58,22 +58,14 @@ pub struct ConnectionPath {
 }
 
 impl ConnectionPath {
-    pub fn new(
-        from_node: &Node,
-        to_node: &Node,
-        nodes: &[Node],
-        branch_type: &BranchType,
-    ) -> Self {
+    pub fn new(from_node: &Node, to_node: &Node, nodes: &[Node], branch_type: &BranchType) -> Self {
         let start = PinPosition::output(from_node, branch_type).world_pos();
         let end = PinPosition::input(to_node).world_pos();
 
         let preferred_direction = from_node.get_preferred_output_direction(branch_type);
-        
+
         // Create visibility graph with all nodes as obstacles
-        let visibility_graph = VisibilityGraph::new(
-            nodes,
-            UiConstants::ROUTING_OBSTACLE_PADDING,
-        );
+        let visibility_graph = VisibilityGraph::new(nodes, UiConstants::ROUTING_OBSTACLE_PADDING);
 
         let source_rect = egui::Rect {
             min: Pos2::new(
@@ -158,25 +150,30 @@ impl ConnectionPath {
         painter.add(egui::Shape::line(screen_points, Stroke::new(2.0, color)));
     }
 
-    pub fn draw_debug_info(&self, painter: &Painter) {
+    pub fn draw_debug_info(&self, painter: &Painter, transform: impl Fn(Pos2) -> Pos2) {
         if !UiConstants::DEBUG_ROUTING_VISUALIZATION {
             return;
         }
 
-        painter.circle_filled(self.ghost_pin, 8.0, Color32::from_rgb(0, 255, 255));
-        painter.circle_filled(self.ghost_input, 8.0, Color32::from_rgb(255, 0, 255));
+        let screen_ghost_pin = transform(self.ghost_pin);
+        let screen_ghost_input = transform(self.ghost_input);
+        let screen_start = transform(self.start);
+        let screen_end = transform(self.end);
+
+        painter.circle_filled(screen_ghost_pin, 8.0, Color32::from_rgb(0, 255, 255));
+        painter.circle_filled(screen_ghost_input, 8.0, Color32::from_rgb(255, 0, 255));
 
         for waypoint in &self.waypoints {
-            painter.circle_filled(*waypoint, 4.0, Color32::from_rgb(255, 255, 0));
+            painter.circle_filled(transform(*waypoint), 4.0, Color32::from_rgb(255, 255, 0));
         }
 
         painter.line_segment(
-            [self.start, self.ghost_pin],
+            [screen_start, screen_ghost_pin],
             Stroke::new(1.0, Color32::from_rgb(0, 255, 255)),
         );
 
         painter.line_segment(
-            [self.ghost_input, self.end],
+            [screen_ghost_input, screen_end],
             Stroke::new(1.0, Color32::from_rgb(255, 0, 255)),
         );
     }
@@ -221,7 +218,12 @@ impl ConnectionRenderer {
         self.routing_generation = self.routing_generation.wrapping_add(1);
     }
 
-    pub fn get_or_compute_path(&mut self, connection_id: &NanoId, waypoints: &[Pos2], source_rect: egui::Rect) -> Vec<Pos2> {
+    pub fn get_or_compute_path(
+        &mut self,
+        connection_id: &NanoId,
+        waypoints: &[Pos2],
+        source_rect: egui::Rect,
+    ) -> Vec<Pos2> {
         if let Some(entry) = self.path_cache.get(connection_id)
             && entry.generation == self.routing_generation
         {
@@ -284,8 +286,10 @@ fn waypoints_to_line_segments(waypoints: &[Pos2], source_rect: egui::Rect) -> Ve
             };
 
             if corner != a && corner != b {
-                let corner_in_source = corner.x >= source_rect.min.x && corner.x <= source_rect.max.x
-                    && corner.y >= source_rect.min.y && corner.y <= source_rect.max.y;
+                let corner_in_source = corner.x >= source_rect.min.x
+                    && corner.x <= source_rect.max.x
+                    && corner.y >= source_rect.min.y
+                    && corner.y <= source_rect.max.y;
                 if !corner_in_source {
                     result.push(corner);
                 }
