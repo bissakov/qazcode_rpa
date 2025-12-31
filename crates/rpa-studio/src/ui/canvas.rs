@@ -339,6 +339,9 @@ pub fn render_node_graph(
 
     draw_grid_transformed(&painter, rect, view.pan_offset, view.zoom);
 
+    // Clear cache before recomputing connection paths to ensure fresh routing
+    view.connection_renderer.clear_cache();
+
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
             get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
@@ -347,6 +350,7 @@ pub fn render_node_graph(
             let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
             let color = get_connection_color(&connection.branch_type, from_node);
             path.draw(&painter, color, &mut view.connection_renderer, &connection.id);
+            path.draw_debug_info(&painter);
         }
     }
 

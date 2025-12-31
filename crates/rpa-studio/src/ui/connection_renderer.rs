@@ -54,6 +54,8 @@ pub struct ConnectionPath {
     #[allow(dead_code)]
     end: Pos2,
     waypoints: Vec<Pos2>,
+    ghost_pin: Pos2,        // output ghost pin
+    ghost_input: Pos2,      // input ghost pin
 }
 
 impl ConnectionPath {
@@ -70,14 +72,21 @@ impl ConnectionPath {
         let start = PinPosition::output(from_node, branch_type).screen_pos(&transform);
         let end = PinPosition::input(to_node).screen_pos(&transform);
 
-        let visibility_graph = VisibilityGraph::new(nodes, UiConstants::ROUTING_OBSTACLE_PADDING);
+        let visibility_graph = VisibilityGraph::new(nodes, UiConstants::ROUTING_EXPANDED_PADDING);
         let preferred_direction = from_node.get_preferred_output_direction(branch_type);
-        let waypoints = visibility_graph.find_path_with_direction(start, end, preferred_direction);
+        let routing_path = visibility_graph.find_path_with_ghost_pins(
+            start,
+            end,
+            preferred_direction,
+            UiConstants::ROUTING_GHOST_PIN_DISTANCE,
+        );
 
         Self {
             start,
             end,
-            waypoints,
+            waypoints: routing_path.waypoints,
+            ghost_pin: routing_path.ghost_pin,
+            ghost_input: routing_path.ghost_input,
         }
     }
 
@@ -131,6 +140,35 @@ impl ConnectionPath {
     ) {
         let points = self.get_path_points(renderer, connection_id);
         painter.add(egui::Shape::line(points, Stroke::new(2.0, color)));
+    }
+
+    pub fn draw_debug_info(&self, painter: &Painter) {
+        if !UiConstants::DEBUG_ROUTING_VISUALIZATION {
+            return;
+        }
+
+        // Draw output ghost pin as cyan circle (8px radius)
+        painter.circle_filled(self.ghost_pin, 8.0, Color32::from_rgb(0, 255, 255));
+
+        // Draw input ghost pin as magenta circle (8px radius)
+        painter.circle_filled(self.ghost_input, 8.0, Color32::from_rgb(255, 0, 255));
+
+        // Draw waypoints as yellow dots (4px radius)
+        for waypoint in &self.waypoints {
+            painter.circle_filled(*waypoint, 4.0, Color32::from_rgb(255, 255, 0));
+        }
+
+        // Draw line from start to ghost output pin as cyan line (output directional intent)
+        painter.line_segment(
+            [self.start, self.ghost_pin],
+            Stroke::new(1.0, Color32::from_rgb(0, 255, 255)),
+        );
+
+        // Draw line from ghost input pin to end as magenta line (input directional intent)
+        painter.line_segment(
+            [self.ghost_input, self.end],
+            Stroke::new(1.0, Color32::from_rgb(255, 0, 255)),
+        );
     }
 
     #[allow(dead_code)]
@@ -199,7 +237,45 @@ impl Default for ConnectionRenderer {
 }
 
 fn waypoints_to_line_segments(waypoints: &[Pos2]) -> Vec<Pos2> {
-    waypoints.to_vec()
+    if waypoints.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+
+    for pair in waypoints.windows(2) {
+        let a = pair[0];
+        let b = pair[1];
+
+        result.push(a);
+
+        let dx = (b.x - a.x).abs();
+        let dy = (b.y - a.y).abs();
+
+        // If diagonal (both dx and dy are significant), insert a 90° corner
+        if dx > 0.01 && dy > 0.01 {
+            // Choose corner based on dominant axis (minimizes visual snap)
+            let corner = if dx > dy {
+                // Horizontal-first: move X first, then Y
+                Pos2::new(b.x, a.y)
+            } else {
+                // Vertical-first: move Y first, then X
+                Pos2::new(a.x, b.y)
+            };
+
+            // Defensive: skip corner if it equals a or b (shouldn't happen with dx/dy check, but safe)
+            if corner != a && corner != b {
+                result.push(corner);
+            }
+        }
+    }
+
+    // Always add final point
+    if let Some(last) = waypoints.last() {
+        result.push(*last);
+    }
+
+    result
 }
 
 fn point_to_line_distance(point: Pos2, line_points: &[Pos2]) -> f32 {

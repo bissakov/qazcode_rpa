@@ -2,6 +2,12 @@ use egui::Pos2;
 use rpa_core::{constants::OutputDirection, Node};
 use std::collections::HashMap;
 
+pub struct RoutingPath {
+    pub waypoints: Vec<Pos2>,
+    pub ghost_pin: Pos2,      // output ghost pin
+    pub ghost_input: Pos2,    // input ghost pin
+}
+
 #[derive(Clone, Copy)]
 struct Obstacle {
     min: Pos2,
@@ -55,47 +61,53 @@ impl VisibilityGraph {
         }
     }
 
-    pub fn find_path_with_direction(
+    pub fn find_path_with_ghost_pins(
         &self,
         start: Pos2,
         end: Pos2,
-        preferred_direction: OutputDirection,
-    ) -> Vec<Pos2> {
+        preferred_output_direction: OutputDirection,
+        ghost_distance: f32,
+    ) -> RoutingPath {
         if start == end {
-            return vec![start, end];
+            return RoutingPath {
+                waypoints: vec![start, end],
+                ghost_pin: start,
+                ghost_input: end,
+            };
         }
 
-        // Create initial waypoint based on preferred direction
-        let offset = 50.0;
-        let initial_waypoint = match preferred_direction {
-            OutputDirection::Down => Pos2::new(start.x, start.y + offset),
-            OutputDirection::Right => Pos2::new(start.x + offset, start.y),
-            OutputDirection::Left => Pos2::new(start.x - offset, start.y),
-            OutputDirection::Up => Pos2::new(start.x, start.y - offset),
+        // Calculate ghost output pin position based on preferred output direction
+        let ghost_pin = match preferred_output_direction {
+            OutputDirection::Down => Pos2::new(start.x, start.y + ghost_distance),
+            OutputDirection::Right => Pos2::new(start.x + ghost_distance, start.y),
+            OutputDirection::Left => Pos2::new(start.x - ghost_distance, start.y),
+            OutputDirection::Up => Pos2::new(start.x, start.y - ghost_distance),
         };
 
-        // Try to route with the initial waypoint
-        if let (Some(path_to_waypoint), Some(path_from_waypoint)) = (
-            self.find_path_astar(start, initial_waypoint),
-            self.find_path_astar(initial_waypoint, end),
-        ) {
-            // Combine paths, avoiding duplicate waypoint
-            let mut combined = path_to_waypoint;
-            combined.extend_from_slice(&path_from_waypoint[1..]);
-            // Only simplify from the second waypoint onwards to preserve initial direction
-            if combined.len() > 2 {
-                let first_segment = combined[0];
-                let mut simplified = vec![first_segment];
-                simplified.extend_from_slice(&simplify_path(&combined[1..], &self.obstacles));
-                return simplified;
-            }
-            return combined;
+        // Ghost input pin is always directly above the actual input pin (input is always at top)
+        let ghost_input = Pos2::new(end.x, end.y - ghost_distance);
+
+        // Start with straight line from original output pin to ghost output pin
+        let mut waypoints = vec![start, ghost_pin];
+
+        // Use A* routing from ghost output pin to ghost input pin
+        let middle_path = self
+            .find_path_astar(ghost_pin, ghost_input)
+            .map(|path| simplify_path(&path, &self.obstacles))
+            .unwrap_or_else(|| vec![ghost_pin, ghost_input]);
+
+        // Skip first point (ghost_pin) to avoid duplication
+        waypoints.extend_from_slice(&middle_path[1..]);
+
+        // Add final segment from ghost input pin to actual input pin
+        if waypoints.last() != Some(&end) {
+            waypoints.push(end);
         }
 
-        // Fallback to regular pathfinding
-        match self.find_path_astar(start, end) {
-            Some(path) => simplify_path(&path, &self.obstacles),
-            None => fallback_manhattan(start, end),
+        RoutingPath {
+            waypoints,
+            ghost_pin,
+            ghost_input,
         }
     }
 
