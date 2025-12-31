@@ -129,19 +129,17 @@ fn find_connection_near_point(
     scenario: &Scenario,
     node_index: &NodeIndex,
     point: Pos2,
-    pan_offset: Vec2,
-    zoom: f32,
+    _pan_offset: Vec2,
+    _zoom: f32,
     threshold: f32,
     renderer: &mut ConnectionRenderer,
 ) -> Option<(NanoId, NanoId)> {
-    let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
-
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
+            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
             if path.hit_test(point, renderer, &connection.id, threshold) {
                 return Some((connection.from_node.clone(), connection.to_node.clone()));
             }
@@ -155,24 +153,18 @@ fn find_intersecting_connections(
     scenario: &Scenario,
     node_index: &NodeIndex,
     cut_path: &[Pos2],
-    pan_offset: Vec2,
-    zoom: f32,
+    _pan_offset: Vec2,
+    _zoom: f32,
     renderer: &mut ConnectionRenderer,
 ) -> Vec<(NanoId, NanoId)> {
     let mut intersecting = Vec::new();
-
-    if cut_path.len() < 2 {
-        return intersecting;
-    }
-
-    let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
             get_node_from_index(&scenario.nodes, node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
+            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
 
             for i in 0..cut_path.len() - 1 {
                 let cut_start = cut_path[i];
@@ -280,7 +272,7 @@ pub fn render_node_graph(
             view.pan_offset += mouse_pos.to_vec2() - mouse_screen_after.to_vec2();
 
             if zoom_delta != 0.0 {
-                view.connection_renderer.clear_cache();
+                view.connection_renderer.increment_generation();
             }
         }
     }
@@ -290,9 +282,7 @@ pub fn render_node_graph(
     if is_panning && response.dragged() && !*state.knife_tool_active {
         let pan_delta = response.drag_delta();
         view.pan_offset += pan_delta;
-
-        view.connection_renderer.update_pan_offset(pan_delta);
-
+        view.connection_renderer.increment_generation();
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
 
@@ -347,9 +337,9 @@ pub fn render_node_graph(
             get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
             get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
         ) {
-            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type, to_screen);
+            let path = ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
             let color = get_connection_color(&connection.branch_type, from_node);
-            path.draw(&painter, color, &mut view.connection_renderer, &connection.id);
+            path.draw(&painter, color, &mut view.connection_renderer, &connection.id, to_screen);
             path.draw_debug_info(&painter);
         }
     }
@@ -459,15 +449,18 @@ pub fn render_node_graph(
             match handle {
                 ResizeHandle::Right => {
                     node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::Left => {
                     let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                     let width_change = node.width - new_width;
                     node.position.x += width_change;
                     node.width = new_width;
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::Bottom => {
                     node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::Top => {
                     let new_height =
@@ -475,10 +468,12 @@ pub fn render_node_graph(
                     let height_change = node.height - new_height;
                     node.position.y += height_change;
                     node.height = new_height;
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::BottomRight => {
                     node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                     node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::BottomLeft => {
                     let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
@@ -486,6 +481,7 @@ pub fn render_node_graph(
                     node.position.x += width_change;
                     node.width = new_width;
                     node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::TopRight => {
                     node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
@@ -494,6 +490,7 @@ pub fn render_node_graph(
                     let height_change = node.height - new_height;
                     node.position.y += height_change;
                     node.height = new_height;
+                    view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::TopLeft => {
                     let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
@@ -505,6 +502,7 @@ pub fn render_node_graph(
                     let height_change = node.height - new_height;
                     node.position.y += height_change;
                     node.height = new_height;
+                    view.connection_renderer.increment_generation();
                 }
             }
             if let Activity::Note { width, height, .. } = &mut node.activity {
@@ -781,7 +779,7 @@ pub fn render_node_graph(
                 node.position += drag_delta;
             }
         }
-        view.connection_renderer.clear_cache();
+        view.connection_renderer.increment_generation();
     }
 
     if let Some(released_node_id) = node_drag_released

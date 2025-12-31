@@ -1,10 +1,7 @@
-use egui::{Color32, Painter, Pos2, Stroke, Vec2};
-use rpa_core::{
-    BranchType, NanoId, Node, UiConstants,
-};
-use std::collections::HashMap;
 use super::visibility_graph::VisibilityGraph;
-
+use egui::{Color32, Painter, Pos2, Stroke, Vec2};
+use rpa_core::{BranchType, NanoId, Node, UiConstants};
+use std::collections::HashMap;
 
 pub struct PinPosition {
     world_pos: Pos2,
@@ -40,6 +37,7 @@ impl PinPosition {
         self.world_pos
     }
 
+    #[allow(dead_code)]
     pub fn screen_pos<F>(&self, transform: F) -> Pos2
     where
         F: Fn(Pos2) -> Pos2,
@@ -54,31 +52,46 @@ pub struct ConnectionPath {
     #[allow(dead_code)]
     end: Pos2,
     waypoints: Vec<Pos2>,
-    ghost_pin: Pos2,        // output ghost pin
-    ghost_input: Pos2,      // input ghost pin
+    ghost_pin: Pos2,
+    ghost_input: Pos2,
+    source_rect: egui::Rect,
 }
 
 impl ConnectionPath {
-    pub fn new<F>(
+    pub fn new(
         from_node: &Node,
         to_node: &Node,
         nodes: &[Node],
         branch_type: &BranchType,
-        transform: F,
-    ) -> Self
-    where
-        F: Fn(Pos2) -> Pos2,
-    {
-        let start = PinPosition::output(from_node, branch_type).screen_pos(&transform);
-        let end = PinPosition::input(to_node).screen_pos(&transform);
+    ) -> Self {
+        let start = PinPosition::output(from_node, branch_type).world_pos();
+        let end = PinPosition::input(to_node).world_pos();
 
-        let visibility_graph = VisibilityGraph::new(nodes, UiConstants::ROUTING_EXPANDED_PADDING);
         let preferred_direction = from_node.get_preferred_output_direction(branch_type);
+        
+        // Create visibility graph with all nodes as obstacles
+        let visibility_graph = VisibilityGraph::new(
+            nodes,
+            UiConstants::ROUTING_OBSTACLE_PADDING,
+        );
+
+        let source_rect = egui::Rect {
+            min: Pos2::new(
+                from_node.position.x - UiConstants::ROUTING_EXPANDED_PADDING,
+                from_node.position.y - UiConstants::ROUTING_EXPANDED_PADDING,
+            ),
+            max: Pos2::new(
+                from_node.position.x + from_node.width + UiConstants::ROUTING_EXPANDED_PADDING,
+                from_node.position.y + from_node.height + UiConstants::ROUTING_EXPANDED_PADDING,
+            ),
+        };
+
         let routing_path = visibility_graph.find_path_with_ghost_pins(
             start,
             end,
             preferred_direction,
             UiConstants::ROUTING_GHOST_PIN_DISTANCE,
+            source_rect,
         );
 
         Self {
@@ -87,6 +100,7 @@ impl ConnectionPath {
             waypoints: routing_path.waypoints,
             ghost_pin: routing_path.ghost_pin,
             ghost_input: routing_path.ghost_input,
+            source_rect,
         }
     }
 
@@ -95,7 +109,7 @@ impl ConnectionPath {
         renderer: &mut ConnectionRenderer,
         connection_id: &NanoId,
     ) -> Vec<Pos2> {
-        renderer.get_or_compute_path(connection_id, &self.waypoints)
+        renderer.get_or_compute_path(connection_id, &self.waypoints, self.source_rect)
     }
 
     pub fn hit_test(
@@ -137,9 +151,11 @@ impl ConnectionPath {
         color: Color32,
         renderer: &mut ConnectionRenderer,
         connection_id: &NanoId,
+        transform: impl Fn(Pos2) -> Pos2,
     ) {
-        let points = self.get_path_points(renderer, connection_id);
-        painter.add(egui::Shape::line(points, Stroke::new(2.0, color)));
+        let world_points = self.get_path_points(renderer, connection_id);
+        let screen_points: Vec<Pos2> = world_points.iter().map(|p| transform(*p)).collect();
+        painter.add(egui::Shape::line(screen_points, Stroke::new(2.0, color)));
     }
 
     pub fn draw_debug_info(&self, painter: &Painter) {
@@ -147,24 +163,18 @@ impl ConnectionPath {
             return;
         }
 
-        // Draw output ghost pin as cyan circle (8px radius)
         painter.circle_filled(self.ghost_pin, 8.0, Color32::from_rgb(0, 255, 255));
-
-        // Draw input ghost pin as magenta circle (8px radius)
         painter.circle_filled(self.ghost_input, 8.0, Color32::from_rgb(255, 0, 255));
 
-        // Draw waypoints as yellow dots (4px radius)
         for waypoint in &self.waypoints {
             painter.circle_filled(*waypoint, 4.0, Color32::from_rgb(255, 255, 0));
         }
 
-        // Draw line from start to ghost output pin as cyan line (output directional intent)
         painter.line_segment(
             [self.start, self.ghost_pin],
             Stroke::new(1.0, Color32::from_rgb(0, 255, 255)),
         );
 
-        // Draw line from ghost input pin to end as magenta line (input directional intent)
         painter.line_segment(
             [self.ghost_input, self.end],
             Stroke::new(1.0, Color32::from_rgb(255, 0, 255)),
@@ -190,21 +200,43 @@ impl ConnectionPath {
 }
 
 pub struct ConnectionRenderer {
-    path_cache: HashMap<NanoId, Vec<Pos2>>,
+    path_cache: HashMap<NanoId, CacheEntry>,
+    routing_generation: u64,
+}
+
+struct CacheEntry {
+    generation: u64,
+    points: Vec<Pos2>,
 }
 
 impl ConnectionRenderer {
     pub fn new() -> Self {
         Self {
             path_cache: HashMap::new(),
+            routing_generation: 0,
         }
     }
 
-    pub fn get_or_compute_path(&mut self, connection_id: &NanoId, waypoints: &[Pos2]) -> Vec<Pos2> {
-        self.path_cache
-            .entry(connection_id.clone())
-            .or_insert_with(|| waypoints_to_line_segments(waypoints))
-            .clone()
+    pub fn increment_generation(&mut self) {
+        self.routing_generation = self.routing_generation.wrapping_add(1);
+    }
+
+    pub fn get_or_compute_path(&mut self, connection_id: &NanoId, waypoints: &[Pos2], source_rect: egui::Rect) -> Vec<Pos2> {
+        if let Some(entry) = self.path_cache.get(connection_id)
+            && entry.generation == self.routing_generation
+        {
+            return entry.points.clone();
+        }
+
+        let points = waypoints_to_line_segments(waypoints, source_rect);
+        self.path_cache.insert(
+            connection_id.clone(),
+            CacheEntry {
+                generation: self.routing_generation,
+                points: points.clone(),
+            },
+        );
+        points
     }
 
     pub fn clear_cache(&mut self) {
@@ -220,14 +252,6 @@ impl ConnectionRenderer {
     pub fn cache_size(&self) -> usize {
         self.path_cache.len()
     }
-
-    pub fn update_pan_offset(&mut self, pan_delta: Vec2) {
-        for points in self.path_cache.values_mut() {
-            for point in points.iter_mut() {
-                *point += pan_delta;
-            }
-        }
-    }
 }
 
 impl Default for ConnectionRenderer {
@@ -236,7 +260,7 @@ impl Default for ConnectionRenderer {
     }
 }
 
-fn waypoints_to_line_segments(waypoints: &[Pos2]) -> Vec<Pos2> {
+fn waypoints_to_line_segments(waypoints: &[Pos2], source_rect: egui::Rect) -> Vec<Pos2> {
     if waypoints.is_empty() {
         return Vec::new();
     }
@@ -252,20 +276,19 @@ fn waypoints_to_line_segments(waypoints: &[Pos2]) -> Vec<Pos2> {
         let dx = (b.x - a.x).abs();
         let dy = (b.y - a.y).abs();
 
-        // If diagonal (both dx and dy are significant), insert a 90° corner
         if dx > 0.01 && dy > 0.01 {
-            // Choose corner based on dominant axis (minimizes visual snap)
             let corner = if dx > dy {
-                // Horizontal-first: move X first, then Y
                 Pos2::new(b.x, a.y)
             } else {
-                // Vertical-first: move Y first, then X
                 Pos2::new(a.x, b.y)
             };
 
-            // Defensive: skip corner if it equals a or b (shouldn't happen with dx/dy check, but safe)
             if corner != a && corner != b {
-                result.push(corner);
+                let corner_in_source = corner.x >= source_rect.min.x && corner.x <= source_rect.max.x
+                    && corner.y >= source_rect.min.y && corner.y <= source_rect.max.y;
+                if !corner_in_source {
+                    result.push(corner);
+                }
             }
         }
     }
@@ -279,7 +302,6 @@ fn waypoints_to_line_segments(waypoints: &[Pos2]) -> Vec<Pos2> {
 }
 
 fn point_to_line_distance(point: Pos2, line_points: &[Pos2]) -> f32 {
-
     let mut min_distance = f32::MAX;
 
     for i in 0..line_points.len() - 1 {

@@ -8,6 +8,58 @@ pub struct RoutingPath {
     pub ghost_input: Pos2,    // input ghost pin
 }
 
+/// Directional rectangular notch carved from source node for directional exit.
+/// Allows A* to escape from source node in the preferred output direction only.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct ExitNotch {
+    min: Pos2,
+    max: Pos2,
+}
+
+impl ExitNotch {
+    #[allow(dead_code)]
+    pub fn create(source_rect: egui::Rect, preferred_direction: OutputDirection, notch_length: f32, notch_thickness: f32) -> Self {
+        let (min, max) = match preferred_direction {
+            OutputDirection::Down => {
+                let notch_min_x = source_rect.center().x - notch_thickness;
+                let notch_max_x = source_rect.center().x + notch_thickness;
+                let notch_min_y = source_rect.max.y;
+                let notch_max_y = source_rect.max.y + notch_length;
+                (Pos2::new(notch_min_x, notch_min_y), Pos2::new(notch_max_x, notch_max_y))
+            }
+            OutputDirection::Up => {
+                let notch_min_x = source_rect.center().x - notch_thickness;
+                let notch_max_x = source_rect.center().x + notch_thickness;
+                let notch_min_y = source_rect.min.y - notch_length;
+                let notch_max_y = source_rect.min.y;
+                (Pos2::new(notch_min_x, notch_min_y), Pos2::new(notch_max_x, notch_max_y))
+            }
+            OutputDirection::Right => {
+                let notch_min_x = source_rect.max.x;
+                let notch_max_x = source_rect.max.x + notch_length;
+                let notch_min_y = source_rect.center().y - notch_thickness;
+                let notch_max_y = source_rect.center().y + notch_thickness;
+                (Pos2::new(notch_min_x, notch_min_y), Pos2::new(notch_max_x, notch_max_y))
+            }
+            OutputDirection::Left => {
+                let notch_min_x = source_rect.min.x - notch_length;
+                let notch_max_x = source_rect.min.x;
+                let notch_min_y = source_rect.center().y - notch_thickness;
+                let notch_max_y = source_rect.center().y + notch_thickness;
+                (Pos2::new(notch_min_x, notch_min_y), Pos2::new(notch_max_x, notch_max_y))
+            }
+        };
+
+        Self { min, max }
+    }
+
+    #[allow(dead_code)]
+    fn segment_intersects(&self, p1: Pos2, p2: Pos2) -> bool {
+        segment_intersects_rect(p1, p2, self.min, self.max)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Obstacle {
     min: Pos2,
@@ -25,6 +77,7 @@ impl Obstacle {
         }
     }
 
+    #[allow(dead_code)]
     fn contains(&self, pos: Pos2) -> bool {
         pos.x >= self.min.x && pos.x <= self.max.x && pos.y >= self.min.y && pos.y <= self.max.y
     }
@@ -44,11 +97,11 @@ pub struct VisibilityGraph {
 }
 
 impl VisibilityGraph {
+    #[allow(dead_code)]
     pub fn new(nodes: &[Node], padding: f32) -> Self {
         let obstacles = nodes.iter().map(|n| Obstacle::from_node(n, padding)).collect();
         Self { obstacles }
     }
-
     #[allow(dead_code)]
     fn find_path(&self, start: Pos2, end: Pos2) -> Vec<Pos2> {
         if start == end {
@@ -67,6 +120,7 @@ impl VisibilityGraph {
         end: Pos2,
         preferred_output_direction: OutputDirection,
         ghost_distance: f32,
+        _source_node_rect: egui::Rect,
     ) -> RoutingPath {
         if start == end {
             return RoutingPath {
@@ -76,7 +130,6 @@ impl VisibilityGraph {
             };
         }
 
-        // Calculate ghost output pin position based on preferred output direction
         let ghost_pin = match preferred_output_direction {
             OutputDirection::Down => Pos2::new(start.x, start.y + ghost_distance),
             OutputDirection::Right => Pos2::new(start.x + ghost_distance, start.y),
@@ -84,22 +137,17 @@ impl VisibilityGraph {
             OutputDirection::Up => Pos2::new(start.x, start.y - ghost_distance),
         };
 
-        // Ghost input pin is always directly above the actual input pin (input is always at top)
         let ghost_input = Pos2::new(end.x, end.y - ghost_distance);
 
-        // Start with straight line from original output pin to ghost output pin
         let mut waypoints = vec![start, ghost_pin];
 
-        // Use A* routing from ghost output pin to ghost input pin
         let middle_path = self
             .find_path_astar(ghost_pin, ghost_input)
             .map(|path| simplify_path(&path, &self.obstacles))
             .unwrap_or_else(|| vec![ghost_pin, ghost_input]);
 
-        // Skip first point (ghost_pin) to avoid duplication
         waypoints.extend_from_slice(&middle_path[1..]);
 
-        // Add final segment from ghost input pin to actual input pin
         if waypoints.last() != Some(&end) {
             waypoints.push(end);
         }
@@ -206,6 +254,7 @@ impl VisibilityGraph {
                 return false;
             }
         }
+
         true
     }
 }
@@ -230,12 +279,15 @@ fn reconstruct_path(came_from: &HashMap<usize, usize>, mut current: usize, verti
     path
 }
 
-fn segment_intersects_obstacle(p1: Pos2, p2: Pos2, obstacle: &Obstacle) -> bool {
+/// Canonical rect intersection test used by obstacles, notch, and re-entry guard.
+/// Uses slab test (AABB rejection + parametric slab) for consistent floating-point behavior.
+fn segment_intersects_rect(p1: Pos2, p2: Pos2, min: Pos2, max: Pos2) -> bool {
     let (p1x, p1y) = (p1.x, p1.y);
     let (p2x, p2y) = (p2.x, p2.y);
-    let (mx, mxx) = (obstacle.min.x, obstacle.max.x);
-    let (my, mxy) = (obstacle.min.y, obstacle.max.y);
+    let (mx, mxx) = (min.x, max.x);
+    let (my, mxy) = (min.y, max.y);
 
+    // AABB rejection test
     if (p1x < mx && p2x < mx) || (p1x > mxx && p2x > mxx) || (p1y < my && p2y < my)
         || (p1y > mxy && p2y > mxy)
     {
@@ -245,10 +297,12 @@ fn segment_intersects_obstacle(p1: Pos2, p2: Pos2, obstacle: &Obstacle) -> bool 
     let dx = p2x - p1x;
     let dy = p2y - p1y;
 
+    // Zero-length segment: check if point is in rect
     if dx == 0.0 && dy == 0.0 {
-        return obstacle.contains(p1);
+        return p1x >= mx && p1x <= mxx && p1y >= my && p1y <= mxy;
     }
 
+    // Slab test for x-axis
     if dx != 0.0 {
         let t_left = (mx - p1x) / dx;
         let t_right = (mxx - p1x) / dx;
@@ -263,6 +317,7 @@ fn segment_intersects_obstacle(p1: Pos2, p2: Pos2, obstacle: &Obstacle) -> bool 
         }
     }
 
+    // Slab test for y-axis
     if dy != 0.0 {
         let t_top = (my - p1y) / dy;
         let t_bottom = (mxy - p1y) / dy;
@@ -280,6 +335,10 @@ fn segment_intersects_obstacle(p1: Pos2, p2: Pos2, obstacle: &Obstacle) -> bool 
     true
 }
 
+fn segment_intersects_obstacle(p1: Pos2, p2: Pos2, obstacle: &Obstacle) -> bool {
+    segment_intersects_rect(p1, p2, obstacle.min, obstacle.max)
+}
+
 fn simplify_path(waypoints: &[Pos2], obstacles: &[Obstacle]) -> Vec<Pos2> {
     if waypoints.len() <= 2 {
         return waypoints.to_vec();
@@ -294,7 +353,11 @@ fn simplify_path(waypoints: &[Pos2], obstacles: &[Obstacle]) -> Vec<Pos2> {
 
         for test_idx in (current_idx + 2)..waypoints.len() {
             let can_connect = !obstacles.iter().any(|obs| {
-                segment_intersects_obstacle(waypoints[current_idx], waypoints[test_idx], obs)
+                segment_intersects_obstacle(
+                    waypoints[current_idx],
+                    waypoints[test_idx],
+                    obs,
+                )
             });
 
             if can_connect {
