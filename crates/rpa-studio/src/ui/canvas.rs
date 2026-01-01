@@ -155,8 +155,9 @@ fn find_intersecting_connections(
     _pan_offset: Vec2,
     _zoom: f32,
     renderer: &mut ConnectionRenderer,
-) -> Vec<(NanoId, NanoId)> {
+) -> (Vec<(NanoId, NanoId)>, Vec<Pos2>) {
     let mut intersecting = Vec::new();
+    let mut intersection_points = Vec::new();
 
     for connection in &scenario.connections {
         if let (Some(from_node), Some(to_node)) = (
@@ -170,15 +171,16 @@ fn find_intersecting_connections(
                 let cut_start = cut_path[i];
                 let cut_end = cut_path[i + 1];
 
-                if path.intersects_line(cut_start, cut_end, renderer, &connection.id) {
+                if let Some(intersection_point) = path.intersects_line(cut_start, cut_end, renderer, &connection.id) {
                     intersecting.push((connection.from_node.clone(), connection.to_node.clone()));
+                    intersection_points.push(intersection_point);
                     break;
                 }
             }
         }
     }
 
-    intersecting
+    (intersecting, intersection_points)
 }
 
 fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<ContextMenuAction> {
@@ -294,7 +296,7 @@ pub fn render_node_graph(
 
     if *state.knife_tool_active && !alt_rmb {
         if !state.knife_path.is_empty() {
-            let connections_to_remove = find_intersecting_connections(
+            let (connections_to_remove, _) = find_intersecting_connections(
                 scenario,
                 &node_index,
                 state.knife_path,
@@ -1106,6 +1108,33 @@ pub fn render_node_graph(
                 state.knife_path.clone(),
                 Stroke::new(3.0, Color32::from_rgb(255, 100, 100)),
             ));
+
+            let (_, intersection_points) = find_intersecting_connections(
+                scenario,
+                &node_index,
+                state.knife_path,
+                view.pan_offset,
+                view.zoom,
+                &mut view.connection_renderer,
+            );
+
+            for point in intersection_points {
+                let size = 8.0;
+                painter.line_segment(
+                    [
+                        Pos2::new(point.x - size, point.y - size),
+                        Pos2::new(point.x + size, point.y + size),
+                    ],
+                    Stroke::new(3.0, Color32::from_rgb(255, 0, 0)),
+                );
+                painter.line_segment(
+                    [
+                        Pos2::new(point.x - size, point.y + size),
+                        Pos2::new(point.x + size, point.y - size),
+                    ],
+                    Stroke::new(3.0, Color32::from_rgb(255, 0, 0)),
+                );
+            }
         }
     }
 
