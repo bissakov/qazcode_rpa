@@ -22,17 +22,38 @@ fn point_segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     (p - proj).length()
 }
 
-fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
+fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> Option<Pos2> {
     fn orient(a: Pos2, b: Pos2, c: Pos2) -> f32 {
         (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
     }
 
-    let o1 = orient(a1, a2, b1);
-    let o2 = orient(a1, a2, b2);
-    let o3 = orient(b1, b2, a1);
-    let o4 = orient(b1, b2, a2);
+    fn on_segment(a: Pos2, b: Pos2, c: Pos2) -> bool {
+        b.x <= a.x.max(c.x) && b.x >= a.x.min(c.x) &&
+        b.y <= a.y.max(c.y) && b.y >= a.y.min(c.y)
+    }
 
-    o1 * o2 < 0.0 && o3 * o4 < 0.0
+    let d1 = a2 - a1;
+    let d2 = b2 - b1;
+    let d = d1.x * d2.y - d1.y * d2.x;
+
+    if d.abs() < 1e-6 {
+        let o1 = orient(a1, a2, b1);
+        if o1.abs() < 1e-6 && on_segment(a1, b1, a2) {
+            return Some(b1);
+        }
+        return None;
+    }
+
+    let t1 = ((b1.x - a1.x) * d2.y - (b1.y - a1.y) * d2.x) / d;
+    let t2 = ((b1.x - a1.x) * d1.y - (b1.y - a1.y) * d1.x) / d;
+
+    if (0.0..=1.0).contains(&t1) && (0.0..=1.0).contains(&t2) {
+        let ix = a1.x + t1 * d1.x;
+        let iy = a1.y + t1 * d1.y;
+        return Some(Pos2::new(ix, iy));
+    }
+
+    None
 }
 
 pub struct ConnectionPath {
@@ -107,14 +128,14 @@ impl ConnectionPath {
         p2: Pos2,
         renderer: &mut ConnectionRenderer,
         id: &NanoId,
-    ) -> bool {
+    ) -> Option<Pos2> {
         let pts = self.get_path_points(renderer, id);
         for w in pts.windows(2) {
-            if segments_intersect(p1, p2, w[0], w[1]) {
-                return true;
+            if let Some(intersection_point) = segments_intersect(p1, p2, w[0], w[1]) {
+                return Some(intersection_point);
             }
         }
-        false
+        None
     }
 }
 
