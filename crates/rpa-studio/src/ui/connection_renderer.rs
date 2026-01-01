@@ -162,10 +162,10 @@ impl ConnectionRenderer {
     }
 
     pub fn get_or_compute(&mut self, id: &NanoId, wp: &[Pos2]) -> Vec<Pos2> {
-        if let Some(e) = self.cache.get(id) {
-            if e.generation == self.generation {
-                return e.points.clone();
-            }
+        if let Some(e) = self.cache.get(id)
+            && e.generation == self.generation
+        {
+            return e.points.clone();
         }
         let pts = wp.to_vec();
         self.cache.insert(
