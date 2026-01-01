@@ -296,10 +296,15 @@ pub fn render_node_graph(
 
     if *state.knife_tool_active && !alt_rmb {
         if !state.knife_path.is_empty() {
+            let knife_path_world: Vec<Pos2> = state.knife_path
+                .iter()
+                .map(|pos| ((pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2())
+                .collect();
+
             let (connections_to_remove, _) = find_intersecting_connections(
                 scenario,
                 &node_index,
-                state.knife_path,
+                &knife_path_world,
                 view.pan_offset,
                 view.zoom,
                 &mut view.connection_renderer,
@@ -743,7 +748,6 @@ pub fn render_node_graph(
             && state.connection_from.is_none()
             && !is_panning
             && is_selected
-            && state.selected_nodes.len() == 1
         {
             node_drag_released = Some(node.id.clone());
             drag_ended = true;
@@ -826,7 +830,8 @@ pub fn render_node_graph(
         view.connection_renderer.increment_generation();
     }
 
-    if let Some(released_node_id) = node_drag_released {
+    // Snap all selected nodes to grid when drag is released
+    if drag_ended && !state.selected_nodes.is_empty() {
         let mut reroute_needed = false;
 
         for node in &mut scenario.nodes {
@@ -849,10 +854,13 @@ pub fn render_node_graph(
             view.connection_renderer.increment_generation();
             scenario.obstacle_grid.invalidate();
         }
+    }
 
-        if let Some(released_node) =
+    if let Some(released_node_id) = node_drag_released
+        && state.selected_nodes.len() == 1
+        && let Some(released_node) =
             get_node_from_index(&scenario.nodes, &node_index, &released_node_id)
-        {
+    {
             let node_center_screen = to_screen(released_node.get_rect().center());
 
             if let Some((from_id, to_id)) = find_connection_near_point(
@@ -912,7 +920,6 @@ pub fn render_node_graph(
                 scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
                 scenario.obstacle_grid.invalidate();
             }
-        }
     }
 
     for i in (0..scenario.nodes.len()).rev() {
@@ -1109,28 +1116,34 @@ pub fn render_node_graph(
                 Stroke::new(3.0, Color32::from_rgb(255, 100, 100)),
             ));
 
+            let knife_path_world: Vec<Pos2> = state.knife_path
+                .iter()
+                .map(|pos| ((pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2())
+                .collect();
+
             let (_, intersection_points) = find_intersecting_connections(
                 scenario,
                 &node_index,
-                state.knife_path,
+                &knife_path_world,
                 view.pan_offset,
                 view.zoom,
                 &mut view.connection_renderer,
             );
 
             for point in intersection_points {
+                let screen_point = to_screen(point);
                 let size = 8.0;
                 painter.line_segment(
                     [
-                        Pos2::new(point.x - size, point.y - size),
-                        Pos2::new(point.x + size, point.y + size),
+                        Pos2::new(screen_point.x - size, screen_point.y - size),
+                        Pos2::new(screen_point.x + size, screen_point.y + size),
                     ],
                     Stroke::new(3.0, Color32::from_rgb(255, 0, 0)),
                 );
                 painter.line_segment(
                     [
-                        Pos2::new(point.x - size, point.y + size),
-                        Pos2::new(point.x + size, point.y - size),
+                        Pos2::new(screen_point.x - size, screen_point.y + size),
+                        Pos2::new(screen_point.x + size, screen_point.y - size),
                     ],
                     Stroke::new(3.0, Color32::from_rgb(255, 0, 0)),
                 );

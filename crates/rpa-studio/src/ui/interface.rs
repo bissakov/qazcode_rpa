@@ -732,13 +732,13 @@ impl RpaApp {
                 }
             };
 
-            if let Some((scenario_id, mut parameters)) = scenario_id_and_params {
-                if let Some(called_scenario) = self
+            if let Some((scenario_id, mut parameters)) = scenario_id_and_params
+                && let Some(called_scenario) = self
                     .project
                     .scenarios
                     .iter_mut()
                     .find(|s| s.id == scenario_id)
-                {
+            {
                     let target_var_exists = called_scenario
                         .parameters
                         .iter()
@@ -768,15 +768,14 @@ impl RpaApp {
                         parameters.push(binding);
                     }
 
-                    if let Some(node) =
-                        self.project.scenarios[current_idx].get_node_mut(node_id.clone())
-                        && let rpa_core::Activity::CallScenario {
-                            parameters: node_params,
-                            ..
-                        } = &mut node.activity
-                    {
-                        *node_params = parameters;
-                    }
+                if let Some(node) =
+                    self.project.scenarios[current_idx].get_node_mut(node_id.clone())
+                    && let rpa_core::Activity::CallScenario {
+                        parameters: node_params,
+                        ..
+                    } = &mut node.activity
+                {
+                    *node_params = parameters;
                 }
             }
         }
