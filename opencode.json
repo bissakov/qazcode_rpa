@@ -4,6 +4,17 @@
   "model": "github-copilot/claude-haiku-4.5",
   "small_model": "github-copilot/claude-haiku-4.5",
   "autoupdate": true,
+  "agent": {
+    "build": {
+      "mode": "primary",
+      "model": "github-copilot/claude-haiku-4.5",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": false
+      }
+    }
+  },
   "lsp": false,
   "formatter": {
     "rustfmt": {
