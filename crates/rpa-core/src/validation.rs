@@ -845,6 +845,8 @@ fn get_activity_name(activity: &Activity) -> String {
         Activity::IfCondition { condition } => format!("If '{}'", condition),
         Activity::Loop { index, .. } => format!("Loop '{}'", index),
         Activity::While { condition } => format!("While '{}'", condition),
+        Activity::Continue => "Continue".to_string(),
+        Activity::Break => "Break".to_string(),
         Activity::CallScenario { .. } => "CallScenario".to_string(),
         Activity::RunPowershell { .. } => "RunPowershell".to_string(),
         Activity::Note { .. } => "Note".to_string(),
@@ -1006,6 +1008,8 @@ fn hash_activity(activity: &Activity, hasher: &mut DefaultHasher) {
             height.to_bits().hash(hasher);
         }
         Activity::TryCatch => 13_u8.hash(hasher),
+        Activity::Continue => 14_u8.hash(hasher),
+        Activity::Break => 15_u8.hash(hasher),
     }
 }
 

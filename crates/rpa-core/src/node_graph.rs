@@ -474,7 +474,10 @@ impl Node {
     }
 
     pub fn has_output_pin(&self) -> bool {
-        !matches!(self.activity, Activity::End { .. } | Activity::Note { .. })
+        !matches!(
+            self.activity,
+            Activity::End { .. } | Activity::Note { .. } | Activity::Continue | Activity::Break
+        )
     }
 
     pub fn get_output_pin_count(&self) -> usize {
@@ -737,6 +740,8 @@ pub enum Activity {
     While {
         condition: String,
     },
+    Continue,
+    Break,
     CallScenario {
         scenario_id: NanoId,
         #[serde(default)]

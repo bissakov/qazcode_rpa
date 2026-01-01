@@ -73,6 +73,8 @@ impl ActivityMetadata {
             Activity::IfCondition { .. } => &IF_CONDITION_METADATA,
             Activity::Loop { .. } => &LOOP_METADATA,
             Activity::While { .. } => &WHILE_METADATA,
+            Activity::Continue => &CONTINUE_METADATA,
+            Activity::Break => &BREAK_METADATA,
             Activity::CallScenario { .. } => &CALL_SCENARIO_METADATA,
             Activity::RunPowershell { .. } => &RUN_POWERSHELL_METADATA,
             Activity::Note { .. } => &NOTE_METADATA,
@@ -257,6 +259,8 @@ impl ActivityMetadata {
                             condition: String::new(),
                         },
                     ),
+                    (&CONTINUE_METADATA, Activity::Continue),
+                    (&BREAK_METADATA, Activity::Break),
                     (&TRY_CATCH_METADATA, Activity::TryCatch),
                 ],
                 false,
@@ -511,6 +515,40 @@ static WHILE_METADATA: ActivityMetadata = ActivityMetadata {
         label_key: "properties.condition",
         tooltip_key: Some("tooltips.condition_help"),
         property_type: PropertyType::TextSingleLine,
+    }],
+};
+
+static CONTINUE_METADATA: ActivityMetadata = ActivityMetadata {
+    name_key: "activity_names.continue",
+    button_key: "activity_buttons.continue",
+    category: ActivityCategory::ControlFlow,
+    color_category: ColorCategory::ControlFlow,
+    pin_config: PinConfig {
+        output_count: 0,
+        pin_labels: &[],
+    },
+    can_have_error_output: false,
+    properties: &[PropertyDef {
+        label_key: "activity_descriptions.continue",
+        tooltip_key: None,
+        property_type: PropertyType::Description,
+    }],
+};
+
+static BREAK_METADATA: ActivityMetadata = ActivityMetadata {
+    name_key: "activity_names.break",
+    button_key: "activity_buttons.break",
+    category: ActivityCategory::ControlFlow,
+    color_category: ColorCategory::ControlFlow,
+    pin_config: PinConfig {
+        output_count: 0,
+        pin_labels: &[],
+    },
+    can_have_error_output: false,
+    properties: &[PropertyDef {
+        label_key: "activity_descriptions.break",
+        tooltip_key: None,
+        property_type: PropertyType::Description,
     }],
 };
 

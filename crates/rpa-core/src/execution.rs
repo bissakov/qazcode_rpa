@@ -638,6 +638,26 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     _ => Err("Non-logical result of an expression".to_string()),
                 }
             }
+            Instruction::LoopContinue { check_target } => {
+                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                self.log.log(LogEntry {
+                    timestamp,
+                    level: LogLevel::Info,
+                    activity: "LOOP".to_string(),
+                    message: "Continue to next iteration".to_string(),
+                });
+                Ok(*check_target)
+            }
+            Instruction::LoopBreak { end_target } => {
+                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                self.log.log(LogEntry {
+                    timestamp,
+                    level: LogLevel::Info,
+                    activity: "LOOP".to_string(),
+                    message: "Breaking out of loop".to_string(),
+                });
+                Ok(*end_target)
+            }
             Instruction::PushErrorHandler { catch_target } => {
                 self.error_handlers.push(*catch_target);
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
