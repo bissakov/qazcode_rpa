@@ -64,15 +64,21 @@ pub enum Instruction {
         step: i64,
         check_target: usize,
     },
-    WhileCheck {
-        condition: Expr,
-        body_target: usize,
-        end_target: usize,
-    },
-    PushErrorHandler {
-        catch_target: usize,
-    },
-    PopErrorHandler,
+     WhileCheck {
+         condition: Expr,
+         body_target: usize,
+         end_target: usize,
+     },
+     LoopContinue {
+         check_target: usize,
+     },
+     LoopBreak {
+         end_target: usize,
+     },
+     PushErrorHandler {
+         catch_target: usize,
+     },
+     PopErrorHandler,
     CallScenario {
         scenario_id: NanoId,
         parameters: Vec<crate::node_graph::VariablesBinding>,
@@ -123,6 +129,12 @@ impl IrProgram {
     }
 }
 
+#[derive(Clone, Debug)]
+struct LoopContext {
+    break_instructions: Vec<usize>,
+    continue_instructions: Vec<usize>,
+}
+
 #[derive(Debug)]
 pub struct IrBuilder<'a> {
     scenario: &'a Scenario,
@@ -137,6 +149,7 @@ pub struct IrBuilder<'a> {
     call_graph: HashMap<NanoId, HashSet<NanoId>>,
     recursive_scenarios: HashSet<NanoId>,
     compilation_depth: usize,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl<'a> IrBuilder<'a> {
@@ -159,6 +172,7 @@ impl<'a> IrBuilder<'a> {
             call_graph,
             recursive_scenarios,
             compilation_depth: 0,
+            loop_stack: Vec::new(),
         }
     }
 
@@ -204,6 +218,23 @@ impl<'a> IrBuilder<'a> {
         }
 
         Ok(())
+    }
+
+    fn push_loop_context(&mut self) {
+        self.loop_stack.push(LoopContext { 
+            break_instructions: Vec::new(),
+            continue_instructions: Vec::new(),
+        });
+    }
+
+    fn pop_loop_context(&mut self) -> Option<LoopContext> {
+        self.loop_stack.pop()
+    }
+
+    fn current_loop(&mut self) -> Result<&mut LoopContext, String> {
+        self.loop_stack
+            .last_mut()
+            .ok_or_else(|| "Continue/Break statement found outside of loop".to_string())
     }
 
     fn first_next_node(&self, node_id: NanoId, branch: BranchType) -> Option<NanoId> {
@@ -337,6 +368,18 @@ impl<'a> IrBuilder<'a> {
             Activity::While { condition } => {
                 self.compile_while_node(node_id, condition)?;
             }
+            Activity::Continue => {
+                let continue_idx = self.program.add_instruction(Instruction::LoopContinue {
+                    check_target: 0,
+                });
+                self.current_loop()?.continue_instructions.push(continue_idx);
+            }
+            Activity::Break => {
+                let break_idx = self.program.add_instruction(Instruction::LoopBreak {
+                    end_target: 0,
+                });
+                self.current_loop()?.break_instructions.push(break_idx);
+            }
             Activity::TryCatch => {
                 self.compile_try_catch_node(node_id)?;
             }
@@ -455,9 +498,11 @@ impl<'a> IrBuilder<'a> {
         });
 
         let body_start = self.program.instructions.len();
+        self.push_loop_context();
         self.compile_from_node(body_node.unwrap())?;
+        let loop_ctx = self.pop_loop_context().unwrap();
 
-        self.program.add_instruction(Instruction::LoopNext {
+        let next_target_idx = self.program.add_instruction(Instruction::LoopNext {
             index: index_var.clone(),
             step,
             check_target: check_idx,
@@ -476,6 +521,22 @@ impl<'a> IrBuilder<'a> {
         {
             *body_target = body_start;
             *end_target = after_loop_start;
+         }
+
+        for break_idx in loop_ctx.break_instructions {
+            if let Instruction::LoopBreak { end_target, .. } = 
+                &mut self.program.instructions[break_idx] 
+            {
+                *end_target = after_loop_start;
+            }
+        }
+
+        for continue_idx in loop_ctx.continue_instructions {
+            if let Instruction::LoopContinue { check_target, .. } = 
+                &mut self.program.instructions[continue_idx] 
+            {
+                *check_target = next_target_idx;
+            }
         }
 
         Ok(())
@@ -509,9 +570,11 @@ impl<'a> IrBuilder<'a> {
 
         let body_start = self.program.instructions.len();
 
+        self.push_loop_context();
         if let Some(body_node) = body_nodes.first() {
             self.compile_from_node(body_node.clone())?;
         }
+        let loop_ctx = self.pop_loop_context().unwrap();
 
         self.program
             .add_instruction(Instruction::Jump { target: check_idx });
@@ -530,6 +593,22 @@ impl<'a> IrBuilder<'a> {
         {
             *body_target = body_start;
             *end_target = after_loop_start;
+        }
+
+        for break_idx in loop_ctx.break_instructions {
+            if let Instruction::LoopBreak { end_target, .. } = 
+                &mut self.program.instructions[break_idx] 
+            {
+                *end_target = after_loop_start;
+            }
+        }
+
+        for continue_idx in loop_ctx.continue_instructions {
+            if let Instruction::LoopContinue { check_target, .. } = 
+                &mut self.program.instructions[continue_idx] 
+            {
+                *check_target = check_idx;
+            }
         }
 
         Ok(())
@@ -766,17 +845,22 @@ impl<'a> IrBuilder<'a> {
                 step,
                 index,
             } => {
-                self.compile_loop_node_called(
-                    scenario,
-                    node_id,
-                    *start,
-                    *end,
-                    *step,
-                    index,
-                )?;
+                self.compile_loop_node_called(scenario, node_id, *start, *end, *step, index)?;
             }
             Activity::While { condition } => {
                 self.compile_while_node_called(scenario, node_id, condition)?;
+            }
+            Activity::Continue => {
+                let continue_idx = self.program.add_instruction(Instruction::LoopContinue {
+                    check_target: 0,
+                });
+                self.current_loop()?.continue_instructions.push(continue_idx);
+            }
+            Activity::Break => {
+                let break_idx = self.program.add_instruction(Instruction::LoopBreak {
+                    end_target: 0,
+                });
+                self.current_loop()?.break_instructions.push(break_idx);
             }
             _ => {
                 self.compile_default_next_called(scenario, node_id)?;
@@ -819,8 +903,10 @@ impl<'a> IrBuilder<'a> {
         step: i64,
         index: &str,
     ) -> Result<(), String> {
-        let body_node = self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
-        let after_node = self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
+        let body_node =
+            self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
+        let after_node =
+            self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
 
         if body_node.is_none() {
             if let Some(n) = after_node {
@@ -850,12 +936,14 @@ impl<'a> IrBuilder<'a> {
             step,
             body_target: 0,
             end_target: 0,
-        });
+         });
 
-        let body_start = self.program.instructions.len();
+         let body_start = self.program.instructions.len();
+        self.push_loop_context();
         self.compile_from_called_scenario(scenario, body_node.unwrap())?;
+        let loop_ctx = self.pop_loop_context().unwrap();
 
-        self.program.add_instruction(Instruction::LoopNext {
+        let next_target_idx = self.program.add_instruction(Instruction::LoopNext {
             index: index_var.clone(),
             step,
             check_target: check_idx,
@@ -876,6 +964,22 @@ impl<'a> IrBuilder<'a> {
             *end_target = after_loop_start;
         }
 
+        for break_idx in loop_ctx.break_instructions {
+            if let Instruction::LoopBreak { end_target, .. } = 
+                &mut self.program.instructions[break_idx] 
+            {
+                *end_target = after_loop_start;
+            }
+        }
+
+        for continue_idx in loop_ctx.continue_instructions {
+            if let Instruction::LoopContinue { check_target, .. } = 
+                &mut self.program.instructions[continue_idx] 
+            {
+                *check_target = next_target_idx;
+            }
+        }
+
         Ok(())
     }
 
@@ -885,8 +989,10 @@ impl<'a> IrBuilder<'a> {
         node_id: NanoId,
         condition: &str,
     ) -> Result<(), String> {
-        let body_node = self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
-        let after_loop = self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
+        let body_node =
+            self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
+        let after_loop =
+            self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
 
         if body_node.is_none() {
             if let Some(after_node) = after_loop {
@@ -910,8 +1016,10 @@ impl<'a> IrBuilder<'a> {
             end_target: 0,
         });
 
-        let body_start = self.program.instructions.len();
+          let body_start = self.program.instructions.len();
+        self.push_loop_context();
         self.compile_from_called_scenario(scenario, body_node.unwrap())?;
+        let loop_ctx = self.pop_loop_context().unwrap();
 
         self.program
             .add_instruction(Instruction::Jump { target: check_idx });
@@ -930,6 +1038,22 @@ impl<'a> IrBuilder<'a> {
         {
             *body_target = body_start;
             *end_target = after_loop_start;
+        }
+
+        for break_idx in loop_ctx.break_instructions {
+            if let Instruction::LoopBreak { end_target, .. } = 
+                &mut self.program.instructions[break_idx] 
+            {
+                *end_target = after_loop_start;
+            }
+        }
+
+        for continue_idx in loop_ctx.continue_instructions {
+            if let Instruction::LoopContinue { check_target, .. } = 
+                &mut self.program.instructions[continue_idx] 
+            {
+                *check_target = check_idx;
+            }
         }
 
         Ok(())
