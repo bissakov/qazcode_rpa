@@ -796,6 +796,7 @@ impl RpaApp {
                         );
                         self.current_file = None;
                         self.current_scenario_index = None;
+                        self.opened_scenarios.clear();
                         self.selected_nodes.clear();
                         self.init_current_scenario_view();
                         ui.close();
