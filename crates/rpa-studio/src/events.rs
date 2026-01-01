@@ -64,6 +64,7 @@ impl RpaApp {
                 for node_id in nodes_to_remove {
                     scenario.remove_node(node_id);
                 }
+                self.invalidate_current_scenario();
                 self.selected_nodes.clear();
                 handled = true;
             }
@@ -101,19 +102,20 @@ impl RpaApp {
             canvas::ContextMenuAction::Paste => {
                 self.paste_clipboard_nodes(mouse_world_pos);
             }
-            canvas::ContextMenuAction::Delete => {
-                if !self.selected_nodes.is_empty() {
-                    let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
-                    let scenario = self.get_current_scenario_mut();
-                    for node_id in nodes_to_remove {
-                        scenario.remove_node(node_id);
-                    }
-                    self.selected_nodes.clear();
-                    let view = self.get_current_scenario_view_mut();
-                    view.connection_renderer.clear_cache();
-                    self.undo_redo.add_undo(&self.project);
-                }
-            }
+             canvas::ContextMenuAction::Delete => {
+                 if !self.selected_nodes.is_empty() {
+                     let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
+                     let scenario = self.get_current_scenario_mut();
+                     for node_id in nodes_to_remove {
+                         scenario.remove_node(node_id);
+                     }
+                     self.invalidate_current_scenario();
+                     self.selected_nodes.clear();
+                     let view = self.get_current_scenario_view_mut();
+                     view.connection_renderer.clear_cache();
+                     self.undo_redo.add_undo(&self.project);
+                 }
+             }
             canvas::ContextMenuAction::SelectAll => {
                 let node_ids: Vec<_> = self
                     .get_current_scenario()
@@ -227,14 +229,15 @@ impl RpaApp {
             })
             .collect();
 
-        let scenario = self.get_current_scenario_mut();
-        scenario.nodes.extend(nodes_to_paste);
+         let scenario = self.get_current_scenario_mut();
+         scenario.nodes.extend(nodes_to_paste);
 
-        for (new_from, new_to, branch_type) in connections_to_add {
-            scenario.add_connection_with_branch(new_from, new_to, branch_type);
-        }
+         for (new_from, new_to, branch_type) in connections_to_add {
+             scenario.add_connection_with_branch(new_from, new_to, branch_type);
+         }
 
-        let view = self.get_current_scenario_view_mut();
-        view.connection_renderer.clear_cache();
-    }
+         self.invalidate_current_scenario();
+         let view = self.get_current_scenario_view_mut();
+         view.connection_renderer.clear_cache();
+     }
 }

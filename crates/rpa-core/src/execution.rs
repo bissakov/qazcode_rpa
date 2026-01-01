@@ -106,7 +106,10 @@ impl ExecutionContext {
         self.scope_stack.last_mut().map(|f| &mut f.variables)
     }
 
-    pub fn find_scenario_variables(&self, scenario_id: &crate::node_graph::NanoId) -> Option<&Variables> {
+    pub fn find_scenario_variables(
+        &self,
+        scenario_id: &crate::node_graph::NanoId,
+    ) -> Option<&Variables> {
         self.scope_stack
             .iter()
             .find(|f| f.scenario_id == scenario_id.as_str())
@@ -114,13 +117,11 @@ impl ExecutionContext {
     }
 
     pub fn resolve_variable(&self, name: &str) -> Option<VariableValue> {
-        // Check current scope first
         if let Some(frame) = self.scope_stack.last()
             && let Some(val) = frame.variables.get(name)
         {
             return Some(val.clone());
         }
-        // Fall back to global
         self.global_variables.get(name).cloned()
     }
 
@@ -318,20 +319,23 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     });
 
                     if let Some(frame) = self.call_stack.pop() {
-                        // Collect OUT/INOUT parameter values from child scope before popping
                         let mut param_values: Vec<(String, VariableValue)> = Vec::new();
                         for binding in &frame.var_bindings {
-                            if matches!(binding.direction, VariableDirection::Out | VariableDirection::InOut)
-                                && let Some(val) = self.context.read().unwrap().resolve_variable(&binding.target_var_name)
+                            if matches!(
+                                binding.direction,
+                                VariableDirection::Out | VariableDirection::InOut
+                            ) && let Some(val) = self
+                                .context
+                                .read()
+                                .unwrap()
+                                .resolve_variable(&binding.target_var_name)
                             {
                                 param_values.push((binding.source_var_name.clone(), val));
                             }
                         }
 
-                        // Pop the child scope
                         self.context.write().unwrap().scope_stack.pop();
 
-                        // Now set the collected values in parent scope
                         for (var_name, value) in param_values {
                             self.context.write().unwrap().set_variable(
                                 &var_name,
@@ -686,13 +690,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         message: format!("Entering scenario: {}", _scenario.name),
                     });
 
-                    // Create new scope with child's design-time variables
                     let mut child_scope = ScopeFrame {
                         scenario_id: scenario_id.as_str().to_string(),
                         variables: _scenario.variables.clone(),
                     };
 
-                    // Handle IN/INOUT bindings to the child scope
                     for binding in parameters {
                         match binding.direction {
                             VariableDirection::In | VariableDirection::InOut => {
@@ -724,17 +726,14 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         }
                     }
 
-                    // Push prepared scope
                     self.context.write().unwrap().scope_stack.push(child_scope);
 
-                    // Push call frame (simplified - no variable save needed)
                     self.call_stack.push(CallFrame {
                         scenario_id: self.current_scenario_id.clone(),
                         return_address: pc + 1,
                         var_bindings: parameters.clone(),
                     });
 
-                    // Update current scenario tracking
                     self.current_scenario_id = scenario_id.as_str().to_string();
 
                     if let Some(&start_index) = self.program.scenario_start_index.get(scenario_id) {

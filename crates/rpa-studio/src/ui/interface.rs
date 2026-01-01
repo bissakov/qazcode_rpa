@@ -45,9 +45,15 @@ impl RpaApp {
 
                 let view = self.scenario_views.entry(scenario.id.clone()).or_default();
 
-                let (canvas_result, dropped_activity) = ui
-                    .dnd_drop_zone::<Activity, _>(egui::Frame::default(), |ui| {
-                        canvas::render_node_graph(ui, scenario, &mut render_state, view)
+                let (canvas_result, dropped_activity) =
+                    ui.dnd_drop_zone::<Activity, _>(egui::Frame::default(), |ui| {
+                        canvas::render_node_graph(
+                            ui,
+                            scenario,
+                            &mut render_state,
+                            view,
+                            self.dialogs.debug.show_grid_debug,
+                        )
                     });
 
                 let (
@@ -80,6 +86,7 @@ impl RpaApp {
                             ((pointer_pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2();
                         self.get_current_scenario_mut()
                             .add_node((*activity).clone(), world_pos);
+                        self.invalidate_current_scenario();
                         self.undo_redo.add_undo(&self.project);
                     }
                 }
@@ -549,10 +556,10 @@ impl RpaApp {
             }
         }
 
-        if self.dialogs.debug.show_debug {
+        if self.dialogs.debug.show_inspection_ui {
             egui::Window::new("Debug")
                 .id(egui::Id::new("debug_window"))
-                .open(&mut self.dialogs.debug.show_debug)
+                .open(&mut self.dialogs.debug.show_inspection_ui)
                 .show(ctx, |ui| {
                     ctx.inspection_ui(ui);
                 });
@@ -726,21 +733,18 @@ impl RpaApp {
             };
 
             if let Some((scenario_id, mut parameters)) = scenario_id_and_params {
-                // Find the called scenario to add the parameter to it
                 if let Some(called_scenario) = self
                     .project
                     .scenarios
                     .iter_mut()
                     .find(|s| s.id == scenario_id)
                 {
-                    // Create or find the parameter in the called scenario
                     let target_var_exists = called_scenario
                         .parameters
                         .iter()
                         .any(|p| p.var_name == dialog_state.target_var_name);
 
                     if !target_var_exists {
-                        // Parameter doesn't exist, create it
                         called_scenario
                             .parameters
                             .push(rpa_core::node_graph::ScenarioParameter {
@@ -764,7 +768,6 @@ impl RpaApp {
                         parameters.push(binding);
                     }
 
-                    // Now update the node activity with the modified parameters
                     if let Some(node) =
                         self.project.scenarios[current_idx].get_node_mut(node_id.clone())
                         && let rpa_core::Activity::CallScenario {
@@ -822,8 +825,21 @@ impl RpaApp {
                         self.dialogs.settings.show = true;
                         ui.close();
                     }
-                    if ui.button("Debug").clicked() {
-                        self.dialogs.debug.show_debug = true;
+                });
+
+                ui.menu_button(t!("menu.debug").as_ref(), |ui| {
+                    if ui.button(t!("menu.inspection_ui").as_ref()).clicked() {
+                        self.dialogs.debug.show_inspection_ui = true;
+                        ui.close();
+                    }
+
+                    if ui
+                        .toggle_value(
+                            &mut self.dialogs.debug.show_grid_debug,
+                            t!("menu.grid_debug").as_ref(),
+                        )
+                        .clicked()
+                    {
                         ui.close();
                     }
                 });
@@ -898,7 +914,7 @@ impl RpaApp {
                     ui.push_id("main_tab", |ui| {
                         let tab = scenario_tab(
                             ui,
-                            ui.id(), // unique because of push_id
+                            ui.id(),
                             &self.project.main_scenario.name,
                             self.current_scenario_index.is_none(),
                         );
@@ -917,7 +933,7 @@ impl RpaApp {
 
                             let tab = scenario_tab(
                                 ui,
-                                ui.id(), // scoped ID
+                                ui.id(),
                                 &scenario.name,
                                 self.current_scenario_index == Some(tab_idx),
                             );
@@ -954,7 +970,8 @@ impl RpaApp {
                 self.project.scenarios.push(Scenario::new(&name));
                 self.undo_redo.add_undo(&self.project);
 
-                self.open_scenario(new_tab_idx)
+                self.open_scenario(new_tab_idx);
+                self.invalidate_current_scenario();
             }
         });
     }
@@ -1106,6 +1123,7 @@ impl RpaApp {
                     let new_node_pos = world_pos + egui::vec2(offset, offset);
                     self.get_current_scenario_mut()
                         .add_node(activity, new_node_pos);
+                    self.invalidate_current_scenario();
                 }
             });
     }
@@ -1154,7 +1172,6 @@ impl RpaApp {
                                     self.property_edit_debounce = 0.0;
                                 }
 
-                                // Handle parameter binding actions
                                 match param_action {
                                     canvas::ParameterBindingAction::Add => {
                                         if let Activity::CallScenario { scenario_id, .. } =
