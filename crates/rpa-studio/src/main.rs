@@ -134,7 +134,7 @@ impl RpaApp {
                     timestamp: get_timestamp(start_time),
                     level: LogLevel::Error,
                     activity: "VALIDATION".to_string(),
-                    message: format!("{}", error.message),
+                    message: error.message,
                 });
             }
 
@@ -143,7 +143,7 @@ impl RpaApp {
                     timestamp: get_timestamp(start_time),
                     level: LogLevel::Warning,
                     activity: "VALIDATION".to_string(),
-                    message: format!("{}", warning.message),
+                    message: warning.message,
                 });
             }
 

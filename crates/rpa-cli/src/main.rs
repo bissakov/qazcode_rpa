@@ -1,8 +1,8 @@
+use arc_script::Value;
 use clap::Parser;
 use rpa_core::execution::{ExecutionContext, IrExecutor, LogOutput, ScopeFrame};
 use rpa_core::{
     IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, StopControl,
-    VariableValue,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -149,11 +149,11 @@ fn main() {
 
     if verbose {
         let ctx = context.read().unwrap();
-        let var_list: Vec<(String, VariableValue)> = ctx
+        let var_list: Vec<(String, Value)> = ctx
             .global_variables
             .iter()
             .filter_map(|(name, value, _)| {
-                if !matches!(value, VariableValue::Undefined) {
+                if !matches!(value, Value::Undefined) {
                     Some((name.to_string(), value.clone()))
                 } else {
                     None

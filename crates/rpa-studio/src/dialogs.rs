@@ -1,7 +1,5 @@
-use rpa_core::{
-    NanoId,
-    node_graph::{VariableDirection, VariableType},
-};
+use arc_script::VariableType;
+use rpa_core::{NanoId, node_graph::VariableDirection};
 
 use crate::AppSettings;
 

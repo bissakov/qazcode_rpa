@@ -1,0 +1,10 @@
+[package]
+name = "arc_script"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+
+[lints]
+workspace = true
