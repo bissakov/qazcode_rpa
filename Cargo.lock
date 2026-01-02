@@ -301,6 +301,9 @@ dependencies = [
 [[package]]
 name = "arc_script"
 version = "0.7.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "arg_enum_proc_macro"
@@ -3758,6 +3761,7 @@ checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
 name = "rpa-cli"
 version = "0.7.0"
 dependencies = [
+ "arc_script",
  "clap",
  "dhat",
  "egui-wgpu",
@@ -3771,6 +3775,7 @@ dependencies = [
 name = "rpa-core"
 version = "0.7.0"
 dependencies = [
+ "arc_script",
  "egui",
  "indexmap",
  "nanoid",
@@ -3782,6 +3787,7 @@ dependencies = [
 name = "rpa-studio"
 version = "0.7.0"
 dependencies = [
+ "arc_script",
  "eframe",
  "egui",
  "egui_code_editor",

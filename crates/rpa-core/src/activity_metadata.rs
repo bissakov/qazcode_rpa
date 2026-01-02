@@ -1,6 +1,6 @@
 use crate::Activity;
 use crate::LogLevel;
-use crate::VariableType;
+use arc_script::VariableType;
 use crate::node_graph::NanoId;
 
 #[non_exhaustive]

@@ -7,7 +7,8 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    fn new(input: &str, variable_sigil: char) -> Self {
+    #[must_use]
+    pub fn new(input: &str, variable_sigil: char) -> Self {
         Self {
             input: input.chars().collect(),
             pos: 0,
@@ -23,7 +24,7 @@ impl Lexer {
         }
     }
 
-    fn advance(&mut self) {
+    const fn advance(&mut self) {
         self.pos += 1;
     }
 
@@ -105,6 +106,10 @@ impl Lexer {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if tokenization fails.
+    #[allow(clippy::too_many_lines)]
     fn next_token(&mut self) -> Result<Option<Token>, String> {
         self.skip_whitespace();
 
@@ -227,7 +232,10 @@ impl Lexer {
         Ok(Some(token))
     }
 
-    fn tokenize(&mut self) -> Result<Vec<Token>, String> {
+    /// # Errors
+    ///
+    /// Returns an error if tokenization fails.
+    pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
         let mut tokens = Vec::new();
         while let Some(token) = self.next_token()? {
             tokens.push(token);

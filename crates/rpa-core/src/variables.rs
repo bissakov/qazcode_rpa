@@ -1,4 +1,4 @@
-use crate::VariableValue;
+use arc_script::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -10,12 +10,12 @@ pub enum VariableScope {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Variable {
-    value: VariableValue,
+    value: Value,
     scope: VariableScope,
 }
 
 impl Variable {
-    pub fn new(value: VariableValue, scope: VariableScope) -> Self {
+    pub fn new(value: Value, scope: VariableScope) -> Self {
         Self { value, scope }
     }
 }
@@ -39,22 +39,20 @@ impl Variables {
     }
 
     pub fn create_variable(&mut self, name: &str, scope: VariableScope) {
-        self.values.insert(
-            name.to_owned(),
-            Variable::new(VariableValue::Undefined, scope),
-        );
+        self.values
+            .insert(name.to_owned(), Variable::new(Value::Undefined, scope));
     }
 
     pub fn get_scope(&self, name: &str) -> Option<&VariableScope> {
         self.values.get(name).map(|var| &var.scope)
     }
 
-    pub fn set(&mut self, name: &str, value: VariableValue, scope: VariableScope) {
+    pub fn set(&mut self, name: &str, value: Value, scope: VariableScope) {
         self.values
             .insert(name.to_owned(), Variable::new(value, scope));
     }
 
-    pub fn get(&self, name: &str) -> Option<&VariableValue> {
+    pub fn get(&self, name: &str) -> Option<&Value> {
         self.values.get(name).map(|var| &var.value)
     }
 
@@ -74,7 +72,7 @@ impl Variables {
         self.values.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &VariableValue, &VariableScope)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value, &VariableScope)> {
         self.values
             .iter()
             .map(|(name, var)| (name.as_str(), &var.value, &var.scope))

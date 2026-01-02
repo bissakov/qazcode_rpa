@@ -1,9 +1,9 @@
 use crate::constants::UiConstants;
-use crate::evaluator;
 use crate::ir::{Instruction, IrProgram};
-use crate::node_graph::{LogEntry, LogLevel, Project, VariableDirection, VariableValue};
+use crate::node_graph::{LogEntry, LogLevel, Project, VariableDirection};
 use crate::stop_control::StopControl;
 use crate::variables::{VariableScope, Variables};
+use arc_script::{Value, eval_expr, parse_expr};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
@@ -116,7 +116,7 @@ impl ExecutionContext {
             .map(|f| &f.variables)
     }
 
-    pub fn resolve_variable(&self, name: &str) -> Option<VariableValue> {
+    pub fn resolve_variable(&self, name: &str) -> Option<Value> {
         if let Some(frame) = self.scope_stack.last()
             && let Some(val) = frame.variables.get(name)
         {
@@ -125,7 +125,7 @@ impl ExecutionContext {
         self.global_variables.get(name).cloned()
     }
 
-    pub fn set_variable(&mut self, name: &str, value: VariableValue, scope: VariableScope) {
+    pub fn set_variable(&mut self, name: &str, value: Value, scope: VariableScope) {
         match scope {
             VariableScope::Global => {
                 self.global_variables.set(name, value, scope);
@@ -185,65 +185,6 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         }
 
         Ok(())
-    }
-
-    fn resolve_variables_runtime(&mut self, template: &str) -> String {
-        let mut out = String::with_capacity(template.len());
-        let mut chars = template.char_indices().peekable();
-
-        while let Some((i, c)) = chars.next() {
-            if c == UiConstants::VARIABLE_PLACEHOLDER_OPEN {
-                let start = i + c.len_utf8();
-                let mut end = None;
-                for (j, c2) in chars.by_ref() {
-                    if c2 == UiConstants::VARIABLE_PLACEHOLDER_CLOSE {
-                        end = Some(j);
-                        break;
-                    }
-                }
-
-                if let Some(end) = end {
-                    let var_name = &template[start..end];
-                    let var_value = self.get_variable_value(var_name);
-                    if let Some(s) = var_value.as_str() {
-                        out.push_str(s);
-                    } else if !matches!(var_value, VariableValue::Undefined) {
-                        use std::fmt::Write;
-                        write!(out, "{}", var_value).unwrap();
-                    }
-                } else {
-                    out.push(c);
-                    break;
-                }
-            } else {
-                out.push(c);
-            }
-        }
-
-        out
-    }
-
-    fn get_variable_value(&mut self, name: &str) -> VariableValue {
-        let ctx = self.context.read().unwrap();
-        let scenario = ctx.get_scenario_variables().and_then(|v| v.get(name));
-        let global = ctx.global_variables.get(name);
-
-        match (scenario, global) {
-            (Some(val), Some(_)) => {
-                self.log.log(LogEntry {
-                    timestamp: get_timestamp(ctx.start_time),
-                    level: LogLevel::Warning,
-                    activity: "LOG".to_string(),
-                    message: format!(
-                        "Variable `{name}` exists both in local and global scopes; using local value"
-                    ),
-                });
-                val.clone()
-            }
-            (Some(val), None) => val.clone(),
-            (None, Some(val)) => val.clone(),
-            (None, None) => VariableValue::Undefined,
-        }
     }
 
     fn get_combined_variables(&self) -> Variables {
@@ -319,7 +260,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     });
 
                     if let Some(frame) = self.call_stack.pop() {
-                        let mut param_values: Vec<(String, VariableValue)> = Vec::new();
+                        let mut param_values: Vec<(String, Value)> = Vec::new();
                         for binding in &frame.var_bindings {
                             if matches!(
                                 binding.direction,
@@ -362,14 +303,25 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             }
             Instruction::Log { level, message } => {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
-                let resolved_message = self.resolve_variables_runtime(message);
-                self.log.log(LogEntry {
-                    timestamp,
-                    level: level.clone(),
-                    activity: "LOG".to_string(),
-                    message: resolved_message,
-                });
-                Ok(pc + 1)
+                let combined_vars = self.get_combined_variables();
+
+                match parse_expr(message) {
+                    Ok(expr) => {
+                        match eval_expr(&expr, &combined_vars) {
+                            Ok(value) => {
+                                self.log.log(LogEntry {
+                                    timestamp,
+                                    level: level.clone(),
+                                    activity: "LOG".to_string(),
+                                    message: value.to_string(),
+                                });
+                                Ok(pc + 1)
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
             }
             Instruction::Delay { milliseconds } => {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
@@ -424,7 +376,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
 
                 let combined_vars = self.get_combined_variables();
-                let result = match evaluator::eval_expr(expr, &combined_vars) {
+                let result = match eval_expr(expr, &combined_vars) {
                     Ok(value) => value,
                     Err(err) => {
                         self.log.log(LogEntry {
@@ -451,29 +403,28 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
 
                 let combined_vars = self.get_combined_variables();
-                let (message, next_pc, level) =
-                    match evaluator::eval_expr(condition, &combined_vars) {
-                        Ok(VariableValue::Boolean(true)) => (
-                            "Condition evaluated to: true".to_string(),
-                            *target,
-                            LogLevel::Info,
-                        ),
-                        Ok(VariableValue::Boolean(false)) => (
-                            "Condition evaluated to: false".to_string(),
-                            pc + 1,
-                            LogLevel::Info,
-                        ),
-                        Ok(other) => (
-                            format!("Condition evaluated to non-boolean value: {:?}", other),
-                            pc + 1,
-                            LogLevel::Error,
-                        ),
-                        Err(err) => (
-                            format!("Condition failed with error: {err}"),
-                            pc + 1,
-                            LogLevel::Error,
-                        ),
-                    };
+                let (message, next_pc, level) = match eval_expr(condition, &combined_vars) {
+                    Ok(Value::Boolean(true)) => (
+                        "Condition evaluated to: true".to_string(),
+                        *target,
+                        LogLevel::Info,
+                    ),
+                    Ok(Value::Boolean(false)) => (
+                        "Condition evaluated to: false".to_string(),
+                        pc + 1,
+                        LogLevel::Info,
+                    ),
+                    Ok(other) => (
+                        format!("Condition evaluated to non-boolean value: {:?}", other),
+                        pc + 1,
+                        LogLevel::Error,
+                    ),
+                    Err(err) => (
+                        format!("Condition failed with error: {err}"),
+                        pc + 1,
+                        LogLevel::Error,
+                    ),
+                };
 
                 self.log.log(LogEntry {
                     timestamp,
@@ -488,29 +439,28 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
 
                 let combined_vars = self.get_combined_variables();
-                let (message, next_pc, level) =
-                    match evaluator::eval_expr(condition, &combined_vars) {
-                        Ok(VariableValue::Boolean(true)) => (
-                            "Condition evaluated to: true".to_string(),
-                            pc + 1,
-                            LogLevel::Info,
-                        ),
-                        Ok(VariableValue::Boolean(false)) => (
-                            "Condition evaluated to: false".to_string(),
-                            *target,
-                            LogLevel::Info,
-                        ),
-                        Ok(other) => (
-                            format!("Condition evaluated to non-boolean value: {:?}", other),
-                            pc + 1,
-                            LogLevel::Error,
-                        ),
-                        Err(err) => (
-                            format!("Condition failed with error: {err}"),
-                            *target,
-                            LogLevel::Error,
-                        ),
-                    };
+                let (message, next_pc, level) = match eval_expr(condition, &combined_vars) {
+                    Ok(Value::Boolean(true)) => (
+                        "Condition evaluated to: true".to_string(),
+                        pc + 1,
+                        LogLevel::Info,
+                    ),
+                    Ok(Value::Boolean(false)) => (
+                        "Condition evaluated to: false".to_string(),
+                        *target,
+                        LogLevel::Info,
+                    ),
+                    Ok(other) => (
+                        format!("Condition evaluated to non-boolean value: {:?}", other),
+                        pc + 1,
+                        LogLevel::Error,
+                    ),
+                    Err(err) => (
+                        format!("Condition failed with error: {err}"),
+                        *target,
+                        LogLevel::Error,
+                    ),
+                };
 
                 self.log.log(LogEntry {
                     timestamp,
@@ -524,7 +474,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             Instruction::LoopInit { index, start } => {
                 self.context.write().unwrap().set_variable(
                     index,
-                    VariableValue::Number(*start as f64),
+                    Value::Number(*start as f64),
                     VariableScope::Scenario,
                 );
 
@@ -565,7 +515,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let current = {
                     let ctx = self.context.read().unwrap();
                     ctx.resolve_variable(index)
-                        .and_then(|v: VariableValue| v.as_number())
+                        .and_then(|v: Value| v.as_number())
                         .map_or(*end, |n| n as i64)
                 };
 
@@ -589,7 +539,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let current = {
                     let ctx = self.context.read().unwrap();
                     ctx.resolve_variable(index)
-                        .and_then(|v: VariableValue| v.as_number())
+                        .and_then(|v: Value| v.as_number())
                         .unwrap() as i64
                 };
 
@@ -597,7 +547,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 self.context.write().unwrap().set_variable(
                     index,
-                    VariableValue::Number(next as f64),
+                    Value::Number(next as f64),
                     VariableScope::Scenario,
                 );
 
@@ -610,8 +560,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             } => {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 let combined_vars = self.get_combined_variables();
-                match evaluator::eval_expr(condition, &combined_vars) {
-                    Ok(VariableValue::Boolean(true)) => {
+                match eval_expr(condition, &combined_vars) {
+                    Ok(Value::Boolean(true)) => {
                         let iter_count = self.iteration_counts.entry(pc).or_insert(0);
                         *iter_count += 1;
 
@@ -623,7 +573,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         });
                         Ok(*body_target)
                     }
-                    Ok(VariableValue::Boolean(false)) => {
+                    Ok(Value::Boolean(false)) => {
                         let iter_count = self.iteration_counts.get(&pc).copied().unwrap_or(0);
                         self.log.log(LogEntry {
                             timestamp,
@@ -739,7 +689,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             VariableDirection::Out => {
                                 child_scope.variables.set(
                                     &binding.target_var_name,
-                                    VariableValue::Undefined,
+                                    Value::Undefined,
                                     VariableScope::Scenario,
                                 );
                             }
@@ -797,7 +747,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
         self.context.write().unwrap().global_variables.set(
             "last_error",
-            VariableValue::String(error.clone()),
+            Value::String(error.clone()),
             VariableScope::Global,
         );
 

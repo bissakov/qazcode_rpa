@@ -1,11 +1,11 @@
 use crate::UiConstants;
-use crate::evaluator::{Expr, parse_expr};
 use crate::variables::VariableScope;
 use crate::{
-    LogLevel, VariableValue,
+    LogLevel,
     node_graph::{Activity, BranchType, NanoId, Project, Scenario},
     variables::Variables,
 };
+use arc_script::{Expr, Value, parse_expr};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -25,7 +25,7 @@ pub enum Instruction {
     },
     SetVar {
         var: String,
-        value: VariableValue,
+        value: Value,
         scope: VariableScope,
     },
     Evaluate {
@@ -64,21 +64,21 @@ pub enum Instruction {
         step: i64,
         check_target: usize,
     },
-     WhileCheck {
-         condition: Expr,
-         body_target: usize,
-         end_target: usize,
-     },
-     LoopContinue {
-         check_target: usize,
-     },
-     LoopBreak {
-         end_target: usize,
-     },
-     PushErrorHandler {
-         catch_target: usize,
-     },
-     PopErrorHandler,
+    WhileCheck {
+        condition: Expr,
+        body_target: usize,
+        end_target: usize,
+    },
+    LoopContinue {
+        check_target: usize,
+    },
+    LoopBreak {
+        end_target: usize,
+    },
+    PushErrorHandler {
+        catch_target: usize,
+    },
+    PopErrorHandler,
     CallScenario {
         scenario_id: NanoId,
         parameters: Vec<crate::node_graph::VariablesBinding>,
@@ -221,7 +221,7 @@ impl<'a> IrBuilder<'a> {
     }
 
     fn push_loop_context(&mut self) {
-        self.loop_stack.push(LoopContext { 
+        self.loop_stack.push(LoopContext {
             break_instructions: Vec::new(),
             continue_instructions: Vec::new(),
         });
@@ -292,11 +292,8 @@ impl<'a> IrBuilder<'a> {
 
         match &node.activity {
             Activity::Start { scenario_id } => {
-                self.global_variables.set(
-                    "last_error",
-                    VariableValue::Undefined,
-                    VariableScope::Global,
-                );
+                self.global_variables
+                    .set("last_error", Value::Undefined, VariableScope::Global);
                 self.program.add_instruction(Instruction::Start {
                     scenario_id: scenario_id.clone(),
                 });
@@ -326,9 +323,9 @@ impl<'a> IrBuilder<'a> {
                 var_type,
                 is_global,
             } => {
-                let var_value = match VariableValue::from_string(value, var_type) {
+                let var_value = match Value::from_string(value, var_type) {
                     Ok(v) => v,
-                    Err(_) => VariableValue::String(value.to_string()),
+                    Err(_) => Value::String(value.to_string()),
                 };
 
                 let scope = if *is_global {
@@ -344,7 +341,7 @@ impl<'a> IrBuilder<'a> {
                 self.compile_default_next(node_id)?;
             }
             Activity::Evaluate { expression } => {
-                let expr = parse_expr(expression, self.global_variables).map_err(|e| {
+                let expr = parse_expr(expression).map_err(|e| {
                     format!(
                         "Error in node {} while parsing expression '{}': {}",
                         node_id, expression, e
@@ -369,15 +366,17 @@ impl<'a> IrBuilder<'a> {
                 self.compile_while_node(node_id, condition)?;
             }
             Activity::Continue => {
-                let continue_idx = self.program.add_instruction(Instruction::LoopContinue {
-                    check_target: 0,
-                });
-                self.current_loop()?.continue_instructions.push(continue_idx);
+                let continue_idx = self
+                    .program
+                    .add_instruction(Instruction::LoopContinue { check_target: 0 });
+                self.current_loop()?
+                    .continue_instructions
+                    .push(continue_idx);
             }
             Activity::Break => {
-                let break_idx = self.program.add_instruction(Instruction::LoopBreak {
-                    end_target: 0,
-                });
+                let break_idx = self
+                    .program
+                    .add_instruction(Instruction::LoopBreak { end_target: 0 });
                 self.current_loop()?.break_instructions.push(break_idx);
             }
             Activity::TryCatch => {
@@ -409,7 +408,7 @@ impl<'a> IrBuilder<'a> {
         let true_target = self.first_next_node(node_id.clone(), BranchType::TrueBranch);
         let false_target = self.first_next_node(node_id.clone(), BranchType::FalseBranch);
 
-        let expr = parse_expr(condition, self.global_variables).map_err(|e| {
+        let expr = parse_expr(condition).map_err(|e| {
             format!(
                 "Error in node {} while parsing expression '{}': {}",
                 node_id, condition, e
@@ -521,19 +520,19 @@ impl<'a> IrBuilder<'a> {
         {
             *body_target = body_start;
             *end_target = after_loop_start;
-         }
+        }
 
         for break_idx in loop_ctx.break_instructions {
-            if let Instruction::LoopBreak { end_target, .. } = 
-                &mut self.program.instructions[break_idx] 
+            if let Instruction::LoopBreak { end_target, .. } =
+                &mut self.program.instructions[break_idx]
             {
                 *end_target = after_loop_start;
             }
         }
 
         for continue_idx in loop_ctx.continue_instructions {
-            if let Instruction::LoopContinue { check_target, .. } = 
-                &mut self.program.instructions[continue_idx] 
+            if let Instruction::LoopContinue { check_target, .. } =
+                &mut self.program.instructions[continue_idx]
             {
                 *check_target = next_target_idx;
             }
@@ -555,7 +554,7 @@ impl<'a> IrBuilder<'a> {
 
         let check_idx = self.program.instructions.len();
 
-        let expr = parse_expr(condition, self.global_variables).map_err(|e| {
+        let expr = parse_expr(condition).map_err(|e| {
             format!(
                 "Error in node {} while parsing expression '{}': {}",
                 node_id, condition, e
@@ -596,16 +595,16 @@ impl<'a> IrBuilder<'a> {
         }
 
         for break_idx in loop_ctx.break_instructions {
-            if let Instruction::LoopBreak { end_target, .. } = 
-                &mut self.program.instructions[break_idx] 
+            if let Instruction::LoopBreak { end_target, .. } =
+                &mut self.program.instructions[break_idx]
             {
                 *end_target = after_loop_start;
             }
         }
 
         for continue_idx in loop_ctx.continue_instructions {
-            if let Instruction::LoopContinue { check_target, .. } = 
-                &mut self.program.instructions[continue_idx] 
+            if let Instruction::LoopContinue { check_target, .. } =
+                &mut self.program.instructions[continue_idx]
             {
                 *check_target = check_idx;
             }
@@ -762,9 +761,9 @@ impl<'a> IrBuilder<'a> {
                 var_type,
                 is_global,
             } => {
-                let var_value = match VariableValue::from_string(value, var_type) {
+                let var_value = match Value::from_string(value, var_type) {
                     Ok(v) => v,
-                    Err(_) => VariableValue::String(value.to_string()),
+                    Err(_) => Value::String(value.to_string()),
                 };
 
                 let (var_id, scope) = if *is_global {
@@ -780,7 +779,7 @@ impl<'a> IrBuilder<'a> {
                 self.compile_default_next_called(scenario, node_id)?;
             }
             Activity::Evaluate { expression } => {
-                let expr = parse_expr(expression, self.global_variables)?;
+                let expr = parse_expr(expression)?;
                 self.program.add_instruction(Instruction::Evaluate { expr });
                 self.compile_default_next_called(scenario, node_id)?;
             }
@@ -790,7 +789,7 @@ impl<'a> IrBuilder<'a> {
                 let false_next =
                     self.first_next_node_called(scenario, node_id.clone(), BranchType::FalseBranch);
 
-                let expr = parse_expr(condition, self.global_variables)?;
+                let expr = parse_expr(condition)?;
 
                 let jump_if_not_idx = self.program.add_instruction(Instruction::JumpIfNot {
                     condition: expr,
@@ -851,15 +850,17 @@ impl<'a> IrBuilder<'a> {
                 self.compile_while_node_called(scenario, node_id, condition)?;
             }
             Activity::Continue => {
-                let continue_idx = self.program.add_instruction(Instruction::LoopContinue {
-                    check_target: 0,
-                });
-                self.current_loop()?.continue_instructions.push(continue_idx);
+                let continue_idx = self
+                    .program
+                    .add_instruction(Instruction::LoopContinue { check_target: 0 });
+                self.current_loop()?
+                    .continue_instructions
+                    .push(continue_idx);
             }
             Activity::Break => {
-                let break_idx = self.program.add_instruction(Instruction::LoopBreak {
-                    end_target: 0,
-                });
+                let break_idx = self
+                    .program
+                    .add_instruction(Instruction::LoopBreak { end_target: 0 });
                 self.current_loop()?.break_instructions.push(break_idx);
             }
             _ => {
@@ -936,9 +937,9 @@ impl<'a> IrBuilder<'a> {
             step,
             body_target: 0,
             end_target: 0,
-         });
+        });
 
-         let body_start = self.program.instructions.len();
+        let body_start = self.program.instructions.len();
         self.push_loop_context();
         self.compile_from_called_scenario(scenario, body_node.unwrap())?;
         let loop_ctx = self.pop_loop_context().unwrap();
@@ -965,16 +966,16 @@ impl<'a> IrBuilder<'a> {
         }
 
         for break_idx in loop_ctx.break_instructions {
-            if let Instruction::LoopBreak { end_target, .. } = 
-                &mut self.program.instructions[break_idx] 
+            if let Instruction::LoopBreak { end_target, .. } =
+                &mut self.program.instructions[break_idx]
             {
                 *end_target = after_loop_start;
             }
         }
 
         for continue_idx in loop_ctx.continue_instructions {
-            if let Instruction::LoopContinue { check_target, .. } = 
-                &mut self.program.instructions[continue_idx] 
+            if let Instruction::LoopContinue { check_target, .. } =
+                &mut self.program.instructions[continue_idx]
             {
                 *check_target = next_target_idx;
             }
@@ -1003,7 +1004,7 @@ impl<'a> IrBuilder<'a> {
 
         let check_idx = self.program.instructions.len();
 
-        let expr = parse_expr(condition, self.global_variables).map_err(|e| {
+        let expr = parse_expr(condition).map_err(|e| {
             format!(
                 "Error in node {} while parsing expression '{}': {}",
                 node_id, condition, e
@@ -1016,7 +1017,7 @@ impl<'a> IrBuilder<'a> {
             end_target: 0,
         });
 
-          let body_start = self.program.instructions.len();
+        let body_start = self.program.instructions.len();
         self.push_loop_context();
         self.compile_from_called_scenario(scenario, body_node.unwrap())?;
         let loop_ctx = self.pop_loop_context().unwrap();
@@ -1041,16 +1042,16 @@ impl<'a> IrBuilder<'a> {
         }
 
         for break_idx in loop_ctx.break_instructions {
-            if let Instruction::LoopBreak { end_target, .. } = 
-                &mut self.program.instructions[break_idx] 
+            if let Instruction::LoopBreak { end_target, .. } =
+                &mut self.program.instructions[break_idx]
             {
                 *end_target = after_loop_start;
             }
         }
 
         for continue_idx in loop_ctx.continue_instructions {
-            if let Instruction::LoopContinue { check_target, .. } = 
-                &mut self.program.instructions[continue_idx] 
+            if let Instruction::LoopContinue { check_target, .. } =
+                &mut self.program.instructions[continue_idx]
             {
                 *check_target = check_idx;
             }

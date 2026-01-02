@@ -1,12 +1,13 @@
 use crate::loglevel_ext::LogLevelExt;
 use crate::state::RpaApp;
 use crate::ui::canvas;
+use arc_script::{Value, VariableType};
 use eframe::egui;
 use egui::{DragValue, Slider};
 use egui_extras::{Column, TableBuilder};
 use rpa_core::{
-    Activity, LogEntry, LogLevel, Project, Scenario, UiConstants, VariableType, VariableValue,
-    Variables, node_graph::VariableDirection, variables::VariableScope,
+    Activity, LogEntry, LogLevel, Project, Scenario, UiConstants, Variables,
+    node_graph::VariableDirection, variables::VariableScope,
 };
 use rust_i18n::t;
 
@@ -494,7 +495,7 @@ impl RpaApp {
                                 && value_response.lost_focus()
                                 && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                         {
-                            match VariableValue::from_string(
+                            match Value::from_string(
                                 &self.dialogs.add_variable.value,
                                 &self.dialogs.add_variable.var_type,
                             ) {
@@ -743,34 +744,34 @@ impl RpaApp {
                     .iter_mut()
                     .find(|s| s.id == scenario_id)
             {
-                    let target_var_exists = called_scenario
+                let target_var_exists = called_scenario
+                    .parameters
+                    .iter()
+                    .any(|p| p.var_name == dialog_state.target_var_name);
+
+                if !target_var_exists {
+                    called_scenario
                         .parameters
-                        .iter()
-                        .any(|p| p.var_name == dialog_state.target_var_name);
+                        .push(rpa_core::node_graph::ScenarioParameter {
+                            var_name: dialog_state.target_var_name.clone(),
+                            direction: dialog_state.direction,
+                        });
+                }
 
-                    if !target_var_exists {
-                        called_scenario
-                            .parameters
-                            .push(rpa_core::node_graph::ScenarioParameter {
-                                var_name: dialog_state.target_var_name.clone(),
-                                direction: dialog_state.direction,
-                            });
+                let binding = rpa_core::node_graph::VariablesBinding {
+                    target_var_name: dialog_state.target_var_name.clone(),
+                    source_var_name: dialog_state.source_var_name.clone(),
+                    direction: dialog_state.direction,
+                    source_scope: None,
+                };
+
+                if let Some(idx) = dialog_state.editing_index {
+                    if idx < parameters.len() {
+                        parameters[idx] = binding;
                     }
-
-                    let binding = rpa_core::node_graph::VariablesBinding {
-                        target_var_name: dialog_state.target_var_name.clone(),
-                        source_var_name: dialog_state.source_var_name.clone(),
-                        direction: dialog_state.direction,
-                        source_scope: None,
-                    };
-
-                    if let Some(idx) = dialog_state.editing_index {
-                        if idx < parameters.len() {
-                            parameters[idx] = binding;
-                        }
-                    } else {
-                        parameters.push(binding);
-                    }
+                } else {
+                    parameters.push(binding);
+                }
 
                 if let Some(node) =
                     self.project.scenarios[current_idx].get_node_mut(node_id.clone())

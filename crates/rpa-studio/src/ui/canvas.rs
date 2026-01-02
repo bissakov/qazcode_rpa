@@ -1,12 +1,13 @@
 use crate::ui::connection_renderer::{ConnectionPath, ConnectionRenderer};
 use crate::{activity_ext::ActivityExt, colors::ColorPalette, state::ScenarioViewState};
+use arc_script::VariableType;
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::{
     Activity, ActivityMetadata, BranchType, LogLevel, NanoId, Node, PropertyType, Scenario,
-    UiConstants, VariableType, snap_to_grid,
+    UiConstants, snap_to_grid,
 };
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
@@ -1538,7 +1539,7 @@ pub fn render_node_properties(
                         egui::ComboBox::from_id_salt("var_type_combo")
                             .selected_text(var_type.as_str())
                             .show_ui(ui, |ui| {
-                                for vt in rpa_core::VariableType::all() {
+                                for vt in VariableType::all() {
                                     if ui.selectable_label(*var_type == vt, vt.as_str()).clicked() {
                                         *var_type = vt;
                                     }
