@@ -5,7 +5,7 @@ members = [
     "crates/rpa-cli",
     "crates/rpa-studio",
     "crates/office",
-    "tools/validate_locale",
+    "tools/validate_locale", "crates/arc_script",
 ]
 
 [workspace.dependencies]

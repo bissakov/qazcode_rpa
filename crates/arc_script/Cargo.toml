@@ -1,0 +1,9 @@
+[package]
+name = "arc_script"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
