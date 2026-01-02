@@ -526,68 +526,64 @@ impl Node {
         }
     }
 
-    pub fn get_output_pin_positions(&self) -> Vec<egui::Pos2> {
-        self.get_output_pin_positions_vertical()
-    }
-
-    fn get_output_pin_positions_vertical(&self) -> Vec<egui::Pos2> {
+    pub fn get_output_pin_positions(&self) -> [Option<egui::Pos2>; 2] {
         let pin_count = self.get_output_pin_count();
         if pin_count == 0 {
-            return vec![];
+            return [None, None];
         }
 
         match &self.activity {
-            Activity::End { .. } | Activity::Note { .. } => vec![],
+            Activity::End { .. } | Activity::Note { .. } => [None, None],
             Activity::IfCondition { .. } => {
                 let true_dir = self.get_preferred_output_direction(&BranchType::TrueBranch);
                 let false_dir = self.get_preferred_output_direction(&BranchType::FalseBranch);
-                vec![
-                    self.get_pin_pos_for_direction(true_dir),
-                    self.get_pin_pos_for_direction(false_dir),
+                [
+                    Some(self.get_pin_pos_for_direction(true_dir)),
+                    Some(self.get_pin_pos_for_direction(false_dir)),
                 ]
             }
             Activity::Loop { .. } => {
                 let default_dir = self.get_preferred_output_direction(&BranchType::Default);
                 let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
-                vec![
-                    self.get_pin_pos_for_direction(default_dir),
-                    self.get_pin_pos_for_direction(loop_dir),
+                [
+                    Some(self.get_pin_pos_for_direction(default_dir)),
+                    Some(self.get_pin_pos_for_direction(loop_dir)),
                 ]
             }
             Activity::While { .. } => {
                 let default_dir = self.get_preferred_output_direction(&BranchType::Default);
                 let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
-                vec![
-                    self.get_pin_pos_for_direction(default_dir),
-                    self.get_pin_pos_for_direction(loop_dir),
+                [
+                    Some(self.get_pin_pos_for_direction(default_dir)),
+                    Some(self.get_pin_pos_for_direction(loop_dir)),
                 ]
             }
             Activity::TryCatch => {
                 let try_dir = self.get_preferred_output_direction(&BranchType::TryBranch);
                 let catch_dir = self.get_preferred_output_direction(&BranchType::CatchBranch);
-                vec![
-                    self.get_pin_pos_for_direction(try_dir),
-                    self.get_pin_pos_for_direction(catch_dir),
+                [
+                    Some(self.get_pin_pos_for_direction(try_dir)),
+                    Some(self.get_pin_pos_for_direction(catch_dir)),
                 ]
             }
             Activity::CallScenario { .. } | Activity::RunPowershell { .. } => {
                 let default_dir = self.get_preferred_output_direction(&BranchType::Default);
                 let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
-                vec![
-                    self.get_pin_pos_for_direction(default_dir),
-                    self.get_pin_pos_for_direction(error_dir),
+                [
+                    Some(self.get_pin_pos_for_direction(default_dir)),
+                    Some(self.get_pin_pos_for_direction(error_dir)),
                 ]
             }
             _ => {
                 let default_dir = self.get_preferred_output_direction(&BranchType::Default);
                 if self.activity.can_have_error_output() {
                     let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
-                    vec![
-                        self.get_pin_pos_for_direction(default_dir),
-                        self.get_pin_pos_for_direction(error_dir),
+                    [
+                        Some(self.get_pin_pos_for_direction(default_dir)),
+                        Some(self.get_pin_pos_for_direction(error_dir)),
                     ]
                 } else {
-                    vec![self.get_pin_pos_for_direction(default_dir)]
+                    [Some(self.get_pin_pos_for_direction(default_dir)), None]
                 }
             }
         }
@@ -626,8 +622,10 @@ impl Node {
     }
 
     pub fn get_output_pin_pos_by_index(&self, index: usize) -> egui::Pos2 {
-        let positions = self.get_output_pin_positions();
-        positions.get(index).copied().unwrap_or(egui::Pos2::ZERO)
+        match self.get_output_pin_positions().get(index) {
+            Some(Some(pos)) => *pos,
+            _ => egui::Pos2::ZERO,
+        }
     }
 
     pub fn get_pin_index_for_branch(&self, branch_type: &BranchType) -> usize {

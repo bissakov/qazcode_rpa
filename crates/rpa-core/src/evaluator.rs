@@ -41,9 +41,7 @@ impl ValueExt for VariableValue {
         match self {
             VariableValue::Number(n) => Ok(*n),
             VariableValue::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
-            VariableValue::String(s) => s
-                .parse::<f64>()
-                .map_err(|_| format!("Cannot convert string '{s}' to number")),
+            VariableValue::String(_) => Err("Cannot convert string to number".to_string()),
             VariableValue::Undefined => Err("Cannot convert undefined value to number".to_string()),
         }
     }
@@ -55,22 +53,30 @@ enum Token {
     Boolean(bool),
     String(String),
     Variable(String),
+
     Plus,
     Minus,
     Multiply,
     Divide,
     Modulo,
+
     Equal,
     NotEqual,
     Greater,
     GreaterEqual,
     Less,
     LessEqual,
+
     And,
     Or,
     Not,
+
     LeftParen,
     RightParen,
+}
+
+fn is_alpha(ch: char) -> bool {
+    ch.is_alphabetic() || ch == '_'
 }
 
 struct Lexer {
@@ -151,19 +157,29 @@ impl Lexer {
 
     fn read_variable(&mut self) -> Result<String, String> {
         self.advance();
+
         let start = self.pos;
-        while let Some(ch) = self.current() {
-            if ch == UiConstants::VARIABLE_PLACEHOLDER_CLOSE {
-                let var_name: String = self.input[start..self.pos].iter().collect();
-                self.advance();
-                if var_name.is_empty() {
-                    return Err("Empty variable name".to_string());
-                }
-                return Ok(var_name);
-            }
-            self.advance();
+
+        match self.current() {
+            Some(ch) if is_alpha(ch) => {}
+            _ => return Err("Invalid variable name after '$'".to_string()),
         }
-        Err("Unterminated variable placeholder".to_string())
+
+        while let Some(ch) = self.current() {
+            if is_alpha(ch) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let name: String = self.input[start..self.pos].iter().collect();
+
+        if name.is_empty() {
+            Err("Empty variable name after '$'".to_string())
+        } else {
+            Ok(name)
+        }
     }
 
     fn next_token(&mut self) -> Result<Option<Token>, String> {
@@ -174,11 +190,11 @@ impl Lexer {
         };
 
         let token = match ch {
-            UiConstants::VARIABLE_PLACEHOLDER_OPEN => {
+            UiConstants::VARIABLE_SIGIL => {
                 let var_name = self.read_variable()?;
                 Token::Variable(var_name)
             }
-            '"' | '\'' => {
+            '"' => {
                 let s = self.read_string(ch)?;
                 Token::String(s)
             }
@@ -278,6 +294,9 @@ impl Lexer {
                     "NOT" => Token::Not,
                     _ => return Err(format!("Unknown identifier: {ident}")),
                 }
+            }
+            '\'' => {
+                return Err("Single-quoted strings are not allowed. Use double quotes.".to_string());
             }
             _ => return Err(format!("Unexpected character: {ch}")),
         };
@@ -558,13 +577,23 @@ pub fn eval_expr(expr: &Expr, variables: &Variables) -> Result<VariableValue, St
             -eval_expr(e, variables)?.to_number()?,
         )),
 
-        Expr::Eq(a, b) => Ok(VariableValue::Boolean(
-            eval_expr(a, variables)? == eval_expr(b, variables)?,
-        )),
+        Expr::Eq(a, b) => {
+            let lhs = eval_expr(a, variables)?;
+            let rhs = eval_expr(b, variables)?;
+            if std::mem::discriminant(&lhs) != std::mem::discriminant(&rhs) {
+                return Err("Type mismatch in '=='".to_string());
+            }
+            Ok(VariableValue::Boolean(lhs == rhs))
+        }
 
-        Expr::Ne(a, b) => Ok(VariableValue::Boolean(
-            eval_expr(a, variables)? != eval_expr(b, variables)?,
-        )),
+        Expr::Ne(a, b) => {
+            let lhs = eval_expr(a, variables)?;
+            let rhs = eval_expr(b, variables)?;
+            if std::mem::discriminant(&lhs) != std::mem::discriminant(&rhs) {
+                return Err("Type mismatch in '!='".to_string());
+            }
+            Ok(VariableValue::Boolean(lhs != rhs))
+        }
 
         Expr::Gt(a, b) => Ok(VariableValue::Boolean(
             eval_expr(a, variables)?.to_number()? > eval_expr(b, variables)?.to_number()?,
@@ -737,7 +766,7 @@ mod tests {
         variables.set("y", VariableValue::Number(5.0), VariableScope::Global);
 
         {
-            let expr = parse_expr("{x} + {y}", &mut variables).unwrap();
+            let expr = parse_expr("@x + @y", &mut variables).unwrap();
             assert_eq!(
                 eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Number(15.0)
@@ -745,7 +774,7 @@ mod tests {
         }
 
         {
-            let expr = parse_expr("{x} > {y}", &mut variables).unwrap();
+            let expr = parse_expr("@x > @y", &mut variables).unwrap();
             assert_eq!(
                 eval_expr(&expr, &variables).unwrap(),
                 VariableValue::Boolean(true)
@@ -763,7 +792,7 @@ mod tests {
         variables.create_variable("b", VariableScope::Global);
         variables.set("b", VariableValue::Number(5.0), VariableScope::Global);
 
-        let expr = parse_expr("({a} + {b}) * 2 > 20", &mut variables).unwrap();
+        let expr = parse_expr("(@a + @b) * 2 > 20", &mut variables).unwrap();
         assert_eq!(
             eval_expr(&expr, &variables).unwrap(),
             VariableValue::Boolean(true)
@@ -782,7 +811,7 @@ mod tests {
         let expr = parse_expr("10 / 0", &mut variables).unwrap();
         assert!(eval_expr(&expr, &variables).is_err());
 
-        let expr = parse_expr("{undefined}", &mut variables).unwrap();
+        let expr = parse_expr("@undefined", &mut variables).unwrap();
         assert!(eval_expr(&expr, &variables).is_err());
     }
 
@@ -792,6 +821,93 @@ mod tests {
 
         for expr_str in ["yes", "and", "or", "not"] {
             assert!(parse_expr(expr_str, &mut variables).is_err());
+        }
+    }
+
+    #[test]
+    fn test_string_literals_double_quotes_only() {
+        let mut variables = Variables::new();
+
+        let expr = parse_expr("\"hello\"", &mut variables).unwrap();
+        assert_eq!(
+            eval_expr(&expr, &variables).unwrap(),
+            VariableValue::String("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_literals_single_quotes_rejected() {
+        let mut variables = Variables::new();
+
+        assert!(parse_expr("'hello'", &mut variables).is_err());
+        assert!(parse_expr("'123'", &mut variables).is_err());
+    }
+
+    #[test]
+    fn test_string_no_numeric_coercion() {
+        let mut variables = Variables::new();
+
+        let expr = parse_expr("\"123\"", &mut variables).unwrap();
+        assert_eq!(
+            eval_expr(&expr, &variables).unwrap(),
+            VariableValue::String("123".to_string())
+        );
+
+        let expr = parse_expr("\"123\" + 1", &mut variables).unwrap();
+        assert!(eval_expr(&expr, &variables).is_err());
+    }
+
+    #[test]
+    fn test_string_equality_strict() {
+        let mut variables = Variables::new();
+
+        let expr = parse_expr("\"abc\" == \"abc\"", &mut variables).unwrap();
+        assert_eq!(
+            eval_expr(&expr, &variables).unwrap(),
+            VariableValue::Boolean(true)
+        );
+
+        let expr = parse_expr("\"abc\" != \"def\"", &mut variables).unwrap();
+        assert_eq!(
+            eval_expr(&expr, &variables).unwrap(),
+            VariableValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn test_string_number_equality_rejected() {
+        let mut variables = Variables::new();
+
+        let expr = parse_expr("\"1\" == 1", &mut variables).unwrap();
+        assert!(eval_expr(&expr, &variables).is_err());
+
+        let expr = parse_expr("1 != \"1\"", &mut variables).unwrap();
+        assert!(eval_expr(&expr, &variables).is_err());
+    }
+
+    #[test]
+    fn test_string_in_boolean_context_rejected() {
+        let mut variables = Variables::new();
+
+        let expr = parse_expr("!\"true\"", &mut variables).unwrap();
+        assert!(eval_expr(&expr, &variables).is_err());
+
+        let expr = parse_expr("\"true\" && true", &mut variables).unwrap();
+        assert!(eval_expr(&expr, &variables).is_err());
+    }
+
+    #[test]
+    fn test_string_comparisons_rejected() {
+        let mut variables = Variables::new();
+
+        for expr_str in [
+            "\"a\" > \"b\"",
+            "\"a\" < \"b\"",
+            "\"a\" >= \"b\"",
+            "\"a\" <= \"b\"",
+        ] {
+            let expr = parse_expr(expr_str, &mut variables).unwrap();
+            assert!(eval_expr(&expr, &variables).is_err());
         }
     }
 }

@@ -171,7 +171,9 @@ fn find_intersecting_connections(
                 let cut_start = cut_path[i];
                 let cut_end = cut_path[i + 1];
 
-                if let Some(intersection_point) = path.intersects_line(cut_start, cut_end, renderer, &connection.id) {
+                if let Some(intersection_point) =
+                    path.intersects_line(cut_start, cut_end, renderer, &connection.id)
+                {
                     intersecting.push((connection.from_node.clone(), connection.to_node.clone()));
                     intersection_points.push(intersection_point);
                     break;
@@ -296,7 +298,8 @@ pub fn render_node_graph(
 
     if *state.knife_tool_active && !alt_rmb {
         if !state.knife_path.is_empty() {
-            let knife_path_world: Vec<Pos2> = state.knife_path
+            let knife_path_world: Vec<Pos2> = state
+                .knife_path
                 .iter()
                 .map(|pos| ((pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2())
                 .collect();
@@ -861,65 +864,65 @@ pub fn render_node_graph(
         && let Some(released_node) =
             get_node_from_index(&scenario.nodes, &node_index, &released_node_id)
     {
-            let node_center_screen = to_screen(released_node.get_rect().center());
+        let node_center_screen = to_screen(released_node.get_rect().center());
 
-            if let Some((from_id, to_id)) = find_connection_near_point(
-                scenario,
-                &node_index,
-                node_center_screen,
-                view.pan_offset,
-                view.zoom,
-                UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
-                &mut view.connection_renderer,
-            ) && released_node_id != from_id
-                && released_node_id != to_id
-                && let Some(conn_to_remove) = scenario
-                    .connections
-                    .iter()
-                    .find(|c| c.from_node == from_id && c.to_node == to_id)
-                    .cloned()
-            {
-                let branch_type = conn_to_remove.branch_type.clone();
+        if let Some((from_id, to_id)) = find_connection_near_point(
+            scenario,
+            &node_index,
+            node_center_screen,
+            view.pan_offset,
+            view.zoom,
+            UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
+            &mut view.connection_renderer,
+        ) && released_node_id != from_id
+            && released_node_id != to_id
+            && let Some(conn_to_remove) = scenario
+                .connections
+                .iter()
+                .find(|c| c.from_node == from_id && c.to_node == to_id)
+                .cloned()
+        {
+            let branch_type = conn_to_remove.branch_type.clone();
 
-                scenario
-                    .connections
-                    .retain(|c| !(c.from_node == from_id && c.to_node == to_id));
+            scenario
+                .connections
+                .retain(|c| !(c.from_node == from_id && c.to_node == to_id));
 
-                if let (Some(from_node), Some(to_node)) = (
-                    get_node_from_index(&scenario.nodes, &node_index, &from_id),
-                    get_node_from_index(&scenario.nodes, &node_index, &to_id),
-                ) {
-                    let from_pos = from_node.position;
-                    let to_pos = to_node.position;
-                    let mid_x = (from_pos.x + to_pos.x) * 0.5;
-                    let mid_y = (from_pos.y + to_pos.y) * 0.5;
+            if let (Some(from_node), Some(to_node)) = (
+                get_node_from_index(&scenario.nodes, &node_index, &from_id),
+                get_node_from_index(&scenario.nodes, &node_index, &to_id),
+            ) {
+                let from_pos = from_node.position;
+                let to_pos = to_node.position;
+                let mid_x = (from_pos.x + to_pos.x) * 0.5;
+                let mid_y = (from_pos.y + to_pos.y) * 0.5;
 
-                    let distance = to_pos.y - from_pos.y;
-                    let required = UiConstants::MIN_NODE_SPACING * 2.0;
+                let distance = to_pos.y - from_pos.y;
+                let required = UiConstants::MIN_NODE_SPACING * 2.0;
 
-                    if distance < required {
-                        let push = required - distance;
-
-                        for node in &mut scenario.nodes {
-                            if node.position.y >= to_pos.y {
-                                node.position.y += push;
-                            }
-                        }
-                    }
+                if distance < required {
+                    let push = required - distance;
 
                     for node in &mut scenario.nodes {
-                        if node.id == released_node_id {
-                            node.position.x = mid_x;
-                            node.position.y = mid_y;
-                            break;
+                        if node.position.y >= to_pos.y {
+                            node.position.y += push;
                         }
                     }
                 }
 
-                scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
-                scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
-                scenario.obstacle_grid.invalidate();
+                for node in &mut scenario.nodes {
+                    if node.id == released_node_id {
+                        node.position.x = mid_x;
+                        node.position.y = mid_y;
+                        break;
+                    }
+                }
             }
+
+            scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
+            scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
+            scenario.obstacle_grid.invalidate();
+        }
     }
 
     for i in (0..scenario.nodes.len()).rev() {
@@ -1116,7 +1119,8 @@ pub fn render_node_graph(
                 Stroke::new(3.0, Color32::from_rgb(255, 100, 100)),
             ));
 
-            let knife_path_world: Vec<Pos2> = state.knife_path
+            let knife_path_world: Vec<Pos2> = state
+                .knife_path
                 .iter()
                 .map(|pos| ((pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2())
                 .collect();
@@ -1321,8 +1325,8 @@ pub fn draw_node_transformed<F>(
 
     if node.has_output_pin() {
         let positions = node.get_output_pin_positions();
-        for (pin_index, &pos) in positions.iter().enumerate() {
-            let pin_screen = to_screen(pos);
+        for (pin_index, _) in positions.iter().enumerate() {
+            let pin_screen = to_screen(node.get_output_pin_pos_by_index(pin_index));
             let branch_type = node.get_branch_type_for_pin(pin_index);
 
             let (color, stroke_color, label) = match branch_type {

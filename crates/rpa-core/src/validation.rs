@@ -1,7 +1,51 @@
 use crate::execution::LogOutput;
 use crate::node_graph::{Activity, BranchType, LogEntry, LogLevel, NanoId, Project, Scenario};
 use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
+use std::fmt::Display;
 use std::hash::{Hash, Hasher};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ErrorCode {
+    E001, // Missing Start node
+    E002, // Missing End node
+    E003, // Dead-end path detected
+    E004, // Connection references non-existent node
+    E101, // Loop with invalid parameters
+    E102, // Loop with zero step
+    E103, // CallScenario references non-existent scenario
+    E104, // Invalid condition syntax
+    E201, // Empty variable name
+    W001, // If node missing True branch
+    W002, // If node missing False branch
+    W003, // Try-Catch node missing Try branch
+    W004, // Try-Catch node missing Catch branch
+    W005, // Variable used before definition
+    W006, // Recursive scenario call detected
+    W007, // Loop node with no body connection
+}
+
+impl Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorCode::E001 => write!(f, "E001"),
+            ErrorCode::E002 => write!(f, "E002"),
+            ErrorCode::E003 => write!(f, "E003"),
+            ErrorCode::E004 => write!(f, "E004"),
+            ErrorCode::E101 => write!(f, "E101"),
+            ErrorCode::E102 => write!(f, "E102"),
+            ErrorCode::E103 => write!(f, "E103"),
+            ErrorCode::E104 => write!(f, "E104"),
+            ErrorCode::E201 => write!(f, "E201"),
+            ErrorCode::W001 => write!(f, "W001"),
+            ErrorCode::W002 => write!(f, "W002"),
+            ErrorCode::W003 => write!(f, "W003"),
+            ErrorCode::W004 => write!(f, "W004"),
+            ErrorCode::W005 => write!(f, "W005"),
+            ErrorCode::W006 => write!(f, "W006"),
+            ErrorCode::W007 => write!(f, "W007"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationLevel {
@@ -14,7 +58,35 @@ pub struct ValidationIssue {
     pub level: ValidationLevel,
     pub node_id: Option<NanoId>,
     pub message: String,
-    pub code: String,
+    pub code: ErrorCode,
+}
+
+impl ValidationIssue {
+    pub fn new_error(node_id: Option<NanoId>, message: String, code: ErrorCode) -> Self {
+        Self {
+            level: ValidationLevel::Error,
+            node_id,
+            message,
+            code,
+        }
+    }
+
+    pub fn new_warning(node_id: Option<NanoId>, message: String, code: ErrorCode) -> Self {
+        Self {
+            level: ValidationLevel::Warning,
+            node_id,
+            message,
+            code,
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        matches!(self.level, ValidationLevel::Error)
+    }
+
+    pub fn is_warning(&self) -> bool {
+        matches!(self.level, ValidationLevel::Warning)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -159,12 +231,11 @@ impl<'a> ScenarioValidator<'a> {
             .iter()
             .find(|n| matches!(n.activity, Activity::Start { .. }));
         if start_node.is_none() {
-            issues.push(ValidationIssue {
-                level: ValidationLevel::Error,
-                node_id: None,
-                message: format!("Scenario '{}' is missing a Start node", self.scenario.name),
-                code: "E001".to_string(),
-            });
+            issues.push(ValidationIssue::new_error(
+                None,
+                format!("Scenario '{}' is missing a Start node", self.scenario.name),
+                ErrorCode::E001,
+            ));
         }
 
         let end_node = self
@@ -173,12 +244,11 @@ impl<'a> ScenarioValidator<'a> {
             .iter()
             .find(|n| matches!(n.activity, Activity::End { .. }));
         if end_node.is_none() {
-            issues.push(ValidationIssue {
-                level: ValidationLevel::Error,
-                node_id: None,
-                message: format!("Scenario '{}' is missing an End node", self.scenario.name),
-                code: "E002".to_string(),
-            });
+            issues.push(ValidationIssue::new_error(
+                None,
+                format!("Scenario '{}' is missing an End node", self.scenario.name),
+                ErrorCode::E002,
+            ));
         }
 
         issues
@@ -190,26 +260,24 @@ impl<'a> ScenarioValidator<'a> {
 
         for conn in &self.scenario.connections {
             if !node_ids.contains(&conn.from_node) {
-                issues.push(ValidationIssue {
-                    level: ValidationLevel::Error,
-                    node_id: None,
-                    message: format!(
+                issues.push(ValidationIssue::new_error(
+                    None,
+                    format!(
                         "Connection references non-existent source node {}",
                         conn.from_node
                     ),
-                    code: "E004".to_string(),
-                });
+                    ErrorCode::E004,
+                ));
             }
             if !node_ids.contains(&conn.to_node) {
-                issues.push(ValidationIssue {
-                    level: ValidationLevel::Error,
-                    node_id: None,
-                    message: format!(
+                issues.push(ValidationIssue::new_error(
+                    None,
+                    format!(
                         "Connection references non-existent target node {}",
                         conn.to_node
                     ),
-                    code: "E004".to_string(),
-                });
+                    ErrorCode::E004,
+                ));
             }
         }
 
@@ -230,15 +298,14 @@ impl<'a> ScenarioValidator<'a> {
                 && !matches!(node.activity, Activity::End { .. })
             {
                 let activity_name = get_activity_name(&node.activity);
-                issues.push(ValidationIssue {
-                    level: ValidationLevel::Error,
-                    node_id: Some(node_id.clone()),
-                    message: format!(
+                issues.push(ValidationIssue::new_error(
+                    Some(node_id.clone()),
+                    format!(
                         "Node '{}' ({}) is reachable from Start but doesn't lead to End",
                         activity_name, node_id
                     ),
-                    code: "E003".to_string(),
-                });
+                    ErrorCode::E003,
+                ));
             }
         }
 
@@ -257,63 +324,52 @@ impl<'a> ScenarioValidator<'a> {
             match &node.activity {
                 Activity::IfCondition { .. } => {
                     if !self.has_connection(node.id.clone(), BranchType::TrueBranch) {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Warning,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
-                                "If node ({}) is missing True branch connection",
-                                node.id
-                            ),
-                            code: "W001".to_string(),
-                        });
+                        issues.push(ValidationIssue::new_warning(
+                            Some(node.id.clone()),
+                            format!("If node ({}) is missing True branch connection", node.id),
+                            ErrorCode::W001,
+                        ));
                     }
                     if !self.has_connection(node.id.clone(), BranchType::FalseBranch) {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Warning,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
-                                "If node ({}) is missing False branch connection",
-                                node.id
-                            ),
-                            code: "W002".to_string(),
-                        });
+                        issues.push(ValidationIssue::new_warning(
+                            Some(node.id.clone()),
+                            format!("If node ({}) is missing False branch connection", node.id),
+                            ErrorCode::W002,
+                        ));
                     }
                 }
                 Activity::TryCatch => {
                     if !self.has_connection(node.id.clone(), BranchType::TryBranch) {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Warning,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
+                        issues.push(ValidationIssue::new_warning(
+                            Some(node.id.clone()),
+                            format!(
                                 "Try-Catch node ({}) is missing Try branch connection",
                                 node.id
                             ),
-                            code: "W003".to_string(),
-                        });
+                            ErrorCode::W003,
+                        ));
                     }
                     if !self.has_connection(node.id.clone(), BranchType::CatchBranch) {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Warning,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
+                        issues.push(ValidationIssue::new_warning(
+                            Some(node.id.clone()),
+                            format!(
                                 "Try-Catch node ({}) is missing Catch branch connection",
                                 node.id
                             ),
-                            code: "W004".to_string(),
-                        });
+                            ErrorCode::W004,
+                        ));
                     }
                 }
                 Activity::Loop { .. } | Activity::While { .. } => {
                     if !self.has_connection(node.id.clone(), BranchType::LoopBody) {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Warning,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
+                        issues.push(ValidationIssue::new_warning(
+                            Some(node.id.clone()),
+                            format!(
                                 "Loop node ({}) has no body connection, loop will be skipped",
                                 node.id
                             ),
-                            code: "W007".to_string(),
-                        });
+                            ErrorCode::W007,
+                        ));
                     }
                 }
                 _ => {}
@@ -347,35 +403,32 @@ impl<'a> ScenarioValidator<'a> {
             } = &node.activity
             {
                 if *step == 0 {
-                    issues.push(ValidationIssue {
-                        level: ValidationLevel::Error,
-                        node_id: Some(node.id.clone()),
-                        message: format!(
+                    issues.push(ValidationIssue::new_error(
+                        Some(node.id.clone()),
+                        format!(
                             "Loop node ({}) has step = 0, which would cause infinite loop",
                             node.id
                         ),
-                        code: "E101".to_string(),
-                    });
+                        ErrorCode::E101,
+                    ));
                 } else if *step > 0 && start >= end {
-                    issues.push(ValidationIssue {
-                        level: ValidationLevel::Error,
-                        node_id: Some(node.id.clone()),
-                        message: format!(
+                    issues.push(ValidationIssue::new_error(
+                         Some(node.id.clone()),
+                         format!(
                             "Loop node ({}) has invalid parameters: start ({}) >= end ({}) with positive step ({})",
                             node.id, start, end, step
                         ),
-                        code: "E102".to_string(),
-                    });
+                         ErrorCode::E102,
+                    ));
                 } else if *step < 0 && start <= end {
-                    issues.push(ValidationIssue {
-                        level: ValidationLevel::Error,
-                        node_id: Some(node.id.clone()),
-                        message: format!(
+                    issues.push(ValidationIssue::new_error(
+                         Some(node.id.clone()),
+                         format!(
                             "Loop node ({}) has invalid parameters: start ({}) <= end ({}) with negative step ({})",
                             node.id, start, end, step
                         ),
-                        code: "E102".to_string(),
-                    });
+                         ErrorCode::E102,
+                    ));
                 }
             }
         }
@@ -400,12 +453,11 @@ impl<'a> ScenarioValidator<'a> {
             if let Some(cond) = condition
                 && let Err(msg) = validate_condition_syntax(cond)
             {
-                issues.push(ValidationIssue {
-                    level: ValidationLevel::Error,
-                    node_id: Some(node.id.clone()),
-                    message: format!("Invalid condition '{}': {}", cond, msg),
-                    code: "E104".to_string(),
-                });
+                issues.push(ValidationIssue::new_error(
+                    Some(node.id.clone()),
+                    format!("Invalid condition '{}': {}", cond, msg),
+                    ErrorCode::E104,
+                ));
             }
         }
 
@@ -427,15 +479,14 @@ impl<'a> ScenarioValidator<'a> {
                     || self.project.main_scenario.id == *scenario_id;
 
                 if !scenario_exists {
-                    issues.push(ValidationIssue {
-                        level: ValidationLevel::Error,
-                        node_id: Some(node.id.clone()),
-                        message: format!(
+                    issues.push(ValidationIssue::new_error(
+                        Some(node.id.clone()),
+                        format!(
                             "CallScenario node ({}) references non-existent scenario {}",
                             node.id, scenario_id
                         ),
-                        code: "E103".to_string(),
-                    });
+                        ErrorCode::E103,
+                    ));
                 }
             }
         }
@@ -454,10 +505,9 @@ impl<'a> ScenarioValidator<'a> {
             &mut call_stack,
             depth_limit,
         ) {
-            issues.push(ValidationIssue {
-                level: ValidationLevel::Warning,
-                node_id: None,
-                message: format!(
+            issues.push(ValidationIssue::new_warning(
+                None,
+                format!(
                     "Recursive scenario call detected: {} (depth limit: {})",
                     cycle
                         .iter()
@@ -466,8 +516,8 @@ impl<'a> ScenarioValidator<'a> {
                         .join(" -> "),
                     depth_limit
                 ),
-                code: "W006".to_string(),
-            });
+                ErrorCode::W006,
+            ));
         }
 
         issues
@@ -559,25 +609,20 @@ impl<'a> ScenarioValidator<'a> {
             match &node.activity {
                 Activity::SetVariable { name, .. } => {
                     if name.is_empty() {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Error,
-                            node_id: Some(node.id.clone()),
-                            message: format!("Variable name is empty in node ({})", node.id),
-                            code: "E201".to_string(),
-                        });
+                        issues.push(ValidationIssue::new_error(
+                            Some(node.id.clone()),
+                            format!("Variable name is empty in node ({})", node.id),
+                            ErrorCode::E201,
+                        ));
                     }
                 }
                 Activity::Loop { index, .. } => {
                     if index.is_empty() {
-                        issues.push(ValidationIssue {
-                            level: ValidationLevel::Error,
-                            node_id: Some(node.id.clone()),
-                            message: format!(
-                                "Loop index variable name is empty in node ({})",
-                                node.id
-                            ),
-                            code: "E201".to_string(),
-                        });
+                        issues.push(ValidationIssue::new_error(
+                            Some(node.id.clone()),
+                            format!("Loop index variable name is empty in node ({})", node.id),
+                            ErrorCode::E201,
+                        ));
                     }
                 }
                 _ => {}
@@ -608,12 +653,11 @@ impl<'a> ScenarioValidator<'a> {
 
         for var in used_vars {
             if !defined_vars.contains(&var) && !self.project.variables.contains(&var) {
-                issues.push(ValidationIssue {
-                    level: ValidationLevel::Warning,
-                    node_id: None,
-                    message: format!("Variable '{}' may be used before being defined", var),
-                    code: "W005".to_string(),
-                });
+                issues.push(ValidationIssue::new_warning(
+                    None,
+                    format!("Variable '{}' may be used before being defined", var),
+                    ErrorCode::W005,
+                ));
             }
         }
 

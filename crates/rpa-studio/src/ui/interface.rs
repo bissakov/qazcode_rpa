@@ -565,6 +565,10 @@ impl RpaApp {
                 });
         }
 
+        if self.dialogs.debug.show_ir_view {
+            self.render_ir_debug_window(ctx);
+        }
+
         if let Some(index) = self.dialogs.rename_scenario.scenario_index {
             let mut close_window = false;
 
@@ -830,6 +834,12 @@ impl RpaApp {
                 ui.menu_button(t!("menu.debug").as_ref(), |ui| {
                     if ui.button(t!("menu.inspection_ui").as_ref()).clicked() {
                         self.dialogs.debug.show_inspection_ui = true;
+                        ui.close();
+                    }
+
+                    if ui.button(t!("menu.ir_view").as_ref()).clicked() {
+                        self.dialogs.debug.show_ir_view = true;
+                        self.compile_ir_for_debug();
                         ui.close();
                     }
 

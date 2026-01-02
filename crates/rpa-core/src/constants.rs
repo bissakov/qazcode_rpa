@@ -85,6 +85,7 @@ impl UiConstants {
 
     pub const VARIABLE_PLACEHOLDER_OPEN: char = '{';
     pub const VARIABLE_PLACEHOLDER_CLOSE: char = '}';
+    pub const VARIABLE_SIGIL: char = '@';
 
     pub const NOTE_MIN_WIDTH: f32 = 100.0;
     pub const NOTE_MIN_HEIGHT: f32 = 60.0;

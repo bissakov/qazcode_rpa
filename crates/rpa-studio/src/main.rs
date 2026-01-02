@@ -129,6 +129,24 @@ impl RpaApp {
                     validation_result.errors.len()
                 ),
             });
+            for error in validation_result.errors {
+                self.project.execution_log.push(LogEntry {
+                    timestamp: get_timestamp(start_time),
+                    level: LogLevel::Error,
+                    activity: "VALIDATION".to_string(),
+                    message: format!("{}", error.message),
+                });
+            }
+
+            for warning in validation_result.warnings {
+                self.project.execution_log.push(LogEntry {
+                    timestamp: get_timestamp(start_time),
+                    level: LogLevel::Warning,
+                    activity: "VALIDATION".to_string(),
+                    message: format!("{}", warning.message),
+                });
+            }
+
             self.project.execution_log.push(LogEntry {
                 timestamp: "[00:00.00]".to_string(),
                 level: LogLevel::Info,
@@ -237,5 +255,42 @@ impl RpaApp {
                 message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
             });
         });
+    }
+
+    fn compile_ir_for_debug(&mut self) {
+        let scenario = self.get_current_scenario();
+        let validator = ScenarioValidator::new(scenario, &self.project);
+        let validation_result = validator.validate();
+
+        if !validation_result.is_valid() {
+            let error_msg = validation_result
+                .errors
+                .iter()
+                .map(|e| format!("- {}", e.message))
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.dialogs.debug.compilation_error = Some(error_msg);
+            self.dialogs.debug.compiled_ir_program = None;
+            return;
+        }
+
+        let mut vars = self.global_variables.clone();
+        let ir_builder = IrBuilder::new(
+            scenario,
+            &self.project,
+            &validation_result.reachable_nodes,
+            &mut vars,
+        );
+
+        match ir_builder.build() {
+            Ok(program) => {
+                self.dialogs.debug.compiled_ir_program = Some(program);
+                self.dialogs.debug.compilation_error = None;
+            }
+            Err(e) => {
+                self.dialogs.debug.compilation_error = Some(format!("IR compilation error: {}", e));
+                self.dialogs.debug.compiled_ir_program = None;
+            }
+        }
     }
 }
