@@ -1,14 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rpa-core",
-    "crates/rpa-cli",
-    "crates/rpa-studio",
-    "crates/office",
-    "crates/arc_script",
-    "crates/ui-automation-sys",
-    "crates/ui-automation",
-    "tools/validate_locale",
+  "crates/rpa-core",
+  "crates/rpa-cli",
+  "crates/rpa-studio",
+  "crates/office",
+  "crates/arc_script",
+  "tools/validate_locale",
+  "crates/ui-automation",
 ]
 
 [workspace.dependencies]
@@ -27,9 +26,10 @@ unused = { level = "deny", priority = -1 }
 dead_code = { level = "deny", priority = -1 }
 
 [workspace.lints.clippy]
-all = "deny"
-pedantic = "warn"
-nursery = "warn"
+missing-errors-doc = "allow"
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
 
 [profile.release]
 debug = true

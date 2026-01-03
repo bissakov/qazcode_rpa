@@ -1,9 +1,8 @@
 use arc_script::Value;
 use clap::Parser;
 use rpa_core::execution::{ExecutionContext, IrExecutor, LogOutput, ScopeFrame};
-use rpa_core::{
-    IrBuilder, LogEntry, LogLevel, Project, ProjectFile, ScenarioValidator, StopControl,
-};
+use rpa_core::log::{LogEntry, LogLevel};
+use rpa_core::{IrBuilder, Project, ProjectFile, ScenarioValidator, StopControl};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
@@ -41,7 +40,7 @@ impl LogOutput for CliLogOutput {
                 "{} [{}] {}: {}",
                 entry.timestamp,
                 entry.level.as_str(),
-                entry.activity,
+                entry.activity.as_str(),
                 entry.message
             );
         }
