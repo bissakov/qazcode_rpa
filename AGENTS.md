@@ -45,33 +45,12 @@ Visual node-based RPA workflow editor built with Rust and egui. Create and execu
 
 ---
 
-## Build
-- Build all:
-```
-cargo build --release
-```
-- Build specific:
-```
-cargo build --release --bin rpa-studio
-```
-- Lint:
-```
-cargo clippy
-```
-- Validate i18n:
-```
-cargo run --bin validate_locale
-```
-
----
-
 ## Code Rules
 - No comments unless strictly necessary
 - No hardcoding unless unavoidable
 - All constants go in `constants.rs`
 - Extract duplicated logic
 - Fix all errors and warnings immediately
-- Run `cargo clippy` after each major task
 - Update `CLAUDE.md` and/or `README.md` if architecture or features change
 - Bump version in root `Cargo.toml` after every significant change
 
