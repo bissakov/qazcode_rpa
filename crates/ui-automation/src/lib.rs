@@ -21,10 +21,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_RIGHTUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, MOUSEEVENTF_WHEEL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow,
-    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
+     BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow,
+     GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
+     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+     SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
 };
 use windows::core::BOOL;
 use windows::core::{PCWSTR, PWSTR};
@@ -42,6 +42,8 @@ const SB_LINELEFT: usize = 0;
 const SB_LINERIGHT: usize = 1;
 const WM_SCROLL: u32 = 0x0114;
 const WHEEL_DELTA: i32 = 120;
+const EM_SETSEL: u32 = 0x00B1;
+const EM_GETSEL: u32 = 0x00B0;
 
 const VK_BACKSPACE: u16 = 0x08;
 const VK_TAB: u16 = 0x09;
@@ -635,9 +637,81 @@ impl Control {
     }
 
     pub fn toggle_checkbox(&self) -> Result<(), AutomationError> {
-        let current = self.is_checked()?;
-        self.set_checked(!current)
-    }
+         let current = self.is_checked()?;
+         self.set_checked(!current)
+     }
+
+     pub fn clear_text(&self) -> Result<(), AutomationError> {
+         self.focus()?;
+         key_down_ctrl()?;
+         sleep(Duration::from_millis(50));
+         press_key('a')?;
+         sleep(Duration::from_millis(50));
+         key_up_ctrl()?;
+         sleep(Duration::from_millis(50));
+         press_delete()?;
+         Ok(())
+     }
+
+     pub fn copy_to_clipboard(&self) -> Result<(), AutomationError> {
+         self.focus()?;
+         key_down_ctrl()?;
+         sleep(Duration::from_millis(50));
+         press_key('a')?;
+         sleep(Duration::from_millis(50));
+         key_up_ctrl()?;
+         sleep(Duration::from_millis(50));
+         key_down_ctrl()?;
+         sleep(Duration::from_millis(50));
+         press_key('c')?;
+         sleep(Duration::from_millis(50));
+         key_up_ctrl()?;
+         Ok(())
+     }
+
+     pub fn paste_from_clipboard(&self) -> Result<(), AutomationError> {
+         self.focus()?;
+         key_down_ctrl()?;
+         sleep(Duration::from_millis(50));
+         press_key('v')?;
+         sleep(Duration::from_millis(50));
+         key_up_ctrl()?;
+         Ok(())
+     }
+
+     pub fn select_text(&self, start: i32, length: i32) -> Result<(), AutomationError> {
+         unsafe {
+             SendMessageW(
+                 self.as_hwnd(),
+                 EM_SETSEL,
+                 Some(WPARAM(start as usize)),
+                 Some(LPARAM(start as isize + length as isize)),
+             );
+             Ok(())
+         }
+     }
+
+     pub fn get_selected_text(&self) -> Result<String, AutomationError> {
+         unsafe {
+             let result = SendMessageW(self.as_hwnd(), EM_GETSEL, None, None).0 as isize;
+             let start = result & 0xFFFF;
+             let end = (result >> 16) & 0xFFFF;
+
+             if start == end {
+                 return Ok(String::new());
+             }
+
+             let full_text = self.get_text()?;
+             let start_idx = start.max(0) as usize;
+             let end_idx = end.max(0) as usize;
+
+             if start_idx >= full_text.len() || end_idx > full_text.len() {
+                 return Ok(String::new());
+             }
+
+             Ok(full_text[start_idx..end_idx.min(full_text.len())].to_string())
+         }
+     }
 
     pub fn refresh(&mut self) -> Result<(), AutomationError> {
         unsafe {
