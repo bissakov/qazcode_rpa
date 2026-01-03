@@ -1,0 +1,15 @@
+[package]
+name = "ui-automation"
+version.workspace = true
+edition.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
+
+[dependencies]
+ui-automation-sys = { path = "../ui-automation-sys" }
+libc = "0.2"
+
+[lib]
+name = "ui_automation"
+path = "src/lib.rs"

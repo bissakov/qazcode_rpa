@@ -5,7 +5,10 @@ members = [
     "crates/rpa-cli",
     "crates/rpa-studio",
     "crates/office",
-    "tools/validate_locale", "crates/arc_script",
+    "crates/arc_script",
+    "crates/ui-automation-sys",
+    "crates/ui-automation",
+    "tools/validate_locale",
 ]
 
 [workspace.dependencies]
@@ -20,7 +23,6 @@ version = "0.7.0"
 edition = "2024"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
 unused = { level = "deny", priority = -1 }
 dead_code = { level = "deny", priority = -1 }
 

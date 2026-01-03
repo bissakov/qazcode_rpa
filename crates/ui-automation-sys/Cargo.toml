@@ -1,0 +1,16 @@
+[package]
+name = "ui-automation-sys"
+version.workspace = true
+edition.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
+
+[build-dependencies]
+cmake = "0.1"
+
+[dependencies]
+
+[lib]
+name = "ui_automation_sys"
+path = "src/lib.rs"
