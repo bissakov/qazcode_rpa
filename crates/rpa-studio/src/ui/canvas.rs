@@ -5,12 +5,20 @@ use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
+use rpa_core::log::LogLevel;
 use rpa_core::{
-    Activity, ActivityMetadata, BranchType, LogLevel, NanoId, Node, PropertyType, Scenario,
-    UiConstants, snap_to_grid,
+    Activity, ActivityMetadata, BranchType, NanoId, Node, PropertyType, Scenario, UiConstants,
+    snap_to_grid,
 };
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
+
+fn is_node_grid_aligned(node: &Node, grid_size: f32) -> bool {
+    let snapped_x = snap_to_grid(node.position.x, grid_size);
+    let snapped_y = snap_to_grid(node.position.y, grid_size);
+
+    (snapped_x - node.position.x).abs() <= 0.001 && (snapped_y - node.position.y).abs() <= 0.001
+}
 
 #[derive(Clone, Copy)]
 struct InputCache {
@@ -71,6 +79,7 @@ pub struct RenderState<'a> {
     pub knife_path: &'a mut Vec<Pos2>,
     pub resizing_node: &'a mut Option<(NanoId, ResizeHandle)>,
     pub allow_node_resize: bool,
+    pub searched_activity: &'a mut String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -192,7 +201,25 @@ fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<C
     Popup::context_menu(response)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(150.0);
+            ui.set_min_width(100.0);
+
+            ui.label("Search:");
+
+            let text_id = ui.make_persistent_id("activity_search_text_edit");
+            let response = ui.add(egui::TextEdit::singleline(state.searched_activity).id(text_id));
+            if !response.has_focus() {
+                response.request_focus();
+            }
+
+            if !state.searched_activity.is_empty() {
+                for activity in Activity::iter_as_str()
+                    .filter(|name| name.contains(state.searched_activity.as_str()))
+                {
+                    ui.label(activity);
+                }
+            }
+
+            ui.separator();
 
             if !state.selected_nodes.is_empty()
                 && ui.button(t!("context_menu.copy").as_ref()).clicked()
@@ -235,7 +262,16 @@ pub fn render_node_graph(
     state: &mut RenderState,
     view: &mut ScenarioViewState,
     show_grid_debug: bool,
-) -> (ContextMenuAction, Vec2, bool, bool, bool, bool, bool) {
+) -> (
+    ContextMenuAction,
+    Vec2,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    egui::Rect,
+) {
     let mut context_action = ContextMenuAction::None;
     let mut connection_created = false;
     let mut drag_started = false;
@@ -1164,6 +1200,7 @@ pub fn render_node_graph(
         drag_ended,
         resize_started,
         resize_ended,
+        rect,
     )
 }
 
@@ -1533,7 +1570,8 @@ pub fn render_node_properties(
 
                 match &mut node.activity {
                     Activity::SetVariable { name, .. } if prop_idx == 0 => {
-                        ui.text_edit_singleline(name);
+                        let set_variable_name_id = ui.make_persistent_id("set_variable_name");
+                        ui.add(egui::TextEdit::singleline(name).id(set_variable_name_id));
                     }
                     Activity::SetVariable { var_type, .. } if prop_idx == 1 => {
                         egui::ComboBox::from_id_salt("var_type_combo")
@@ -1550,7 +1588,8 @@ pub fn render_node_properties(
                         value, var_type, ..
                     } if prop_idx == 2 => match var_type {
                         VariableType::String => {
-                            ui.text_edit_singleline(value);
+                            let value_id = ui.make_persistent_id("var_value_string");
+                            ui.add(egui::TextEdit::singleline(value).id(value_id));
                         }
                         VariableType::Number => {
                             let mut n: f64 = value.parse().unwrap_or(0.0);
@@ -1565,13 +1604,19 @@ pub fn render_node_properties(
                         }
                     },
                     Activity::IfCondition { condition } | Activity::While { condition } => {
-                        ui.text_edit_singleline(condition);
+                        let condition_id =
+                            ui.make_persistent_id(format!("{}_condition_{}", node.id, prop_idx));
+                        ui.add(egui::TextEdit::singleline(condition).id(condition_id));
                     }
                     Activity::Loop { index, .. } if prop_idx == 0 => {
-                        ui.text_edit_singleline(index);
+                        let index_id =
+                            ui.make_persistent_id(format!("{}_loop_index_{}", node.id, prop_idx));
+                        ui.add(egui::TextEdit::singleline(index).id(index_id));
                     }
                     Activity::Evaluate { expression } if prop_idx == 0 => {
-                        ui.text_edit_singleline(expression);
+                        let expr_id =
+                            ui.make_persistent_id(format!("{}_eval_expr_{}", node.id, prop_idx));
+                        ui.add(egui::TextEdit::singleline(expression).id(expr_id));
                     }
                     _ => {}
                 }
@@ -1593,7 +1638,8 @@ pub fn render_node_properties(
                             });
                     }
                     Activity::Note { text, .. } => {
-                        ui.text_edit_multiline(text);
+                        let note_id = ui.make_persistent_id(format!("{}_note_text", node.id));
+                        ui.add(egui::TextEdit::multiline(text).id(note_id).desired_rows(8));
                     }
                     _ => {}
                 }
@@ -1778,6 +1824,20 @@ pub fn render_node_properties(
         .as_ref(),
     );
     ui.label(t!("properties.node_id", node_id = node.id,).as_ref());
+
+    let grid_aligned = is_node_grid_aligned(node, UiConstants::GRID_CELL_SIZE);
+    let grid_status_key = if grid_aligned {
+        "properties.grid_status.aligned"
+    } else {
+        "properties.grid_status.misaligned"
+    };
+    ui.label(
+        t!(
+            "properties.grid_aligned",
+            status = t!(grid_status_key).as_ref()
+        )
+        .as_ref(),
+    );
 
     (node.activity != original_activity, param_action)
 }

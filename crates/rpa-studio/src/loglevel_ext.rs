@@ -1,4 +1,4 @@
-use rpa_core::LogLevel;
+use rpa_core::log::LogLevel;
 
 pub trait LogLevelExt {
     fn get_color(&self) -> egui::Color32;

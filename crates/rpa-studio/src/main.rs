@@ -13,7 +13,8 @@ mod undo_redo;
 use eframe::egui;
 use egui::IconData;
 use rpa_core::execution::{ExecutionContext, ScopeFrame};
-use rpa_core::{IrBuilder, LogEntry, LogLevel, ScenarioValidator, UiConstants, get_timestamp};
+use rpa_core::log::{LogActivity, LogEntry, LogLevel};
+use rpa_core::{IrBuilder, ScenarioValidator, UiConstants, get_timestamp};
 use rust_i18n::t;
 use state::RpaApp;
 use std::sync::mpsc::channel;
@@ -61,10 +62,10 @@ fn main() -> eframe::Result<()> {
     rust_i18n::set_locale("en");
 
     let options = eframe::NativeOptions {
-        vsync: false,
+        vsync: true,
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
-            .with_visible(false)
+            // .with_visible(false)
             .with_maximized(true)
             .with_title(t!("window.title").as_ref())
             .with_icon(load_icon()),
@@ -104,8 +105,9 @@ impl RpaApp {
         self.project.execution_log.clear();
         self.project.execution_log.push(LogEntry {
             timestamp: "[00:00.00]".to_string(),
+            node_id: None,
             level: LogLevel::Info,
-            activity: "SYSTEM".to_string(),
+            activity: LogActivity::System,
             message: t!("system_messages.execution_start").to_string(),
         });
 
@@ -122,8 +124,9 @@ impl RpaApp {
         if !validation_result.is_valid() {
             self.project.execution_log.push(LogEntry {
                 timestamp: get_timestamp(start_time),
+                node_id: None,
                 level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: format!(
                     "Execution aborted: {} validation errors",
                     validation_result.errors.len()
@@ -132,8 +135,9 @@ impl RpaApp {
             for error in validation_result.errors {
                 self.project.execution_log.push(LogEntry {
                     timestamp: get_timestamp(start_time),
+                    node_id: None,
                     level: LogLevel::Error,
-                    activity: "VALIDATION".to_string(),
+                    activity: LogActivity::System,
                     message: error.message,
                 });
             }
@@ -141,16 +145,18 @@ impl RpaApp {
             for warning in validation_result.warnings {
                 self.project.execution_log.push(LogEntry {
                     timestamp: get_timestamp(start_time),
+                    node_id: None,
                     level: LogLevel::Warning,
-                    activity: "VALIDATION".to_string(),
+                    activity: LogActivity::System,
                     message: warning.message,
                 });
             }
 
             self.project.execution_log.push(LogEntry {
                 timestamp: "[00:00.00]".to_string(),
+                node_id: None,
                 level: LogLevel::Info,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
             });
             self.is_executing = false;
@@ -168,14 +174,16 @@ impl RpaApp {
             Err(e) => {
                 self.project.execution_log.push(LogEntry {
                     timestamp: get_timestamp(start_time),
+                    node_id: None,
                     level: LogLevel::Error,
-                    activity: "SYSTEM".to_string(),
+                    activity: LogActivity::System,
                     message: format!("IR compilation failed: {}", e),
                 });
                 self.project.execution_log.push(LogEntry {
                     timestamp: "[00:00.00]".to_string(),
+                    node_id: None,
                     level: LogLevel::Info,
-                    activity: "SYSTEM".to_string(),
+                    activity: LogActivity::System,
                     message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
                 });
                 self.is_executing = false;
@@ -186,9 +194,8 @@ impl RpaApp {
         let stop_control = self.stop_control.clone();
         let variables = self.global_variables.clone();
 
-        let main_scenario_id = self.project.main_scenario.id.as_str().to_string();
         let scope_stack = vec![ScopeFrame {
-            scenario_id: main_scenario_id.clone(),
+            scenario_id: self.project.main_scenario.id.clone(),
             variables: self.project.main_scenario.variables.clone(),
         }];
 
@@ -218,8 +225,9 @@ impl RpaApp {
                 {
                     let _ = log_sender.send(LogEntry {
                         timestamp: get_timestamp(context.read().unwrap().start_time),
+                        node_id: None,
                         level: LogLevel::Error,
-                        activity: "SYSTEM".to_string(),
+                        activity: LogActivity::System,
                         message: format!("Execution error: {e}"),
                     });
                 }
@@ -236,22 +244,25 @@ impl RpaApp {
 
                 let _ = log_sender.send(LogEntry {
                     timestamp: get_timestamp(start_time),
+                    node_id: None,
                     level: LogLevel::Error,
-                    activity: "SYSTEM".to_string(),
+                    activity: LogActivity::System,
                     message: format!("Execution interrupted: {panic_msg}"),
                 });
             }
 
             let _ = log_sender.send(LogEntry {
                 timestamp: get_timestamp(start_time),
+                node_id: None,
                 level: LogLevel::Info,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: "Execution completed.".to_string(),
             });
             let _ = log_sender.send(LogEntry {
                 timestamp: get_timestamp(start_time),
+                node_id: None,
                 level: LogLevel::Info,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
             });
         });

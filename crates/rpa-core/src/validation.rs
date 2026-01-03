@@ -1,5 +1,6 @@
 use crate::execution::LogOutput;
-use crate::node_graph::{Activity, BranchType, LogEntry, LogLevel, NanoId, Project, Scenario};
+use crate::log::{LogActivity, LogEntry, LogLevel};
+use crate::node_graph::{Activity, BranchType, NanoId, Project, Scenario};
 use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
@@ -126,12 +127,13 @@ impl ValidationResult {
         if error_count > 0 || warning_count > 0 {
             log.log(LogEntry {
                 timestamp: timestamp.to_string(),
+                node_id: None,
                 level: if error_count > 0 {
                     LogLevel::Error
                 } else {
                     LogLevel::Warning
                 },
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: format!(
                     "Validation: {} error{}, {} warning{}",
                     error_count,
@@ -145,8 +147,9 @@ impl ValidationResult {
         for error in &self.errors {
             log.log(LogEntry {
                 timestamp: timestamp.to_string(),
+                node_id: None,
                 level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: format!("[{}] {}", error.code, error.message),
             });
         }
@@ -154,8 +157,9 @@ impl ValidationResult {
         for warning in &self.warnings {
             log.log(LogEntry {
                 timestamp: timestamp.to_string(),
+                node_id: None,
                 level: LogLevel::Warning,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: format!("[{}] {}", warning.code, warning.message),
             });
         }
@@ -634,7 +638,12 @@ impl<'a> ScenarioValidator<'a> {
 
     fn check_undefined_variables(&self, reachable_nodes: &HashSet<NanoId>) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
-        let mut defined_vars: HashSet<String> = self.project.variables.names().cloned().collect();
+        let mut defined_vars: HashSet<String> = self
+            .project
+            .variables
+            .names()
+            .map(|s| s.to_string())
+            .collect();
         let mut used_vars: HashSet<String> = HashSet::new();
 
         let start_node = self

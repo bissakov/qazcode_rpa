@@ -9,41 +9,41 @@ impl RpaApp {
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         let mut handled = false;
 
-        let copy_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
-        let paste_event =
-            ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
-        let cut_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Cut)));
-        let has_selected = !self.selected_nodes.is_empty();
-        let no_settings = !self.dialogs.settings.show;
-        let no_rename = self.dialogs.rename_scenario.scenario_index.is_none();
-
-        if copy_event && has_selected && no_settings && no_rename {
-            self.copy_selected_nodes();
-            handled = true;
-        }
-
-        let has_clipboard = !self.clipboard.nodes.is_empty();
-
-        if paste_event && has_clipboard && no_settings && no_rename {
-            let view = self.get_current_scenario_view_mut();
-            let mouse_world_pos = ctx
-                .pointer_hover_pos()
-                .map(|pos| (pos.to_vec2() - view.pan_offset) / view.zoom)
-                .unwrap_or_else(|| {
-                    let viewport_center = ctx.content_rect().center();
-                    (viewport_center.to_vec2() - view.pan_offset) / view.zoom
-                });
-
-            self.paste_clipboard_nodes(mouse_world_pos);
-            handled = true;
-        }
-
-        if cut_event && has_selected && no_settings && no_rename {
-            self.cut_selected_nodes();
-            handled = true;
-        }
-
         if !ctx.wants_keyboard_input() {
+            let copy_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
+            let paste_event =
+                ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
+            let cut_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Cut)));
+            let has_selected = !self.selected_nodes.is_empty();
+            let no_settings = !self.dialogs.settings.show;
+            let no_rename = self.dialogs.rename_scenario.scenario_index.is_none();
+
+            if copy_event && has_selected && no_settings && no_rename {
+                self.copy_selected_nodes();
+                handled = true;
+            }
+
+            let has_clipboard = !self.clipboard.nodes.is_empty();
+
+            if paste_event && has_clipboard && no_settings && no_rename {
+                let view = self.get_current_scenario_view_mut();
+                let mouse_world_pos = ctx
+                    .pointer_hover_pos()
+                    .map(|pos| (pos.to_vec2() - view.pan_offset) / view.zoom)
+                    .unwrap_or_else(|| {
+                        let viewport_center = ctx.content_rect().center();
+                        (viewport_center.to_vec2() - view.pan_offset) / view.zoom
+                    });
+
+                self.paste_clipboard_nodes(mouse_world_pos);
+                handled = true;
+            }
+
+            if cut_event && has_selected && no_settings && no_rename {
+                self.cut_selected_nodes();
+                handled = true;
+            }
+
             if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::A)) {
                 let node_ids: Vec<_> = self
                     .get_current_scenario()
@@ -83,7 +83,7 @@ impl RpaApp {
         }
 
         if handled {
-            ctx.request_repaint();
+            // ctx.request_repaint();
         }
     }
 
@@ -102,20 +102,20 @@ impl RpaApp {
             canvas::ContextMenuAction::Paste => {
                 self.paste_clipboard_nodes(mouse_world_pos);
             }
-             canvas::ContextMenuAction::Delete => {
-                 if !self.selected_nodes.is_empty() {
-                     let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
-                     let scenario = self.get_current_scenario_mut();
-                     for node_id in nodes_to_remove {
-                         scenario.remove_node(node_id);
-                     }
-                     self.invalidate_current_scenario();
-                     self.selected_nodes.clear();
-                     let view = self.get_current_scenario_view_mut();
-                     view.connection_renderer.clear_cache();
-                     self.undo_redo.add_undo(&self.project);
-                 }
-             }
+            canvas::ContextMenuAction::Delete => {
+                if !self.selected_nodes.is_empty() {
+                    let nodes_to_remove: Vec<_> = self.selected_nodes.iter().cloned().collect();
+                    let scenario = self.get_current_scenario_mut();
+                    for node_id in nodes_to_remove {
+                        scenario.remove_node(node_id);
+                    }
+                    self.invalidate_current_scenario();
+                    self.selected_nodes.clear();
+                    let view = self.get_current_scenario_view_mut();
+                    view.connection_renderer.clear_cache();
+                    self.undo_redo.add_undo(&self.project);
+                }
+            }
             canvas::ContextMenuAction::SelectAll => {
                 let node_ids: Vec<_> = self
                     .get_current_scenario()
@@ -229,15 +229,15 @@ impl RpaApp {
             })
             .collect();
 
-         let scenario = self.get_current_scenario_mut();
-         scenario.nodes.extend(nodes_to_paste);
+        let scenario = self.get_current_scenario_mut();
+        scenario.nodes.extend(nodes_to_paste);
 
-         for (new_from, new_to, branch_type) in connections_to_add {
-             scenario.add_connection_with_branch(new_from, new_to, branch_type);
-         }
+        for (new_from, new_to, branch_type) in connections_to_add {
+            scenario.add_connection_with_branch(new_from, new_to, branch_type);
+        }
 
-         self.invalidate_current_scenario();
-         let view = self.get_current_scenario_view_mut();
-         view.connection_renderer.clear_cache();
-     }
+        self.invalidate_current_scenario();
+        let view = self.get_current_scenario_view_mut();
+        view.connection_renderer.clear_cache();
+    }
 }

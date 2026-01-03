@@ -1,6 +1,8 @@
+use crate::NanoId;
 use crate::constants::UiConstants;
 use crate::ir::{Instruction, IrProgram};
-use crate::node_graph::{LogEntry, LogLevel, Project, VariableDirection};
+use crate::log::{LogActivity, LogEntry, LogLevel};
+use crate::node_graph::{Project, VariableDirection};
 use crate::stop_control::StopControl;
 use crate::variables::{VariableScope, Variables};
 use arc_script::{Value, eval_expr, parse_expr};
@@ -11,12 +13,12 @@ use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
 pub struct ScopeFrame {
-    pub scenario_id: String,
+    pub scenario_id: NanoId,
     pub variables: Variables,
 }
 
 pub struct CallFrame {
-    pub scenario_id: String,
+    pub scenario_id: NanoId,
     pub return_address: usize,
     pub var_bindings: Vec<crate::node_graph::VariablesBinding>,
 }
@@ -36,7 +38,8 @@ pub struct IrExecutor<'a, L: LogOutput> {
     error_handlers: Vec<usize>,
     iteration_counts: HashMap<usize, usize>,
     call_stack: Vec<CallFrame>,
-    current_scenario_id: String,
+    current_scenario_id: NanoId,
+    current_node_id: Option<NanoId>,
 }
 
 pub trait LogOutput {
@@ -106,13 +109,10 @@ impl ExecutionContext {
         self.scope_stack.last_mut().map(|f| &mut f.variables)
     }
 
-    pub fn find_scenario_variables(
-        &self,
-        scenario_id: &crate::node_graph::NanoId,
-    ) -> Option<&Variables> {
+    pub fn find_scenario_variables(&self, scenario_id: NanoId) -> Option<&Variables> {
         self.scope_stack
             .iter()
-            .find(|f| f.scenario_id == scenario_id.as_str())
+            .find(|f| f.scenario_id == scenario_id)
             .map(|f| &f.variables)
     }
 
@@ -150,7 +150,6 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         context: Arc<RwLock<ExecutionContext>>,
         log: &'a mut L,
     ) -> Self {
-        let current_scenario_id = project.main_scenario.id.as_str().to_string();
         Self {
             program,
             project,
@@ -159,7 +158,8 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             error_handlers: Vec::new(),
             iteration_counts: HashMap::new(),
             call_stack: Vec::new(),
-            current_scenario_id,
+            current_scenario_id: project.main_scenario.id.clone(),
+            current_node_id: None,
         }
     }
 
@@ -220,8 +220,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 if let Some(scenario) = scenario {
                     self.log.log(LogEntry {
                         timestamp,
+                        node_id: self.current_node_id.clone(),
                         level: LogLevel::Info,
-                        activity: "START".to_string(),
+                        activity: LogActivity::Start,
                         message: format!("Starting scenario: {}", &scenario.name),
                     });
                     Ok(pc + 1)
@@ -229,8 +230,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     let error_msg = format!("Scenario with ID {scenario_id} not found");
                     self.log.log(LogEntry {
                         timestamp,
+                        node_id: self.current_node_id.clone(),
                         level: LogLevel::Error,
-                        activity: "START".to_string(),
+                        activity: LogActivity::Start,
                         message: error_msg.clone(),
                     });
                     Err(error_msg)
@@ -254,8 +256,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 if let Some(scenario) = scenario {
                     self.log.log(LogEntry {
                         timestamp,
+                        node_id: self.current_node_id.clone(),
                         level: LogLevel::Info,
-                        activity: "END".to_string(),
+                        activity: LogActivity::End,
                         message: format!("Ending scenario: {}", &scenario.name),
                     });
 
@@ -294,8 +297,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     let error_msg = format!("Scenario with ID {scenario_id} not found");
                     self.log.log(LogEntry {
                         timestamp,
+                        node_id: self.current_node_id.clone(),
                         level: LogLevel::Error,
-                        activity: "END".to_string(),
+                        activity: LogActivity::End,
                         message: error_msg.clone(),
                     });
                     Err(error_msg)
@@ -306,20 +310,19 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let combined_vars = self.get_combined_variables();
 
                 match parse_expr(message) {
-                    Ok(expr) => {
-                        match eval_expr(&expr, &combined_vars) {
-                            Ok(value) => {
-                                self.log.log(LogEntry {
-                                    timestamp,
-                                    level: level.clone(),
-                                    activity: "LOG".to_string(),
-                                    message: value.to_string(),
-                                });
-                                Ok(pc + 1)
-                            }
-                            Err(e) => Err(e),
+                    Ok(expr) => match eval_expr(&expr, &combined_vars) {
+                        Ok(value) => {
+                            self.log.log(LogEntry {
+                                timestamp,
+                                node_id: self.current_node_id.clone(),
+                                level: level.clone(),
+                                activity: LogActivity::Log,
+                                message: value.to_string(),
+                            });
+                            Ok(pc + 1)
                         }
-                    }
+                        Err(e) => Err(e),
+                    },
                     Err(e) => Err(e),
                 }
             }
@@ -327,8 +330,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "DELAY".to_string(),
+                    activity: LogActivity::Delay,
                     message: format!("Waiting for {milliseconds} ms"),
                 });
 
@@ -366,8 +370,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "SET VAR".to_string(),
+                    activity: LogActivity::SetVariable,
                     message: format!("{var:?} = {value}"),
                 });
                 Ok(pc + 1)
@@ -381,8 +386,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     Err(err) => {
                         self.log.log(LogEntry {
                             timestamp,
+                            node_id: self.current_node_id.clone(),
                             level: LogLevel::Error,
-                            activity: "EVALUATE".to_string(),
+                            activity: LogActivity::Evaluate,
                             message: err.to_string(),
                         });
                         return Err(err);
@@ -391,8 +397,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "EVALUATE".to_string(),
+                    activity: LogActivity::Evaluate,
                     message: format!("Expression evaluated to {result}"),
                 });
 
@@ -428,8 +435,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level,
-                    activity: "IF".to_string(),
+                    activity: LogActivity::IfCondition,
                     message,
                 });
 
@@ -464,8 +472,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level,
-                    activity: "IF".to_string(),
+                    activity: LogActivity::IfCondition,
                     message,
                 });
 
@@ -488,8 +497,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             } => {
                 self.log.log(LogEntry {
                     timestamp: get_timestamp(self.context.read().unwrap().start_time),
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "LOOP".to_string(),
+                    activity: LogActivity::Loop,
                     message: format!("Starting loop: from {start} to {end} step {step}"),
                 });
 
@@ -505,8 +515,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 if *step == 0 {
                     self.log.log(LogEntry {
                         timestamp: get_timestamp(self.context.read().unwrap().start_time),
+                        node_id: self.current_node_id.clone(),
                         level: LogLevel::Warning,
-                        activity: "LOOP".to_string(),
+                        activity: LogActivity::Loop,
                         message: "Step is 0, loop skipped".to_string(),
                     });
                     return Ok(*end_target);
@@ -567,8 +578,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
                         self.log.log(LogEntry {
                             timestamp,
+                            node_id: self.current_node_id.clone(),
                             level: LogLevel::Info,
-                            activity: "WHILE".to_string(),
+                            activity: LogActivity::While,
                             message: format!("Iteration {iter_count}: condition is true"),
                         });
                         Ok(*body_target)
@@ -577,8 +589,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         let iter_count = self.iteration_counts.get(&pc).copied().unwrap_or(0);
                         self.log.log(LogEntry {
                             timestamp,
+                            node_id: self.current_node_id.clone(),
                             level: LogLevel::Info,
-                            activity: "WHILE".to_string(),
+                            activity: LogActivity::While,
                             message: format!("Completed {iter_count} iterations"),
                         });
                         self.iteration_counts.remove(&pc);
@@ -592,8 +605,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "LOOP".to_string(),
+                    activity: LogActivity::Loop,
                     message: "Continue to next iteration".to_string(),
                 });
                 Ok(*check_target)
@@ -602,8 +616,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "LOOP".to_string(),
+                    activity: LogActivity::Loop,
                     message: "Breaking out of loop".to_string(),
                 });
                 Ok(*end_target)
@@ -613,8 +628,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "TRY-CATCH".to_string(),
+                    activity: LogActivity::TryCatch,
                     message: "Entering try block".to_string(),
                 });
                 Ok(pc + 1)
@@ -624,8 +640,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
-                    activity: "TRY-CATCH".to_string(),
+                    activity: LogActivity::TryCatch,
                     message: "Try block completed successfully".to_string(),
                 });
                 Ok(pc + 1)
@@ -655,13 +672,14 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                     self.log.log(LogEntry {
                         timestamp,
+                        node_id: self.current_node_id.clone(),
                         level: LogLevel::Info,
-                        activity: "CALL".to_string(),
+                        activity: LogActivity::CallScenario,
                         message: format!("Entering scenario: {}", _scenario.name),
                     });
 
                     let mut child_scope = ScopeFrame {
-                        scenario_id: scenario_id.as_str().to_string(),
+                        scenario_id: scenario_id.clone(),
                         variables: _scenario.variables.clone(),
                     };
 
@@ -704,7 +722,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         var_bindings: parameters.clone(),
                     });
 
-                    self.current_scenario_id = scenario_id.as_str().to_string();
+                    self.current_scenario_id = scenario_id.clone();
 
                     if let Some(&start_index) = self.program.scenario_start_index.get(scenario_id) {
                         Ok(start_index)
@@ -723,13 +741,30 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 let timestamp = get_timestamp(self.context.read().unwrap().start_time);
                 self.log.log(LogEntry {
                     timestamp,
+                    node_id: self.current_node_id.clone(),
                     level: LogLevel::Warning,
-                    activity: "RUN PWSH".to_string(),
+                    activity: LogActivity::RunPowershell,
                     message: "[TODO] NOT IMPLEMENTED YET".to_string(),
                 });
                 Ok(pc + 1)
             }
-            Instruction::DebugMarker { .. } => Ok(pc + 1),
+            Instruction::DebugMarker {
+                node_id,
+                description,
+            } => {
+                self.current_node_id = Some(node_id.clone());
+
+                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                self.log.log(LogEntry {
+                    timestamp,
+                    node_id: Some(node_id.clone()),
+                    level: LogLevel::Debug,
+                    activity: LogActivity::Execution,
+                    message: format!("Executing node: {} ({})", description, node_id),
+                });
+
+                Ok(pc + 1)
+            }
         }
     }
 
@@ -738,8 +773,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             let timestamp = get_timestamp(self.context.read().unwrap().start_time);
             self.log.log(LogEntry {
                 timestamp,
+                node_id: self.current_node_id.clone(),
                 level: LogLevel::Info,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: "Execution stopped by user".to_string(),
             });
             return Err(error);
@@ -755,8 +791,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             let timestamp = get_timestamp(self.context.read().unwrap().start_time);
             self.log.log(LogEntry {
                 timestamp,
+                node_id: self.current_node_id.clone(),
                 level: LogLevel::Warning,
-                activity: "TRY-CATCH".to_string(),
+                activity: LogActivity::TryCatch,
                 message: format!("Error caught: {error}"),
             });
 
@@ -778,8 +815,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             let timestamp = get_timestamp(self.context.read().unwrap().start_time);
             self.log.log(LogEntry {
                 timestamp,
+                node_id: self.current_node_id.clone(),
                 level: LogLevel::Error,
-                activity: "ERROR".to_string(),
+                activity: LogActivity::System,
                 message: format!("Unhandled error: {error}. No error handler connected."),
             });
             Err(error)
@@ -796,7 +834,7 @@ pub fn execute_project_with_typed_vars(
     stop_control: StopControl,
 ) {
     let scope_stack = vec![ScopeFrame {
-        scenario_id: project.main_scenario.id.as_str().to_string(),
+        scenario_id: project.main_scenario.id.clone(),
         variables: project.main_scenario.variables.clone(),
     }];
 
@@ -816,8 +854,9 @@ pub fn execute_project_with_typed_vars(
         {
             let _ = log_sender.send(LogEntry {
                 timestamp: get_timestamp(context.read().unwrap().start_time),
+                node_id: executor.current_node_id.clone(),
                 level: LogLevel::Error,
-                activity: "SYSTEM".to_string(),
+                activity: LogActivity::System,
                 message: format!("Execution error: {e}"),
             });
         }
@@ -834,22 +873,25 @@ pub fn execute_project_with_typed_vars(
 
         let _ = log_sender.send(LogEntry {
             timestamp: get_timestamp(start_time),
+            node_id: None,
             level: LogLevel::Error,
-            activity: "SYSTEM".to_string(),
+            activity: LogActivity::System,
             message: format!("Execution interrupted: {panic_msg}"),
         });
     }
 
     let _ = log_sender.send(LogEntry {
         timestamp: get_timestamp(start_time),
+        node_id: None,
         level: LogLevel::Info,
-        activity: "SYSTEM".to_string(),
+        activity: LogActivity::System,
         message: "Execution completed.".to_string(),
     });
     let _ = log_sender.send(LogEntry {
         timestamp: get_timestamp(start_time),
+        node_id: None,
         level: LogLevel::Info,
-        activity: "SYSTEM".to_string(),
+        activity: LogActivity::Execution,
         message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
     });
 }

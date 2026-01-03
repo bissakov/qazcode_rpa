@@ -64,8 +64,8 @@ impl Variables {
         self.values.contains_key(name)
     }
 
-    pub fn names(&self) -> impl Iterator<Item = &String> {
-        self.values.keys()
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.values.keys().map(|name| name.as_str())
     }
 
     pub fn is_empty(&self) -> bool {

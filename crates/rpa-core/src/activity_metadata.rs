@@ -1,7 +1,7 @@
 use crate::Activity;
-use crate::LogLevel;
-use arc_script::VariableType;
+use crate::log::LogLevel;
 use crate::node_graph::NanoId;
+use arc_script::VariableType;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

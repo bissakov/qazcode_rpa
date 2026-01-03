@@ -5,9 +5,10 @@ use arc_script::{Value, VariableType};
 use eframe::egui;
 use egui::{DragValue, Slider};
 use egui_extras::{Column, TableBuilder};
+use rpa_core::log::{LogActivity, LogEntry, LogLevel};
 use rpa_core::{
-    Activity, LogEntry, LogLevel, Project, Scenario, UiConstants, Variables,
-    node_graph::VariableDirection, variables::VariableScope,
+    Activity, Project, Scenario, UiConstants, Variables, node_graph::VariableDirection,
+    snap_to_grid, variables::VariableScope,
 };
 use rust_i18n::t;
 
@@ -42,6 +43,7 @@ impl RpaApp {
                     knife_path: &mut self.knife_path,
                     resizing_node: &mut self.resizing_node,
                     allow_node_resize,
+                    searched_activity: &mut self.searched_activity,
                 };
 
                 let view = self.scenario_views.entry(scenario.id.clone()).or_default();
@@ -65,7 +67,14 @@ impl RpaApp {
                     drag_ended,
                     _resize_started,
                     resize_ended,
+                    canvas_rect,
                 ) = canvas_result.inner;
+
+                // Store actual canvas rect for focus calculations
+                self.last_canvas_rect = Some(canvas_rect);
+
+                // Handle any pending node focus requests
+                self.handle_pending_node_focus();
 
                 if connection_created {
                     self.undo_redo.add_undo(&self.project);
@@ -85,10 +94,36 @@ impl RpaApp {
                         let view = self.get_current_scenario_view_mut();
                         let world_pos =
                             ((pointer_pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2();
-                        self.get_current_scenario_mut()
-                            .add_node((*activity).clone(), world_pos);
-                        self.invalidate_current_scenario();
-                        self.undo_redo.add_undo(&self.project);
+
+                        // Apply same logic as button click for CallScenario
+                        let should_add_node = if matches!(*activity, Activity::CallScenario { .. })
+                        {
+                            !self.project.scenarios.is_empty()
+                        } else {
+                            true
+                        };
+
+                        if should_add_node {
+                            let final_activity =
+                                if matches!(*activity, Activity::CallScenario { .. }) {
+                                    let scenario_id = self.project.scenarios[0].id.clone();
+                                    Activity::CallScenario {
+                                        scenario_id,
+                                        parameters: Vec::new(),
+                                    }
+                                } else {
+                                    (*activity).clone()
+                                };
+
+                            let snapped_pos = egui::Pos2::new(
+                                snap_to_grid(world_pos.x, UiConstants::GRID_CELL_SIZE),
+                                snap_to_grid(world_pos.y, UiConstants::GRID_CELL_SIZE),
+                            );
+                            self.get_current_scenario_mut()
+                                .add_node(final_activity, snapped_pos);
+                            self.invalidate_current_scenario();
+                            self.undo_redo.add_undo(&self.project);
+                        }
                     }
                 }
 
@@ -128,6 +163,7 @@ impl RpaApp {
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .column(Column::initial(100.0).resizable(true))
                     .column(Column::initial(100.0).resizable(true))
+                    .column(Column::initial(100.0).resizable(true))
                     .column(Column::initial(120.0).resizable(true))
                     .column(Column::remainder().resizable(true))
                     .min_scrolled_height(0.0)
@@ -137,6 +173,9 @@ impl RpaApp {
                     .header(20.0, |mut header| {
                         header.col(|ui| {
                             ui.strong(t!("output_table.timestamp").as_ref());
+                        });
+                        header.col(|ui| {
+                            ui.strong(t!("output_table.node_id").as_ref());
                         });
                         header.col(|ui| {
                             ui.strong(t!("output_table.level").as_ref());
@@ -157,25 +196,49 @@ impl RpaApp {
                         body.rows(text_height * 1.4, row_count, |mut row| {
                             let row_index = row.index();
                             if let Some(log_entry) = &self.project.execution_log.get(row_index) {
+                                // Extract all data needed for closures to avoid borrowing issues
+                                let timestamp = log_entry.timestamp.clone();
+                                let node_id_clone = log_entry.node_id.clone();
+                                let _level = log_entry.level.clone();
+                                let level_color = log_entry.level.get_color();
+                                let level_str = log_entry.level.as_str().to_string();
+                                let activity = log_entry.activity.clone();
+                                let message = log_entry.message.clone();
+                                let has_newlines = message.contains('\n');
+
                                 row.col(|ui| {
-                                    ui.label(&log_entry.timestamp);
+                                    ui.label(&timestamp);
                                 });
 
                                 row.col(|ui| {
-                                    ui.colored_label(
-                                        log_entry.level.get_color(),
-                                        log_entry.level.as_str(),
-                                    );
+                                    if let Some(node_id) = &node_id_clone {
+                                        let response = ui.add(
+                                            egui::Label::new(node_id.as_str())
+                                                .sense(egui::Sense::click()),
+                                        );
+
+                                        if response.clicked() {
+                                            self.focus_on_node_from_log(node_id);
+                                        }
+
+                                        if response.hovered() {
+                                            ui.ctx()
+                                                .set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+                                    } else {
+                                        ui.label("");
+                                    }
                                 });
 
                                 row.col(|ui| {
-                                    ui.label(&log_entry.activity);
+                                    ui.colored_label(level_color, &level_str);
                                 });
 
                                 row.col(|ui| {
-                                    let message = &log_entry.message;
-                                    let has_newlines = message.contains('\n');
+                                    ui.label(activity.as_str());
+                                });
 
+                                row.col(|ui| {
                                     if has_newlines {
                                         let mut lines = message.lines();
                                         let first_line = lines.next().unwrap_or("");
@@ -197,7 +260,7 @@ impl RpaApp {
                                                 .set_cursor_icon(egui::CursorIcon::PointingHand);
                                         }
                                     } else {
-                                        ui.label(message);
+                                        ui.label(&message);
                                     }
                                 });
                             }
@@ -327,7 +390,7 @@ impl RpaApp {
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(
                                     t!("window.title").to_string(),
                                 ));
-                                ctx.request_repaint();
+                                // ctx.request_repaint();
                             }
 
                             self.settings = temp.clone();
@@ -528,8 +591,9 @@ impl RpaApp {
                                 Err(err) => {
                                     self.project.execution_log.push(LogEntry {
                                         timestamp: "".to_string(),
+                                        node_id: None,
                                         level: LogLevel::Error,
-                                        activity: "SYSTEM".to_string(),
+                                        activity: LogActivity::System,
                                         message: t!(
                                             "system_messages.invalid_variable_value",
                                             error = err
@@ -889,9 +953,6 @@ impl RpaApp {
                 {
                     self.redo();
                 }
-
-                let fps = ctx.input(|i| 1.0 / i.stable_dt);
-                ui.label(format!("FPS: {:.2}", fps));
             });
         });
     }
@@ -1088,18 +1149,35 @@ impl RpaApp {
                         .default_open(default_open)
                         .show(ui, |ui| {
                             for (metadata, activity) in activities {
-                                let response = ui.dnd_drag_source(
-                                    egui::Id::new(format!(
-                                        "activity_{:?}",
-                                        std::mem::discriminant(&activity)
-                                    )),
-                                    activity.clone(),
-                                    |ui| {
-                                        let _ = ui.button(t!(metadata.button_key).as_ref());
-                                    },
-                                );
+                                let should_disable =
+                                    matches!(activity, Activity::CallScenario { .. })
+                                        && self.project.scenarios.is_empty();
 
-                                if response.response.clicked() {
+                                let was_clicked = if should_disable {
+                                    let btn_response = ui
+                                        .add_enabled(
+                                            false,
+                                            egui::Button::new(t!(metadata.button_key).as_ref()),
+                                        )
+                                        .on_hover_text(
+                                            t!("system_messages.no_scenarios_warning").as_ref(),
+                                        );
+                                    btn_response.clicked()
+                                } else {
+                                    let dnd_response = ui.dnd_drag_source(
+                                        egui::Id::new(format!(
+                                            "activity_{:?}",
+                                            std::mem::discriminant(&activity)
+                                        )),
+                                        activity.clone(),
+                                        |ui| {
+                                            let _ = ui.button(t!(metadata.button_key).as_ref());
+                                        },
+                                    );
+                                    dnd_response.response.clicked()
+                                };
+
+                                if was_clicked {
                                     if matches!(activity, Activity::CallScenario { .. }) {
                                         if !self.project.scenarios.is_empty() {
                                             let scenario_id = self.project.scenarios[0].id.clone();
@@ -1110,8 +1188,9 @@ impl RpaApp {
                                         } else {
                                             self.project.execution_log.push(LogEntry {
                                                 timestamp: "".to_string(),
+                                                node_id: None,
                                                 level: LogLevel::Warning,
-                                                activity: "SYSTEM".to_string(),
+                                                activity: LogActivity::System,
                                                 message: t!("system_messages.no_scenarios_warning")
                                                     .to_string(),
                                             });
@@ -1271,7 +1350,8 @@ impl RpaApp {
                         );
                         let scenario = self.get_current_scenario();
                         let scenario_id = self.get_current_scenario_id();
-                        if let Some(runtime_vars) = ctx.find_scenario_variables(scenario_id) {
+                        if let Some(runtime_vars) = ctx.find_scenario_variables(scenario_id.clone())
+                        {
                             let merged = scenario.variables.merge(runtime_vars);
                             self.render_variables(
                                 ui,

@@ -123,9 +123,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    let current_scenario_id = project.main_scenario.id.as_str().to_string();
     let scope_stack = vec![ScopeFrame {
-        scenario_id: current_scenario_id.clone(),
+        scenario_id: project.main_scenario.id.clone(),
         variables: project.main_scenario.variables.clone(),
     }];
 

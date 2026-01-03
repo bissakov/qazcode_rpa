@@ -1,5 +1,6 @@
 use crate::state::RpaApp;
-use rpa_core::{LogEntry, LogLevel, Project, ProjectFile};
+use rpa_core::log::{LogActivity, LogEntry, LogLevel};
+use rpa_core::{Project, ProjectFile};
 use rust_i18n::t;
 
 impl RpaApp {
@@ -36,8 +37,9 @@ impl RpaApp {
                     // When decided, call: self.undo_redo.clear_undo_history();
                     self.project.execution_log.push(LogEntry {
                         timestamp: "[00:00.00]".to_string(),
+                        node_id: None,
                         level: LogLevel::Info,
-                        activity: "SYSTEM".to_string(),
+                        activity: LogActivity::System,
                         message: t!("system_messages.project_saved", path = path.display())
                             .to_string(),
                     });
@@ -45,8 +47,9 @@ impl RpaApp {
                 Err(e) => {
                     self.project.execution_log.push(LogEntry {
                         timestamp: "[00:00.00]".to_string(),
+                        node_id: None,
                         level: LogLevel::Error,
-                        activity: "SYSTEM".to_string(),
+                        activity: LogActivity::System,
                         message: t!("system_messages.failed_save", error = e).to_string(),
                     });
                 }
@@ -54,8 +57,9 @@ impl RpaApp {
             Err(e) => {
                 self.project.execution_log.push(LogEntry {
                     timestamp: "[00:00.00]".to_string(),
+                    node_id: None,
                     level: LogLevel::Error,
-                    activity: "SYSTEM".to_string(),
+                    activity: LogActivity::System,
                     message: t!("system_messages.failed_serialize", error = e).to_string(),
                 });
             }
@@ -79,8 +83,9 @@ impl RpaApp {
                             project_file.project.execution_log.clear();
                             project_file.project.execution_log.push(LogEntry {
                                 timestamp: "".to_string(),
+                                node_id: None,
                                 level: LogLevel::Info,
-                                activity: "SYSTEM".to_string(),
+                                activity: LogActivity::System,
                                 message: t!(
                                     "system_messages.project_loaded",
                                     path = path.display()
@@ -100,8 +105,9 @@ impl RpaApp {
                         Err(e) => {
                             self.project.execution_log.push(LogEntry {
                                 timestamp: "".to_string(),
+                                node_id: None,
                                 level: LogLevel::Error,
-                                activity: "SYSTEM".to_string(),
+                                activity: LogActivity::System,
                                 message: t!("system_messages.failed_parse", error = e).to_string(),
                             });
                         }
@@ -110,8 +116,9 @@ impl RpaApp {
                 Err(e) => {
                     self.project.execution_log.push(LogEntry {
                         timestamp: "[00:00.00]".to_string(),
+                        node_id: None,
                         level: LogLevel::Error,
-                        activity: "SYSTEM".to_string(),
+                        activity: LogActivity::System,
                         message: t!("system_messages.failed_read", error = e).to_string(),
                     });
                 }

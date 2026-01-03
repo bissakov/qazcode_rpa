@@ -1,76 +1,14 @@
 use crate::canvas_grid::CanvasObstacleGrid;
-use crate::constants::{OutputDirection, UiConstants, enforce_minimum_cells};
-use crate::variables::Variables;
+use crate::constants::{ALPHABET, OutputDirection, UiConstants, enforce_minimum_cells};
+use crate::log::LogLevel;
+use crate::log::LogStorage;
+use crate::variables::{VariableScope, Variables};
 use arc_script::VariableType;
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
-use std::{collections::VecDeque, fmt};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LogLevel {
-    Info,
-    Warning,
-    Error,
-    Debug,
-}
-
-impl LogLevel {
-    pub fn as_str(&self) -> &str {
-        match self {
-            LogLevel::Info => "INFO",
-            LogLevel::Warning => "WARN",
-            LogLevel::Error => "ERROR",
-            LogLevel::Debug => "DEBUG",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub timestamp: String,
-    pub level: LogLevel,
-    pub activity: String,
-    pub message: String,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct LogStorage {
-    values: VecDeque<LogEntry>,
-    pub max_entry_count: usize,
-}
-
-impl LogStorage {
-    pub fn new() -> Self {
-        Self {
-            values: VecDeque::new(),
-            max_entry_count: UiConstants::DEFAULT_LOG_ENTRIES,
-        }
-    }
-
-    pub fn push(&mut self, entry: LogEntry) {
-        if self.values.len() == self.max_entry_count {
-            self.values.pop_front();
-        }
-        self.values.push_back(entry);
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&LogEntry> {
-        self.values.get(idx)
-    }
-
-    pub fn len(&mut self) -> usize {
-        self.values.len()
-    }
-
-    pub fn is_empty(&mut self) -> bool {
-        self.values.len() == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.values.clear();
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
@@ -241,6 +179,14 @@ impl Scenario {
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct NanoId(Arc<str>);
+
+impl Deref for NanoId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl fmt::Display for NanoId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -655,6 +601,28 @@ impl Activity {
             Activity::CallScenario { .. } | Activity::RunPowershell { .. }
         )
     }
+
+    pub fn iter_as_str() -> impl Iterator<Item = &'static str> {
+        [
+            "Start",
+            "End",
+            "Log",
+            "Delay",
+            "SetVariable",
+            "Evaluate",
+            "IfCondition",
+            "Loop",
+            "While",
+            "Continue",
+            "Break",
+            "CallScenario",
+            "RunPowershell",
+            "Note",
+            "TryCatch",
+        ]
+        .iter()
+        .copied()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -670,7 +638,7 @@ pub struct VariablesBinding {
     pub source_var_name: String,
     pub direction: VariableDirection,
     #[serde(default)]
-    pub source_scope: Option<crate::variables::VariableScope>,
+    pub source_scope: Option<VariableScope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

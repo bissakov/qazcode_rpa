@@ -1,7 +1,7 @@
 use crate::UiConstants;
+use crate::log::LogLevel;
 use crate::variables::VariableScope;
 use crate::{
-    LogLevel,
     node_graph::{Activity, BranchType, NanoId, Project, Scenario},
     variables::Variables,
 };
