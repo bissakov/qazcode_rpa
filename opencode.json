@@ -16,7 +16,7 @@
       }
     }
   },
-  "lsp": false,
+  "lsp": {},
   "formatter": {
     "rustfmt": {
       "command": [
