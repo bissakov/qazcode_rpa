@@ -276,7 +276,7 @@ impl NanoId {
     }
 
     pub fn new_with_nanoid() -> Self {
-        NanoId(Arc::from(nanoid!(8)))
+        NanoId(Arc::from(nanoid!(8, &ALPHABET)))
     }
 
     pub fn as_str(&self) -> &str {
