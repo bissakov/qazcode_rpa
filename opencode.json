@@ -11,12 +11,12 @@
       "tools": {
         "write": true,
         "edit": true,
-        "bash": false,
+        "bash": true,
         "task": false
       }
     }
   },
-  "lsp": {},
+  "lsp": false,
   "formatter": {
     "rustfmt": {
       "command": [
