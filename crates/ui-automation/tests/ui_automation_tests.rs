@@ -1164,3 +1164,151 @@ fn test_key_sequence_complex() {
     assert!(key_sequence("ctrl+shift+escape").is_ok());
     sleep(Duration::from_millis(100));
 }
+
+#[test]
+fn test_scroll_wheel_at_up() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = &windows[0];
+    let center_x = window.bounds.left + window.bounds.width / 2;
+    let center_y = window.bounds.top + window.bounds.height / 2;
+
+    assert!(scroll_wheel_at(center_x, center_y, "up", 1).is_ok());
+    sleep(Duration::from_millis(200));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_scroll_wheel_at_down() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = &windows[0];
+    let center_x = window.bounds.left + window.bounds.width / 2;
+    let center_y = window.bounds.top + window.bounds.height / 2;
+
+    assert!(scroll_wheel_at(center_x, center_y, "down", 1).is_ok());
+    sleep(Duration::from_millis(200));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_scroll_in_window() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = &windows[0];
+    let hwnd = window.id.as_hwnd();
+
+    assert!(scroll_in_window(hwnd, "down", 2).is_ok());
+    sleep(Duration::from_millis(200));
+
+    assert!(scroll_in_window(hwnd, "up", 2).is_ok());
+    sleep(Duration::from_millis(200));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_scroll_invalid_direction() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = &windows[0];
+    let center_x = window.bounds.left + window.bounds.width / 2;
+    let center_y = window.bounds.top + window.bounds.height / 2;
+
+    let result = scroll_wheel_at(center_x, center_y, "invalid", 1);
+    assert!(result.is_err());
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_scroll_invalid_amount() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = &windows[0];
+    let center_x = window.bounds.left + window.bounds.width / 2;
+    let center_y = window.bounds.top + window.bounds.height / 2;
+
+    let result = scroll_wheel_at(center_x, center_y, "up", 0);
+    assert!(result.is_err());
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_drag_mouse_smooth() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    assert!(drag_mouse(100, 100, 300, 300, 500).is_ok());
+    sleep(Duration::from_millis(200));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_drag_mouse_with_duration() {
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
+
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
+
+    assert!(drag_mouse(150, 150, 400, 250, 300).is_ok());
+    sleep(Duration::from_millis(200));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_drag_mouse_invalid_duration() {
+    let result = drag_mouse(100, 100, 200, 200, 10);
+    assert!(result.is_err());
+}

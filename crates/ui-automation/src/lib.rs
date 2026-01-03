@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::ffi::c_void;
+use std::fmt::{self, Display, Formatter};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{
@@ -17,10 +18,10 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_TYPE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
-    MOUSEEVENTF_RIGHTUP, MOUSEINPUT, SendInput, VIRTUAL_KEY,
+    MOUSEEVENTF_RIGHTUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, MOUSEEVENTF_WHEEL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetForegroundWindow,
+    BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow,
     GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
@@ -34,6 +35,13 @@ const INPUT_MOUSE: INPUT_TYPE = INPUT_TYPE(0);
 const INPUT_KEYBOARD: INPUT_TYPE = INPUT_TYPE(1);
 
 const STILL_ACTIVE: u32 = 259;
+
+const SB_LINEUP: usize = 0;
+const SB_LINEDOWN: usize = 1;
+const SB_LINELEFT: usize = 0;
+const SB_LINERIGHT: usize = 1;
+const WM_SCROLL: u32 = 0x0114;
+const WHEEL_DELTA: i32 = 120;
 
 const VK_BACKSPACE: u16 = 0x08;
 const VK_TAB: u16 = 0x09;
@@ -87,6 +95,56 @@ pub enum AutomationError {
     ProcessNotFound { name: String },
     AccessDenied { operation: String },
     Other(String),
+}
+
+impl Display for AutomationError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            AutomationError::Win32Failure { code } => {
+                let msg = error_code_to_message(*code);
+                write!(f, "Win32 error {}: {}", code, msg)
+            }
+            AutomationError::ApplicationNotFound { name } => {
+                write!(f, "Application '{}' not found in running processes", name)
+            }
+            AutomationError::WindowNotFound { title } => {
+                write!(f, "Window with title containing '{}' not found", title)
+            }
+            AutomationError::ProcessTerminated { pid } => {
+                write!(f, "Process with PID {} has terminated", pid)
+            }
+            AutomationError::ProcessNotFound { name } => {
+                write!(f, "Process '{}' not found", name)
+            }
+            AutomationError::AccessDenied { operation } => {
+                write!(f, "Access denied for operation: {}", operation)
+            }
+            AutomationError::Other(msg) => {
+                write!(f, "{}", msg)
+            }
+        }
+    }
+}
+
+fn error_code_to_message(code: i32) -> &'static str {
+    match code {
+        0 => "Success (no error)",
+        2 => "File or path not found",
+        5 => "Access denied",
+        6 => "Invalid handle",
+        8 => "Not enough memory",
+        11 => "Invalid environment",
+        13 => "Invalid data",
+        126 => "Application not found",
+        127 => "Application path not found",
+        740 => "Elevated privileges required",
+        1400 => "Invalid window handle",
+        1401 => "Invalid menu handle",
+        1402 => "Invalid cursor handle",
+        1404 => "Invalid accelerator table handle",
+        1407 => "No state information for window",
+        _ => "Unknown error",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1414,4 +1472,195 @@ pub fn key_sequence(sequence: &str) -> Result<(), AutomationError> {
     }
 
     Ok(())
+}
+
+fn get_current_mouse_position() -> Result<(i32, i32), AutomationError> {
+    unsafe {
+        let mut point = windows::Win32::Foundation::POINT::default();
+        GetCursorPos(&mut point)
+            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
+        Ok((point.x, point.y))
+    }
+}
+
+pub fn scroll_wheel_at(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), AutomationError> {
+    if amount <= 0 {
+        return Err(AutomationError::Other(
+            "Scroll amount must be greater than 0".to_string(),
+        ));
+    }
+
+    let dir_lower = direction.to_lowercase();
+    let delta = match dir_lower.as_str() {
+        "up" => WHEEL_DELTA * amount,
+        "down" => -(WHEEL_DELTA * amount),
+        _ => {
+            return Err(AutomationError::Other(
+                format!("Invalid scroll direction: {}. Use 'up' or 'down'", direction),
+            ))
+        }
+    };
+
+    move_mouse(x, y)?;
+    sleep(Duration::from_millis(50));
+
+    for _ in 0..amount {
+        unsafe {
+            let input = INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: INPUT_0 {
+                    mi: MOUSEINPUT {
+                        dx: x,
+                        dy: y,
+                        mouseData: delta as u32,
+                        dwFlags: MOUSEEVENTF_WHEEL,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+
+            SendInput(&[input], size_of::<INPUT>() as i32);
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    Ok(())
+}
+
+pub fn scroll_in_window(parent_hwnd: HWND, direction: &str, amount: i32) -> Result<(), AutomationError> {
+    if amount <= 0 {
+        return Err(AutomationError::Other(
+            "Scroll amount must be greater than 0".to_string(),
+        ));
+    }
+
+    unsafe {
+        let _ = SetForegroundWindow(parent_hwnd);
+    }
+    sleep(Duration::from_millis(50));
+
+    let sb_direction = match direction.to_lowercase().as_str() {
+        "up" => SB_LINEUP,
+        "down" => SB_LINEDOWN,
+        "left" => SB_LINELEFT,
+        "right" => SB_LINERIGHT,
+        _ => {
+            return Err(AutomationError::Other(
+                format!("Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'", direction),
+            ))
+        }
+    };
+
+    for _ in 0..amount {
+        unsafe {
+            SendMessageW(
+                parent_hwnd,
+                WM_SCROLL,
+                Some(WPARAM(sb_direction)),
+                None,
+            );
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    Ok(())
+}
+
+pub fn scroll_up() -> Result<(), AutomationError> {
+    let (x, y) = get_current_mouse_position()?;
+    scroll_wheel_at(x, y, "up", 1)
+}
+
+pub fn scroll_down() -> Result<(), AutomationError> {
+    let (x, y) = get_current_mouse_position()?;
+    scroll_wheel_at(x, y, "down", 1)
+}
+
+pub fn scroll_page_up(hwnd: HWND) -> Result<(), AutomationError> {
+    scroll_in_window(hwnd, "up", 5)
+}
+
+pub fn scroll_page_down(hwnd: HWND) -> Result<(), AutomationError> {
+    scroll_in_window(hwnd, "down", 5)
+}
+
+fn linspace(from: (i32, i32), to: (i32, i32), steps: u32) -> Vec<(f64, f64)> {
+    if steps == 0 {
+        return vec![(from.0 as f64, from.1 as f64)];
+    }
+
+    (0..=steps)
+        .map(|i| {
+            let t = i as f64 / steps as f64;
+            (
+                from.0 as f64 + (to.0 - from.0) as f64 * t,
+                from.1 as f64 + (to.1 - from.1) as f64 * t,
+            )
+        })
+        .collect()
+}
+
+pub fn drag_mouse(from_x: i32, from_y: i32, to_x: i32, to_y: i32, duration_ms: u32) -> Result<(), AutomationError> {
+    if duration_ms < 50 {
+        return Err(AutomationError::Other(
+            "Drag duration must be at least 50ms".to_string(),
+        ));
+    }
+
+    move_mouse(from_x, from_y)?;
+    sleep(Duration::from_millis(50));
+
+    unsafe {
+        let input = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: from_x,
+                    dy: from_y,
+                    mouseData: 0,
+                    dwFlags: MOUSEEVENTF_LEFTDOWN,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+
+        SendInput(&[input], size_of::<INPUT>() as i32);
+    }
+    sleep(Duration::from_millis(50));
+
+    let step_count = (duration_ms / 50).max(1);
+    let steps = linspace((from_x, from_y), (to_x, to_y), step_count);
+
+    for (x, y) in steps {
+        move_mouse(x as i32, y as i32)?;
+        sleep(Duration::from_millis(50));
+    }
+
+    unsafe {
+        let input = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: to_x,
+                    dy: to_y,
+                    mouseData: 0,
+                    dwFlags: MOUSEEVENTF_LEFTUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+
+        SendInput(&[input], size_of::<INPUT>() as i32);
+    }
+
+    Ok(())
+}
+
+pub fn drag_control(source: &Control, to_x: i32, to_y: i32, duration_ms: u32) -> Result<(), AutomationError> {
+    let from_x = source.bounds.left + source.bounds.width / 2;
+    let from_y = source.bounds.top + source.bounds.height / 2;
+    drag_mouse(from_x, from_y, to_x, to_y, duration_ms)
 }
