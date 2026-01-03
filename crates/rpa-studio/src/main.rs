@@ -8,6 +8,7 @@ mod file_io;
 mod loglevel_ext;
 mod state;
 mod ui;
+mod ui_explorer;
 mod undo_redo;
 
 use eframe::egui;

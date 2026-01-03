@@ -52,6 +52,7 @@ impl eframe::App for RpaApp {
         let (context_action, mouse_world_pos) = self.render_canvas_panel(ctx);
         self.handle_context_menu_action(context_action, mouse_world_pos);
         self.render_dialogs(ctx);
+        self.render_ui_explorer(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
         ctx.request_repaint();

@@ -1,5 +1,5 @@
-use arc_script::{Value, VariableResolver};
 use crate::variables::Variables;
+use arc_script::{Value, VariableResolver};
 
 impl VariableResolver for Variables {
     fn resolve(&self, name: &str) -> Result<Value, String> {

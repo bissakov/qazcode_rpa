@@ -28,8 +28,7 @@ fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> Option<Pos2> {
     }
 
     fn on_segment(a: Pos2, b: Pos2, c: Pos2) -> bool {
-        b.x <= a.x.max(c.x) && b.x >= a.x.min(c.x) &&
-        b.y <= a.y.max(c.y) && b.y >= a.y.min(c.y)
+        b.x <= a.x.max(c.x) && b.x >= a.x.min(c.x) && b.y <= a.y.max(c.y) && b.y >= a.y.min(c.y)
     }
 
     let d1 = a2 - a1;

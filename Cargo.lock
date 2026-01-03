@@ -1405,6 +1405,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_ltreeview"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26cc0bdade9c74de1ed0f03189a8d10039d5ac6acef981978c01504c80b53d33"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3792,6 +3801,7 @@ dependencies = [
  "egui",
  "egui_code_editor",
  "egui_extras",
+ "egui_ltreeview",
  "embed-resource",
  "image 0.25.9",
  "indexmap",
@@ -3803,6 +3813,8 @@ dependencies = [
  "serde",
  "serde_json",
  "syntect",
+ "ui-automation",
+ "uuid",
 ]
 
 [[package]]
@@ -4632,6 +4644,7 @@ version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
 dependencies = [
+ "getrandom 0.3.4",
  "js-sys",
  "serde_core",
  "wasm-bindgen",

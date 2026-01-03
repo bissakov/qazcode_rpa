@@ -3,6 +3,9 @@ use std::ffi::c_void;
 use std::fmt::{self, Display, Formatter};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+
+pub mod generator;
+pub mod selector;
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0, WAIT_TIMEOUT, WPARAM,
 };
@@ -18,13 +21,14 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_TYPE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
-    MOUSEEVENTF_RIGHTUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, MOUSEEVENTF_WHEEL,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-     BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow,
-     GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
-     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-     SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
+    BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos,
+    GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, IsZoomed, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
 };
 use windows::core::BOOL;
 use windows::core::{PCWSTR, PWSTR};
@@ -637,81 +641,81 @@ impl Control {
     }
 
     pub fn toggle_checkbox(&self) -> Result<(), AutomationError> {
-         let current = self.is_checked()?;
-         self.set_checked(!current)
-     }
+        let current = self.is_checked()?;
+        self.set_checked(!current)
+    }
 
-     pub fn clear_text(&self) -> Result<(), AutomationError> {
-         self.focus()?;
-         key_down_ctrl()?;
-         sleep(Duration::from_millis(50));
-         press_key('a')?;
-         sleep(Duration::from_millis(50));
-         key_up_ctrl()?;
-         sleep(Duration::from_millis(50));
-         press_delete()?;
-         Ok(())
-     }
+    pub fn clear_text(&self) -> Result<(), AutomationError> {
+        self.focus()?;
+        key_down_ctrl()?;
+        sleep(Duration::from_millis(50));
+        press_key('a')?;
+        sleep(Duration::from_millis(50));
+        key_up_ctrl()?;
+        sleep(Duration::from_millis(50));
+        press_delete()?;
+        Ok(())
+    }
 
-     pub fn copy_to_clipboard(&self) -> Result<(), AutomationError> {
-         self.focus()?;
-         key_down_ctrl()?;
-         sleep(Duration::from_millis(50));
-         press_key('a')?;
-         sleep(Duration::from_millis(50));
-         key_up_ctrl()?;
-         sleep(Duration::from_millis(50));
-         key_down_ctrl()?;
-         sleep(Duration::from_millis(50));
-         press_key('c')?;
-         sleep(Duration::from_millis(50));
-         key_up_ctrl()?;
-         Ok(())
-     }
+    pub fn copy_to_clipboard(&self) -> Result<(), AutomationError> {
+        self.focus()?;
+        key_down_ctrl()?;
+        sleep(Duration::from_millis(50));
+        press_key('a')?;
+        sleep(Duration::from_millis(50));
+        key_up_ctrl()?;
+        sleep(Duration::from_millis(50));
+        key_down_ctrl()?;
+        sleep(Duration::from_millis(50));
+        press_key('c')?;
+        sleep(Duration::from_millis(50));
+        key_up_ctrl()?;
+        Ok(())
+    }
 
-     pub fn paste_from_clipboard(&self) -> Result<(), AutomationError> {
-         self.focus()?;
-         key_down_ctrl()?;
-         sleep(Duration::from_millis(50));
-         press_key('v')?;
-         sleep(Duration::from_millis(50));
-         key_up_ctrl()?;
-         Ok(())
-     }
+    pub fn paste_from_clipboard(&self) -> Result<(), AutomationError> {
+        self.focus()?;
+        key_down_ctrl()?;
+        sleep(Duration::from_millis(50));
+        press_key('v')?;
+        sleep(Duration::from_millis(50));
+        key_up_ctrl()?;
+        Ok(())
+    }
 
-     pub fn select_text(&self, start: i32, length: i32) -> Result<(), AutomationError> {
-         unsafe {
-             SendMessageW(
-                 self.as_hwnd(),
-                 EM_SETSEL,
-                 Some(WPARAM(start as usize)),
-                 Some(LPARAM(start as isize + length as isize)),
-             );
-             Ok(())
-         }
-     }
+    pub fn select_text(&self, start: i32, length: i32) -> Result<(), AutomationError> {
+        unsafe {
+            SendMessageW(
+                self.as_hwnd(),
+                EM_SETSEL,
+                Some(WPARAM(start as usize)),
+                Some(LPARAM(start as isize + length as isize)),
+            );
+            Ok(())
+        }
+    }
 
-     pub fn get_selected_text(&self) -> Result<String, AutomationError> {
-         unsafe {
-             let result = SendMessageW(self.as_hwnd(), EM_GETSEL, None, None).0 as isize;
-             let start = result & 0xFFFF;
-             let end = (result >> 16) & 0xFFFF;
+    pub fn get_selected_text(&self) -> Result<String, AutomationError> {
+        unsafe {
+            let result = SendMessageW(self.as_hwnd(), EM_GETSEL, None, None).0 as isize;
+            let start = result & 0xFFFF;
+            let end = (result >> 16) & 0xFFFF;
 
-             if start == end {
-                 return Ok(String::new());
-             }
+            if start == end {
+                return Ok(String::new());
+            }
 
-             let full_text = self.get_text()?;
-             let start_idx = start.max(0) as usize;
-             let end_idx = end.max(0) as usize;
+            let full_text = self.get_text()?;
+            let start_idx = start.max(0) as usize;
+            let end_idx = end.max(0) as usize;
 
-             if start_idx >= full_text.len() || end_idx > full_text.len() {
-                 return Ok(String::new());
-             }
+            if start_idx >= full_text.len() || end_idx > full_text.len() {
+                return Ok(String::new());
+            }
 
-             Ok(full_text[start_idx..end_idx.min(full_text.len())].to_string())
-         }
-     }
+            Ok(full_text[start_idx..end_idx.min(full_text.len())].to_string())
+        }
+    }
 
     pub fn refresh(&mut self) -> Result<(), AutomationError> {
         unsafe {
@@ -1025,6 +1029,154 @@ pub fn find_control_by_class_exact(
         .ok_or(AutomationError::WindowNotFound {
             title: format!("Control with class '{}'", class_name),
         })
+}
+
+pub fn find_window_by_selector(dsl: &str) -> Result<Window, AutomationError> {
+    let selector = selector::Selector::parse(dsl)?;
+    find_window_by_selector_obj(&selector)
+}
+
+pub fn find_window_by_selector_obj(
+    selector: &selector::Selector,
+) -> Result<Window, AutomationError> {
+    if selector.path.is_empty() {
+        return Err(AutomationError::Other("Selector has no paths".to_string()));
+    }
+
+    let first_path = &selector.path[0];
+    if first_path.element_type != "Window" {
+        return Err(AutomationError::Other(
+            "First selector path must be Window".to_string(),
+        ));
+    }
+
+    let windows = find_windows()?;
+    let mut matches = windows
+        .into_iter()
+        .filter(|w| {
+            selector::window_matches_criteria(&w.title, &w.class_name, &first_path.criteria)
+        })
+        .collect::<Vec<_>>();
+
+    if matches.is_empty() {
+        return Err(AutomationError::WindowNotFound {
+            title: format!("No window matches selector: {}", selector.original),
+        });
+    }
+
+    if matches.len() > 1 {
+        log::warn!(
+            "Selector '{}' matched {} windows, returning first. Windows: {:?}",
+            selector.original,
+            matches.len(),
+            matches.iter().map(|w| &w.title).collect::<Vec<_>>()
+        );
+    }
+
+    Ok(matches.remove(0))
+}
+
+pub fn find_control_by_selector(dsl: &str) -> Result<Control, AutomationError> {
+    let selector = selector::Selector::parse(dsl)?;
+    find_control_by_selector_obj(&selector)
+}
+
+pub fn find_control_by_selector_obj(
+    selector: &selector::Selector,
+) -> Result<Control, AutomationError> {
+    if selector.path.is_empty() {
+        return Err(AutomationError::Other("Selector has no paths".to_string()));
+    }
+
+    // First path must be Window
+    let first_path = &selector.path[0];
+    if first_path.element_type != "Window" {
+        return Err(AutomationError::Other(
+            "First selector path must be Window".to_string(),
+        ));
+    }
+
+    // Find the window
+    let mut windows = find_windows()?;
+    windows.retain(|w| {
+        selector::window_matches_criteria(&w.title, &w.class_name, &first_path.criteria)
+    });
+
+    if windows.is_empty() {
+        return Err(AutomationError::WindowNotFound {
+            title: format!("No window matches selector: {}", selector.original),
+        });
+    }
+
+    if windows.len() > 1 {
+        log::warn!(
+            "Selector window matched {} windows, using first. Windows: {:?}",
+            windows.len(),
+            windows.iter().map(|w| &w.title).collect::<Vec<_>>()
+        );
+    }
+
+    let window = windows.remove(0);
+    let mut current_parent_hwnd = window.id.as_hwnd();
+
+    // Process remaining control paths
+    for (path_idx, path) in selector.path.iter().enumerate().skip(1) {
+        if path.element_type != "Control" {
+            return Err(AutomationError::Other(format!(
+                "Selector path {} must be Control, got {}",
+                path_idx, path.element_type
+            )));
+        }
+
+        let controls = find_controls_in_window(current_parent_hwnd)?;
+        let mut matches = controls
+            .into_iter()
+            .filter(|c| selector::control_matches_criteria(&c.text, &c.class_name, &path.criteria))
+            .collect::<Vec<_>>();
+
+        if matches.is_empty() {
+            return Err(AutomationError::WindowNotFound {
+                title: format!(
+                    "No control matches selector at path {}: {}",
+                    path_idx, selector.original
+                ),
+            });
+        }
+
+        if matches.len() > 1 {
+            log::warn!(
+                "Selector path {} matched {} controls, returning first. Controls: {:?}",
+                path_idx,
+                matches.len(),
+                matches.iter().map(|c| &c.text).collect::<Vec<_>>()
+            );
+        }
+
+        let control = matches.remove(0);
+        current_parent_hwnd = control.id.as_hwnd();
+
+        // If this is the last path, return the control
+        if path_idx == selector.path.len() - 1 {
+            return Ok(control);
+        }
+    }
+
+    Err(AutomationError::Other(
+        "Selector resolution failed unexpectedly".to_string(),
+    ))
+}
+
+/// Generate a selector DSL string from a Window
+pub fn window_to_selector(window: &Window) -> Result<String, AutomationError> {
+    generator::window_to_selector(window)
+}
+
+/// Generate a selector DSL string from a Control and its parent Window
+pub fn control_to_selector(
+    control: &Control,
+    parent_window: &Window,
+) -> Result<String, AutomationError> {
+    generator::control_to_selector(control, parent_window)
 }
 
 pub fn click(x: i32, y: i32) -> Result<(), AutomationError> {
@@ -1341,9 +1493,10 @@ pub fn press_insert() -> Result<(), AutomationError> {
 
 pub fn press_f_key(n: u8) -> Result<(), AutomationError> {
     if n < 1 || n > 12 {
-        return Err(AutomationError::Other(
-            format!("F key must be F1-F12, got F{}", n),
-        ));
+        return Err(AutomationError::Other(format!(
+            "F key must be F1-F12, got F{}",
+            n
+        )));
     }
     let key_code = VK_F1 + (n - 1) as u16;
     press_key_code(key_code)
@@ -1376,20 +1529,20 @@ pub fn press_key_by_name(name: &str) -> Result<(), AutomationError> {
                 if n >= 1 && n <= 12 {
                     VK_F1 + (n - 1) as u16
                 } else {
-                    return Err(AutomationError::Other(
-                        format!("F key must be F1-F12, got {}", name),
-                    ));
+                    return Err(AutomationError::Other(format!(
+                        "F key must be F1-F12, got {}",
+                        name
+                    )));
                 }
             } else {
-                return Err(AutomationError::Other(
-                    format!("Invalid F key: {}", name),
-                ));
+                return Err(AutomationError::Other(format!("Invalid F key: {}", name)));
             }
         }
         _ => {
-            return Err(AutomationError::Other(
-                format!("Unknown key name: {}", name),
-            ))
+            return Err(AutomationError::Other(format!(
+                "Unknown key name: {}",
+                name
+            )));
         }
     };
 
@@ -1438,9 +1591,10 @@ where
         }
 
         if start.elapsed() >= timeout {
-            return Err(AutomationError::Other(
-                format!("Timeout after {}ms waiting for condition", timeout_ms),
-            ));
+            return Err(AutomationError::Other(format!(
+                "Timeout after {}ms waiting for condition",
+                timeout_ms
+            )));
         }
 
         sleep(poll_interval);
@@ -1494,9 +1648,9 @@ pub fn wait_for_control_text(
         find_controls_in_window(parent_hwnd)
             .ok()
             .and_then(|controls| {
-                controls.into_iter().find(|c| {
-                    c.text.to_lowercase().contains(&text.to_lowercase())
-                })
+                controls
+                    .into_iter()
+                    .find(|c| c.text.to_lowercase().contains(&text.to_lowercase()))
             })
     })
 }
@@ -1525,9 +1679,10 @@ pub fn key_sequence(sequence: &str) -> Result<(), AutomationError> {
             "shift" => key_down_shift()?,
             "alt" => key_down_alt()?,
             _ => {
-                return Err(AutomationError::Other(
-                    format!("Unknown modifier: {}", modifier),
-                ))
+                return Err(AutomationError::Other(format!(
+                    "Unknown modifier: {}",
+                    modifier
+                )));
             }
         }
         sleep(Duration::from_millis(50));
@@ -1551,13 +1706,17 @@ pub fn key_sequence(sequence: &str) -> Result<(), AutomationError> {
 fn get_current_mouse_position() -> Result<(i32, i32), AutomationError> {
     unsafe {
         let mut point = windows::Win32::Foundation::POINT::default();
-        GetCursorPos(&mut point)
-            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
+        GetCursorPos(&mut point).map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
         Ok((point.x, point.y))
     }
 }
 
-pub fn scroll_wheel_at(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), AutomationError> {
+pub fn scroll_wheel_at(
+    x: i32,
+    y: i32,
+    direction: &str,
+    amount: i32,
+) -> Result<(), AutomationError> {
     if amount <= 0 {
         return Err(AutomationError::Other(
             "Scroll amount must be greater than 0".to_string(),
@@ -1569,9 +1728,10 @@ pub fn scroll_wheel_at(x: i32, y: i32, direction: &str, amount: i32) -> Result<(
         "up" => WHEEL_DELTA * amount,
         "down" => -(WHEEL_DELTA * amount),
         _ => {
-            return Err(AutomationError::Other(
-                format!("Invalid scroll direction: {}. Use 'up' or 'down'", direction),
-            ))
+            return Err(AutomationError::Other(format!(
+                "Invalid scroll direction: {}. Use 'up' or 'down'",
+                direction
+            )));
         }
     };
 
@@ -1602,7 +1762,11 @@ pub fn scroll_wheel_at(x: i32, y: i32, direction: &str, amount: i32) -> Result<(
     Ok(())
 }
 
-pub fn scroll_in_window(parent_hwnd: HWND, direction: &str, amount: i32) -> Result<(), AutomationError> {
+pub fn scroll_in_window(
+    parent_hwnd: HWND,
+    direction: &str,
+    amount: i32,
+) -> Result<(), AutomationError> {
     if amount <= 0 {
         return Err(AutomationError::Other(
             "Scroll amount must be greater than 0".to_string(),
@@ -1620,20 +1784,16 @@ pub fn scroll_in_window(parent_hwnd: HWND, direction: &str, amount: i32) -> Resu
         "left" => SB_LINELEFT,
         "right" => SB_LINERIGHT,
         _ => {
-            return Err(AutomationError::Other(
-                format!("Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'", direction),
-            ))
+            return Err(AutomationError::Other(format!(
+                "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'",
+                direction
+            )));
         }
     };
 
     for _ in 0..amount {
         unsafe {
-            SendMessageW(
-                parent_hwnd,
-                WM_SCROLL,
-                Some(WPARAM(sb_direction)),
-                None,
-            );
+            SendMessageW(parent_hwnd, WM_SCROLL, Some(WPARAM(sb_direction)), None);
         }
         sleep(Duration::from_millis(50));
     }
@@ -1675,7 +1835,13 @@ fn linspace(from: (i32, i32), to: (i32, i32), steps: u32) -> Vec<(f64, f64)> {
         .collect()
 }
 
-pub fn drag_mouse(from_x: i32, from_y: i32, to_x: i32, to_y: i32, duration_ms: u32) -> Result<(), AutomationError> {
+pub fn drag_mouse(
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    duration_ms: u32,
+) -> Result<(), AutomationError> {
     if duration_ms < 50 {
         return Err(AutomationError::Other(
             "Drag duration must be at least 50ms".to_string(),
@@ -1733,7 +1899,12 @@ pub fn drag_mouse(from_x: i32, from_y: i32, to_x: i32, to_y: i32, duration_ms: u
     Ok(())
 }
 
-pub fn drag_control(source: &Control, to_x: i32, to_y: i32, duration_ms: u32) -> Result<(), AutomationError> {
+pub fn drag_control(
+    source: &Control,
+    to_x: i32,
+    to_y: i32,
+    duration_ms: u32,
+) -> Result<(), AutomationError> {
     let from_x = source.bounds.left + source.bounds.width / 2;
     let from_y = source.bounds.top + source.bounds.height / 2;
     drag_mouse(from_x, from_y, to_x, to_y, duration_ms)

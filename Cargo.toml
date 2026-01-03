@@ -16,6 +16,7 @@ serde_json = "1.0"
 nanoid = "0.4"
 indexmap = { version = "2.0", features = ["serde"] }
 rust-i18n = "3"
+uuid = { version = "1.0", features = ["v4"] }
 
 [workspace.package]
 version = "0.7.0"

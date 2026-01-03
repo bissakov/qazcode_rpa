@@ -1309,179 +1309,191 @@ fn test_drag_mouse_with_duration() {
 
 #[test]
 fn test_drag_mouse_invalid_duration() {
-     let result = drag_mouse(100, 100, 200, 200, 10);
-     assert!(result.is_err());
+    let result = drag_mouse(100, 100, 200, 200, 10);
+    assert!(result.is_err());
 }
 
 #[test]
 fn test_control_clear_text() {
-     let result = launch_application("notepad.exe", "");
-     assert!(result.is_ok());
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
 
-     let app = result.unwrap();
-     sleep(Duration::from_millis(300));
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
 
-     let windows = find_windows_by_title("Notepad").unwrap();
-     assert!(!windows.is_empty());
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
 
-     let window = &windows[0];
-     let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
-     let edit_control = controls.iter().find(|c| c.class_name.to_lowercase().contains("edit"));
-     
-     if let Some(control) = edit_control {
-         assert!(control.set_text("Hello World").is_ok());
-         sleep(Duration::from_millis(100));
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
 
-         assert!(control.get_text().unwrap() == "Hello World");
+    if let Some(control) = edit_control {
+        assert!(control.set_text("Hello World").is_ok());
+        sleep(Duration::from_millis(100));
 
-         assert!(control.clear_text().is_ok());
-         sleep(Duration::from_millis(100));
+        assert!(control.get_text().unwrap() == "Hello World");
 
-         assert!(control.get_text().unwrap() == "");
-     }
+        assert!(control.clear_text().is_ok());
+        sleep(Duration::from_millis(100));
 
-     app.close().unwrap();
-     sleep(Duration::from_millis(100));
+        assert!(control.get_text().unwrap() == "");
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn test_control_copy_to_clipboard() {
-     let result = launch_application("notepad.exe", "");
-     assert!(result.is_ok());
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
 
-     let app = result.unwrap();
-     sleep(Duration::from_millis(300));
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
 
-     let windows = find_windows_by_title("Notepad").unwrap();
-     assert!(!windows.is_empty());
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
 
-     let window = &windows[0];
-     let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
-     let edit_control = controls.iter().find(|c| c.class_name.to_lowercase().contains("edit"));
-     
-     if let Some(control) = edit_control {
-         assert!(control.set_text("Test Content").is_ok());
-         sleep(Duration::from_millis(100));
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
 
-         assert!(control.copy_to_clipboard().is_ok());
-         sleep(Duration::from_millis(100));
-     }
+    if let Some(control) = edit_control {
+        assert!(control.set_text("Test Content").is_ok());
+        sleep(Duration::from_millis(100));
 
-     app.close().unwrap();
-     sleep(Duration::from_millis(100));
+        assert!(control.copy_to_clipboard().is_ok());
+        sleep(Duration::from_millis(100));
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn test_control_paste_from_clipboard() {
-     let result = launch_application("notepad.exe", "");
-     assert!(result.is_ok());
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
 
-     let app = result.unwrap();
-     sleep(Duration::from_millis(300));
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
 
-     let windows = find_windows_by_title("Notepad").unwrap();
-     assert!(!windows.is_empty());
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
 
-     let window = &windows[0];
-     let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
-     let edit_control = controls.iter().find(|c| c.class_name.to_lowercase().contains("edit"));
-     
-     if let Some(control) = edit_control {
-         assert!(control.paste_from_clipboard().is_ok());
-         sleep(Duration::from_millis(100));
-     }
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
 
-     app.close().unwrap();
-     sleep(Duration::from_millis(100));
+    if let Some(control) = edit_control {
+        assert!(control.paste_from_clipboard().is_ok());
+        sleep(Duration::from_millis(100));
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn test_control_select_text() {
-     let result = launch_application("notepad.exe", "");
-     assert!(result.is_ok());
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
 
-     let app = result.unwrap();
-     sleep(Duration::from_millis(300));
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
 
-     let windows = find_windows_by_title("Notepad").unwrap();
-     assert!(!windows.is_empty());
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
 
-     let window = &windows[0];
-     let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
-     let edit_control = controls.iter().find(|c| c.class_name.to_lowercase().contains("edit"));
-     
-     if let Some(control) = edit_control {
-         assert!(control.set_text("Hello World").is_ok());
-         sleep(Duration::from_millis(100));
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
 
-         assert!(control.select_text(0, 5).is_ok());
-         sleep(Duration::from_millis(100));
-     }
+    if let Some(control) = edit_control {
+        assert!(control.set_text("Hello World").is_ok());
+        sleep(Duration::from_millis(100));
 
-     app.close().unwrap();
-     sleep(Duration::from_millis(100));
+        assert!(control.select_text(0, 5).is_ok());
+        sleep(Duration::from_millis(100));
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn test_control_get_selected_text() {
-     let result = launch_application("notepad.exe", "");
-     assert!(result.is_ok());
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
 
-     let app = result.unwrap();
-     sleep(Duration::from_millis(300));
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
 
-     let windows = find_windows_by_title("Notepad").unwrap();
-     assert!(!windows.is_empty());
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
 
-     let window = &windows[0];
-     let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
-     let edit_control = controls.iter().find(|c| c.class_name.to_lowercase().contains("edit"));
-     
-     if let Some(control) = edit_control {
-         assert!(control.set_text("Hello World").is_ok());
-         sleep(Duration::from_millis(100));
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
 
-         assert!(control.select_text(0, 5).is_ok());
-         sleep(Duration::from_millis(100));
+    if let Some(control) = edit_control {
+        assert!(control.set_text("Hello World").is_ok());
+        sleep(Duration::from_millis(100));
 
-         let selected = control.get_selected_text().unwrap();
-         assert_eq!(selected, "Hello");
-     }
+        assert!(control.select_text(0, 5).is_ok());
+        sleep(Duration::from_millis(100));
 
-     app.close().unwrap();
-     sleep(Duration::from_millis(100));
+        let selected = control.get_selected_text().unwrap();
+        assert_eq!(selected, "Hello");
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn test_control_text_workflow() {
-     let result = launch_application("notepad.exe", "");
-     assert!(result.is_ok());
+    let result = launch_application("notepad.exe", "");
+    assert!(result.is_ok());
 
-     let app = result.unwrap();
-     sleep(Duration::from_millis(300));
+    let app = result.unwrap();
+    sleep(Duration::from_millis(300));
 
-     let windows = find_windows_by_title("Notepad").unwrap();
-     assert!(!windows.is_empty());
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
 
-     let window = &windows[0];
-     let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
-     let edit_control = controls.iter().find(|c| c.class_name.to_lowercase().contains("edit"));
-     
-     if let Some(control) = edit_control {
-         assert!(control.set_text("Original").is_ok());
-         sleep(Duration::from_millis(100));
-         assert_eq!(control.get_text().unwrap(), "Original");
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
 
-         assert!(control.select_text(0, 3).is_ok());
-         sleep(Duration::from_millis(100));
-         let selected = control.get_selected_text().unwrap();
-         assert_eq!(selected, "Ori");
+    if let Some(control) = edit_control {
+        assert!(control.set_text("Original").is_ok());
+        sleep(Duration::from_millis(100));
+        assert_eq!(control.get_text().unwrap(), "Original");
 
-         assert!(control.clear_text().is_ok());
-         sleep(Duration::from_millis(100));
-         assert_eq!(control.get_text().unwrap(), "");
-     }
+        assert!(control.select_text(0, 3).is_ok());
+        sleep(Duration::from_millis(100));
+        let selected = control.get_selected_text().unwrap();
+        assert_eq!(selected, "Ori");
 
-     app.close().unwrap();
-     sleep(Duration::from_millis(100));
+        assert!(control.clear_text().is_ok());
+        sleep(Duration::from_millis(100));
+        assert_eq!(control.get_text().unwrap(), "");
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
 }
