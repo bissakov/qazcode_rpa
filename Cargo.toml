@@ -4,6 +4,8 @@ members = [
   "crates/rpa-core",
   "crates/rpa-cli",
   "crates/rpa-studio",
+  "crates/shared",
+  "crates/ui-explorer",
   "crates/office",
   "crates/arc_script",
   "tools/validate_locale",

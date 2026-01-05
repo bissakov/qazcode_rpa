@@ -20,7 +20,7 @@ pub use constants::{
 pub use execution::{execute_project_with_typed_vars, get_timestamp};
 pub use ir::{Instruction, IrBuilder, IrProgram};
 pub use node_graph::{
-    Activity, BranchType, Connection, NanoId, Node, Project, ProjectFile, Scenario, UiState,
+    Activity, BranchType, Connection, Node, Project, ProjectFile, Scenario, UiState,
 };
 pub use stop_control::StopControl;
 pub use validation::{

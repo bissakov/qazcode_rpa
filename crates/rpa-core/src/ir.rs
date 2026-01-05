@@ -2,10 +2,11 @@ use crate::UiConstants;
 use crate::log::LogLevel;
 use crate::variables::VariableScope;
 use crate::{
-    node_graph::{Activity, BranchType, NanoId, Project, Scenario},
+    node_graph::{Activity, BranchType, Project, Scenario},
     variables::Variables,
 };
 use arc_script::{Expr, Value, parse_expr};
+use shared::NanoId;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]

@@ -6,9 +6,9 @@ mod dialogs;
 mod events;
 mod file_io;
 mod loglevel_ext;
+mod settings;
 mod state;
 mod ui;
-mod ui_explorer;
 mod undo_redo;
 
 use eframe::egui;
@@ -24,32 +24,14 @@ use std::time::SystemTime;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct AppSettings {
-    target_fps: usize,
-    font_size: f32,
-    show_minimap: bool,
-    allow_node_resize: bool,
-    language: String,
-    current_max_entry_size: usize,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            target_fps: UiConstants::DEFAULT_FPS,
-            font_size: UiConstants::DEFAULT_FONT_SIZE,
-            show_minimap: true,
-            allow_node_resize: false,
-            language: "en".to_string(),
-            current_max_entry_size: UiConstants::DEFAULT_LOG_ENTRIES,
-        }
-    }
-}
-
 fn load_icon() -> IconData {
     let bytes = include_bytes!("../../../resources/icon.ico");
-    let img = image::load_from_memory(bytes).unwrap().to_rgba8();
+
+    let img = match image::load_from_memory(bytes) {
+        Ok(img) => img.to_rgba8(),
+        Err(_) => return IconData::default(),
+    };
+
     let (w, h) = img.dimensions();
 
     IconData {

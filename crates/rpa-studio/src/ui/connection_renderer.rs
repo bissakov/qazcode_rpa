@@ -1,5 +1,6 @@
 use egui::{Color32, Painter, Pos2, Stroke};
-use rpa_core::{BranchType, NanoId, Node};
+use rpa_core::{BranchType, Node};
+use shared::NanoId;
 use std::collections::HashMap;
 
 fn point_to_polyline_distance(p: Pos2, pts: &[Pos2]) -> f32 {

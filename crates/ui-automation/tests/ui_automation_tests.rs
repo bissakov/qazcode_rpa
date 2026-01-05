@@ -1,7 +1,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use ui_automation::*;
+use ui_automation::win32::automation::*;
 
 #[test]
 fn test_application_creation() {
@@ -44,7 +44,76 @@ fn test_process_enumeration() {
 
     let app = result.unwrap();
     app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
 
+#[test]
+fn test_window_show_overlay() {
+    let app = launch_application("notepad.exe", "").unwrap();
+    sleep(Duration::from_millis(500));
+
+    let windows = find_windows_by_title("notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = windows.first().unwrap();
+
+    // Test default overlay
+    assert!(window.show_overlay().is_ok());
+    sleep(Duration::from_millis(500));
+
+    // Test overlay with custom color (red)
+    assert!(window.show_overlay_with_color((255, 0, 0)).is_ok());
+    sleep(Duration::from_millis(500));
+
+    // Test overlay with custom duration
+    assert!(window.show_overlay_with_duration(500).is_ok());
+    sleep(Duration::from_millis(600));
+
+    // Test overlay with all custom parameters (blue, 800ms, 2px)
+    assert!(window.show_overlay_custom((0, 0, 255), 800, 2).is_ok());
+    sleep(Duration::from_millis(900));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_control_show_overlay() {
+    let app = launch_application("notepad.exe", "").unwrap();
+    sleep(Duration::from_millis(500));
+
+    let windows = find_windows_by_title("notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = windows.first().unwrap();
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+
+    if let Some(edit_control) = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"))
+    {
+        // Test default overlay
+        assert!(edit_control.show_overlay().is_ok());
+        sleep(Duration::from_millis(500));
+
+        // Test overlay with custom color (yellow)
+        assert!(edit_control.show_overlay_with_color((255, 255, 0)).is_ok());
+        sleep(Duration::from_millis(500));
+
+        // Test overlay with custom duration
+        assert!(edit_control.show_overlay_with_duration(600).is_ok());
+        sleep(Duration::from_millis(700));
+
+        // Test overlay with all custom parameters (cyan, 500ms, 3px)
+        assert!(
+            edit_control
+                .show_overlay_custom((0, 255, 255), 500, 3)
+                .is_ok()
+        );
+        sleep(Duration::from_millis(600));
+    }
+
+    app.close().unwrap();
     sleep(Duration::from_millis(100));
 }
 
@@ -1492,6 +1561,73 @@ fn test_control_text_workflow() {
         assert!(control.clear_text().is_ok());
         sleep(Duration::from_millis(100));
         assert_eq!(control.get_text().unwrap(), "");
+    }
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_overlay_on_window() {
+    let app = launch_application("notepad.exe", "").unwrap();
+    sleep(Duration::from_millis(500));
+
+    let windows = find_windows_by_title("notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = windows.first().unwrap();
+    window.activate().unwrap();
+    sleep(Duration::from_millis(200));
+
+    // Test default overlay (green border, 2 seconds)
+    assert!(window.show_overlay().is_ok());
+    sleep(Duration::from_millis(100));
+
+    // Test with custom color (red: 255, 0, 0)
+    assert!(window.show_overlay_with_color((255, 0, 0)).is_ok());
+    sleep(Duration::from_millis(100));
+
+    // Test with custom duration (3 seconds)
+    assert!(window.show_overlay_with_duration(3000).is_ok());
+    sleep(Duration::from_millis(100));
+
+    // Test with full control
+    assert!(window.show_overlay_custom((0, 0, 255), 2000, 6).is_ok());
+    sleep(Duration::from_millis(2200));
+
+    app.close().unwrap();
+    sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn test_overlay_on_control() {
+    let app = launch_application("notepad.exe", "").unwrap();
+    sleep(Duration::from_millis(500));
+
+    let windows = find_windows_by_title("Notepad").unwrap();
+    assert!(!windows.is_empty());
+
+    let window = &windows[0];
+    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let edit_control = controls
+        .iter()
+        .find(|c| c.class_name.to_lowercase().contains("edit"));
+
+    if let Some(control) = edit_control {
+        window.activate().unwrap();
+        sleep(Duration::from_millis(200));
+
+        // Test default overlay on control
+        assert!(control.show_overlay().is_ok());
+        sleep(Duration::from_millis(100));
+
+        // Test with custom color
+        assert!(control.show_overlay_with_color((255, 255, 0)).is_ok());
+        sleep(Duration::from_millis(100));
+
+        // Test with custom duration
+        assert!(control.show_overlay_with_duration(1500).is_ok());
+        sleep(Duration::from_millis(1600));
     }
 
     app.close().unwrap();

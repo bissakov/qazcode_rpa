@@ -1,4 +1,3 @@
-use crate::NanoId;
 use crate::constants::UiConstants;
 use crate::ir::{Instruction, IrProgram};
 use crate::log::{LogActivity, LogEntry, LogLevel};
@@ -6,6 +5,7 @@ use crate::node_graph::{Project, VariableDirection};
 use crate::stop_control::StopControl;
 use crate::variables::{VariableScope, Variables};
 use arc_script::{Value, eval_expr, parse_expr};
+use shared::NanoId;
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};

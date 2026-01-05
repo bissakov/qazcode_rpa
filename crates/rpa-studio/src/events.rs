@@ -3,7 +3,7 @@ use crate::{
     ui::canvas,
 };
 use eframe::egui;
-use rpa_core::NanoId;
+use shared::NanoId;
 
 impl RpaApp {
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
@@ -205,7 +205,7 @@ impl RpaApp {
 
         for node in &self.clipboard.nodes {
             let mut new_node = node.clone();
-            let new_id = NanoId::new_with_nanoid();
+            let new_id = NanoId::default();
             old_to_new_id.insert(new_node.id.clone(), new_id.clone());
             new_node.id = new_id;
             new_node.position = (new_node.position.to_vec2() + offset).to_pos2();

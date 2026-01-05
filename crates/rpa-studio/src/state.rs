@@ -1,11 +1,12 @@
-use crate::AppSettings;
 use crate::dialogs::DialogState;
+use crate::settings::AppSettings;
 use crate::ui::canvas::ResizeHandle;
 use crate::ui::connection_renderer::ConnectionRenderer;
 use crate::undo_redo::UndoRedoManager;
 use rpa_core::execution::ExecutionContext;
 use rpa_core::log::LogEntry;
-use rpa_core::{Connection, NanoId, Node, Project, Scenario, StopControl, Variables};
+use rpa_core::{Connection, Node, Project, Scenario, StopControl, Variables};
+use shared::NanoId;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::{

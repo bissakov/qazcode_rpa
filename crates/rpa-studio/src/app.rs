@@ -34,8 +34,6 @@ impl eframe::App for RpaApp {
             ));
         }
 
-        // ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-
         self.process_execution_updates(ctx);
 
         let old_debounce = self.property_edit_debounce;
@@ -56,16 +54,6 @@ impl eframe::App for RpaApp {
         self.handle_keyboard_shortcuts(ctx);
 
         ctx.request_repaint();
-
-        // let target_dt = Duration::from_secs_f64(1.0 / self.settings.target_fps as f64);
-        // if now.duration_since(self.last_repaint) >= target_dt {
-        //     self.last_repaint = now;
-        //     ctx.request_repaint_after(target_dt);
-        // }
-        // ctx.request_repaint_after(target_frame_time);
-        // if frame_time < target_frame_time {
-        //     std::thread::sleep(target_frame_time - frame_time);
-        // }
     }
 }
 
@@ -81,7 +69,6 @@ impl RpaApp {
                     self.project.execution_log.push(log_entry);
                 }
             }
-            // ctx.request_repaint();
         }
 
         if execution_complete {

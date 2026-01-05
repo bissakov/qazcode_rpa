@@ -2,7 +2,8 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{NanoId, UiConstants};
+use crate::UiConstants;
+use shared::NanoId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogActivity {

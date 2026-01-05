@@ -7,10 +7,10 @@ use egui::{
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::log::LogLevel;
 use rpa_core::{
-    Activity, ActivityMetadata, BranchType, NanoId, Node, PropertyType, Scenario, UiConstants,
-    snap_to_grid,
+    Activity, ActivityMetadata, BranchType, Node, PropertyType, Scenario, UiConstants, snap_to_grid,
 };
 use rust_i18n::t;
+use shared::NanoId;
 use std::collections::{HashMap, HashSet};
 
 fn is_node_grid_aligned(node: &Node, grid_size: f32) -> bool {

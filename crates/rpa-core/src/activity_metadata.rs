@@ -1,7 +1,7 @@
 use crate::Activity;
 use crate::log::LogLevel;
-use crate::node_graph::NanoId;
 use arc_script::VariableType;
+use shared::NanoId;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,13 +87,13 @@ impl ActivityMetadata {
             (
                 &START_METADATA,
                 Activity::Start {
-                    scenario_id: NanoId::new_with_nanoid(),
+                    scenario_id: NanoId::default(),
                 },
             ),
             (
                 &END_METADATA,
                 Activity::End {
-                    scenario_id: NanoId::new_with_nanoid(),
+                    scenario_id: NanoId::default(),
                 },
             ),
             (
@@ -144,7 +144,7 @@ impl ActivityMetadata {
             (
                 &CALL_SCENARIO_METADATA,
                 Activity::CallScenario {
-                    scenario_id: NanoId::new_with_nanoid(),
+                    scenario_id: NanoId::default(),
                     parameters: Vec::new(),
                 },
             ),
@@ -179,19 +179,19 @@ impl ActivityMetadata {
                     (
                         &START_METADATA,
                         Activity::Start {
-                            scenario_id: NanoId::new_with_nanoid(),
+                            scenario_id: NanoId::default(),
                         },
                     ),
                     (
                         &END_METADATA,
                         Activity::End {
-                            scenario_id: NanoId::new_with_nanoid(),
+                            scenario_id: NanoId::default(),
                         },
                     ),
                     (
                         &CALL_SCENARIO_METADATA,
                         Activity::CallScenario {
-                            scenario_id: NanoId::new_with_nanoid(),
+                            scenario_id: NanoId::default(),
                             parameters: Vec::new(),
                         },
                     ),

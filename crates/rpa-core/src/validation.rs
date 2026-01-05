@@ -1,6 +1,7 @@
 use crate::execution::LogOutput;
 use crate::log::{LogActivity, LogEntry, LogLevel};
-use crate::node_graph::{Activity, BranchType, NanoId, Project, Scenario};
+use crate::node_graph::{Activity, BranchType, Project, Scenario};
+use shared::NanoId;
 use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};

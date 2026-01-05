@@ -11,6 +11,7 @@ use rpa_core::{
     snap_to_grid, variables::VariableScope,
 };
 use rust_i18n::t;
+use ui_explorer::render::render_ui_explorer_content;
 
 use crate::custom::scenario_tab;
 
@@ -859,6 +860,11 @@ impl RpaApp {
             return;
         }
 
+        // Auto-initialize tree on first window open
+        if self.dialogs.ui_explorer.root_node.is_none() {
+            self.dialogs.ui_explorer.refresh_windows();
+        }
+
         let mut open = self.dialogs.ui_explorer.show;
         egui::Window::new("UI Explorer")
             .open(&mut open)
@@ -866,78 +872,15 @@ impl RpaApp {
             .min_height(800.0)
             .resizable(true)
             .show(ctx, |ui| {
-                self.render_ui_explorer_content(ui);
+                render_ui_explorer_content(ui, &mut self.dialogs.ui_explorer);
             });
         self.dialogs.ui_explorer.show = open;
-    }
 
-    pub fn render_ui_explorer_content(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("🔄 Refresh").clicked() {
-                self.dialogs.ui_explorer.refresh_windows();
-            }
-
-            if let Some(err) = &self.dialogs.ui_explorer.error_message {
-                ui.label(format!("❌ {}", err));
-            }
-
-            if self.dialogs.ui_explorer.is_refreshing {
-                ui.label("⏳ Refreshing...");
-            }
-        });
-
-        ui.separator();
-
-        egui::SidePanel::left("ui_explorer_side_panel")
-            .resizable(true)
-            .default_width(ui.available_width() * 0.4)
-            .show_inside(ui, |ui| {
-                egui::ScrollArea::both()
-                    .max_width(ui.available_width())
-                    .show(ui, |ui| {
-                        if let Some(selected) = crate::ui_explorer::window_tree::render_tree(
-                            ui,
-                            &mut self.dialogs.ui_explorer.root_node,
-                            &mut self.dialogs.ui_explorer.tree_state,
-                        ) {
-                            self.dialogs.ui_explorer.selected_element = Some(selected);
-                        }
-                    });
-            });
-
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            if let Some(ref element) = self.dialogs.ui_explorer.selected_element {
-                crate::ui_explorer::properties::render_properties(ui, element);
-            } else {
-                ui.label("Select an element to see properties");
-            }
-        });
-
-        // ui.horizontal(|ui| {
-        //     let left_width = ui.available_width() * 0.4;
-        //
-        //     egui::ScrollArea::both()
-        //         .max_width(left_width)
-        //         .show(ui, |ui| {
-        //             if let Some(selected) = crate::ui_explorer::window_tree::render_tree(
-        //                 ui,
-        //                 &mut self.dialogs.ui_explorer.root_node,
-        //                 &mut self.dialogs.ui_explorer.tree_state,
-        //             ) {
-        //                 self.dialogs.ui_explorer.selected_element = Some(selected);
-        //             }
-        //         });
-        //
-        //     ui.separator();
-        //
-        //     egui::ScrollArea::both().show(ui, |ui| {
-        //         if let Some(ref element) = self.dialogs.ui_explorer.selected_element {
-        //             crate::ui_explorer::properties::render_properties(ui, element);
-        //         } else {
-        //             ui.label("Select an element to see properties");
-        //         }
-        //     });
-        // });
+        if !open {
+            self.dialogs.ui_explorer.root_node = None;
+            self.dialogs.ui_explorer.expanded_nodes.clear();
+            self.dialogs.ui_explorer.selected_element = None;
+        }
     }
 
     pub fn render_menu_bar(&mut self, ctx: &egui::Context) {

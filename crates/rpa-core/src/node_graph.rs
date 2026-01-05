@@ -1,14 +1,11 @@
 use crate::canvas_grid::CanvasObstacleGrid;
-use crate::constants::{ALPHABET, OutputDirection, UiConstants, enforce_minimum_cells};
+use crate::constants::{OutputDirection, UiConstants, enforce_minimum_cells};
 use crate::log::LogLevel;
 use crate::log::LogStorage;
 use crate::variables::{VariableScope, Variables};
 use arc_script::VariableType;
-use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::ops::Deref;
-use std::sync::Arc;
+use shared::NanoId;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
@@ -91,7 +88,7 @@ impl Project {
 impl Scenario {
     pub fn new(name: &str) -> Self {
         let mut scenario = Self {
-            id: NanoId::new_with_nanoid(),
+            id: NanoId::default(),
             name: name.to_string(),
             nodes: Vec::new(),
             connections: Vec::new(),
@@ -135,7 +132,7 @@ impl Scenario {
             _ => (UiConstants::NODE_WIDTH, UiConstants::NODE_HEIGHT),
         };
         let node = Node {
-            id: NanoId::new_with_nanoid(),
+            id: NanoId::default(),
             activity,
             position,
             width,
@@ -174,59 +171,6 @@ impl Scenario {
 
         self.connections
             .push(Connection::new_with_nanoid(from, to, branch_type));
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct NanoId(Arc<str>);
-
-impl Deref for NanoId {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl fmt::Display for NanoId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Serialize for NanoId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for NanoId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(NanoId(Arc::from(s)))
-    }
-}
-
-impl NanoId {
-    pub fn new<S>(s: S) -> Self
-    where
-        S: AsRef<str>,
-    {
-        NanoId(Arc::from(s.as_ref()))
-    }
-
-    pub fn new_with_nanoid() -> Self {
-        NanoId(Arc::from(nanoid!(8, &ALPHABET)))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
     }
 }
 
@@ -668,7 +612,7 @@ impl Connection {
 
     pub fn new_with_nanoid(from_node: NanoId, to_node: NanoId, branch_type: BranchType) -> Self {
         Self {
-            id: NanoId::new_with_nanoid(),
+            id: NanoId::default(),
             from_node,
             to_node,
             branch_type,
