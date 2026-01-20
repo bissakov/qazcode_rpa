@@ -1,5 +1,3 @@
-use crate::canvas_grid::CanvasObstacleGrid;
-use crate::constants::{OutputDirection, UiConstants, enforce_minimum_cells};
 use crate::log::LogLevel;
 use crate::log::LogStorage;
 use crate::variables::{VariableScope, Variables};
@@ -22,43 +20,6 @@ pub struct ProjectFile {
     pub project: Project,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UiState {
-    pub current_scenario_index: Option<usize>,
-    pub font_size: f32,
-    pub show_minimap: bool,
-    #[serde(default = "default_allow_node_resize")]
-    pub allow_node_resize: bool,
-    #[serde(default = "default_language")]
-    pub language: String,
-}
-
-fn default_language() -> String {
-    "en".to_string()
-}
-
-fn default_allow_node_resize() -> bool {
-    true
-}
-
-impl UiState {
-    pub fn is_unlimited(value: usize) -> bool {
-        value == 0
-    }
-}
-
-impl Default for UiState {
-    fn default() -> Self {
-        Self {
-            current_scenario_index: None,
-            font_size: UiConstants::DEFAULT_FONT_SIZE,
-            show_minimap: true,
-            allow_node_resize: true,
-            language: "en".to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scenario {
     pub id: NanoId,
@@ -69,8 +30,6 @@ pub struct Scenario {
     pub parameters: Vec<ScenarioParameter>,
     #[serde(default)]
     pub variables: Variables,
-    #[serde(skip)]
-    pub obstacle_grid: CanvasObstacleGrid,
 }
 
 impl Project {
@@ -87,58 +46,14 @@ impl Project {
 
 impl Scenario {
     pub fn new(name: &str) -> Self {
-        let mut scenario = Self {
+        Self {
             id: NanoId::default(),
             name: name.to_string(),
             nodes: Vec::new(),
             connections: Vec::new(),
             parameters: Vec::new(),
             variables: Variables::new(),
-            obstacle_grid: CanvasObstacleGrid::new(UiConstants::ROUTING_GRID_SIZE),
-        };
-
-        let grid_size = UiConstants::GRID_CELL_SIZE;
-        let start_x = (1000.0 / grid_size).floor() * grid_size;
-        let start_y = (550.0 / grid_size).floor() * grid_size;
-
-        scenario.add_node(
-            Activity::Start {
-                scenario_id: scenario.id.clone(),
-            },
-            egui::pos2(start_x, start_y),
-        );
-        scenario.add_node(
-            Activity::End {
-                scenario_id: scenario.id.clone(),
-            },
-            egui::pos2(
-                start_x,
-                start_y + UiConstants::NODE_HEIGHT + (64.0 / grid_size).floor() * grid_size,
-            ),
-        );
-
-        if scenario.nodes.len() >= 2 {
-            let start_id = scenario.nodes[0].id.clone();
-            let end_id = scenario.nodes[1].id.clone();
-            scenario.add_connection_with_branch(start_id, end_id, BranchType::Default);
         }
-
-        scenario
-    }
-
-    pub fn add_node(&mut self, activity: Activity, position: egui::Pos2) {
-        let (width, height) = match &activity {
-            Activity::Note { width, height, .. } => (*width, *height),
-            _ => (UiConstants::NODE_WIDTH, UiConstants::NODE_HEIGHT),
-        };
-        let node = Node {
-            id: NanoId::default(),
-            activity,
-            position,
-            width,
-            height,
-        };
-        self.nodes.push(node);
     }
 
     pub fn get_node_mut(&mut self, id: NanoId) -> Option<&mut Node> {
@@ -178,76 +93,13 @@ impl Scenario {
 pub struct Node {
     pub id: NanoId,
     pub activity: Activity,
-    #[serde(with = "pos2_serde")]
-    pub position: egui::Pos2,
-    #[serde(default = "default_node_width")]
+    pub x: f32,
+    pub y: f32,
     pub width: f32,
-    #[serde(default = "default_node_height")]
     pub height: f32,
 }
 
-fn default_node_width() -> f32 {
-    UiConstants::NODE_WIDTH
-}
-
-fn default_node_height() -> f32 {
-    UiConstants::NODE_HEIGHT
-}
-
 impl Node {
-    pub fn get_rect(&self) -> egui::Rect {
-        egui::Rect::from_min_size(self.position, egui::vec2(self.width, self.height))
-    }
-
-    pub fn is_routable(&self) -> bool {
-        !matches!(self.activity, Activity::Note { .. })
-    }
-
-    pub fn snap_bounds(&self, grid_size: f32) -> (egui::Pos2, f32, f32) {
-        if !self.is_routable() {
-            return (self.position, self.width, self.height);
-        }
-
-        let right = self.position.x + self.width;
-        let bottom = self.position.y + self.height;
-
-        let (snapped_left, snapped_right) = enforce_minimum_cells(
-            self.position.x,
-            right,
-            grid_size,
-            UiConstants::MIN_NODE_CELLS,
-        );
-        let (snapped_top, snapped_bottom) = enforce_minimum_cells(
-            self.position.y,
-            bottom,
-            grid_size,
-            UiConstants::MIN_NODE_CELLS,
-        );
-
-        let snapped_pos = egui::Pos2::new(snapped_left, snapped_top);
-        let snapped_width = snapped_right - snapped_left;
-        let snapped_height = snapped_bottom - snapped_top;
-
-        (snapped_pos, snapped_width, snapped_height)
-    }
-
-    pub fn get_routing_footprint(&self, grid_size: f32) -> egui::Rect {
-        let (pos, w, h) = self.snap_bounds(grid_size);
-        egui::Rect::from_min_size(pos, egui::vec2(w, h))
-    }
-
-    pub fn get_visual_bounds(&self) -> egui::Rect {
-        self.get_rect()
-    }
-
-    pub fn get_input_pin_pos(&self) -> egui::Pos2 {
-        self.position + egui::vec2(self.width / 2.0, 0.0)
-    }
-
-    pub fn get_output_pin_pos(&self) -> egui::Pos2 {
-        self.position + egui::vec2(self.width / 2.0, self.height)
-    }
-
     pub fn has_input_pin(&self) -> bool {
         !matches!(
             self.activity,
@@ -274,209 +126,6 @@ impl Node {
                     2
                 } else {
                     1
-                }
-            }
-        }
-    }
-
-    pub fn get_preferred_output_direction(&self, branch_type: &BranchType) -> OutputDirection {
-        match &self.activity {
-            Activity::IfCondition { .. } => match branch_type {
-                BranchType::TrueBranch => OutputDirection::Down,
-                BranchType::FalseBranch => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            Activity::Loop { .. } => match branch_type {
-                BranchType::Default => OutputDirection::Down,
-                BranchType::LoopBody => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            Activity::While { .. } => match branch_type {
-                BranchType::Default => OutputDirection::Down,
-                BranchType::LoopBody => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            Activity::TryCatch => match branch_type {
-                BranchType::TryBranch => OutputDirection::Down,
-                BranchType::CatchBranch => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            _ => match branch_type {
-                BranchType::ErrorBranch => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-        }
-    }
-
-    pub fn get_output_pin_positions(&self) -> [Option<egui::Pos2>; 2] {
-        let pin_count = self.get_output_pin_count();
-        if pin_count == 0 {
-            return [None, None];
-        }
-
-        match &self.activity {
-            Activity::End { .. } | Activity::Note { .. } => [None, None],
-            Activity::IfCondition { .. } => {
-                let true_dir = self.get_preferred_output_direction(&BranchType::TrueBranch);
-                let false_dir = self.get_preferred_output_direction(&BranchType::FalseBranch);
-                [
-                    Some(self.get_pin_pos_for_direction(true_dir)),
-                    Some(self.get_pin_pos_for_direction(false_dir)),
-                ]
-            }
-            Activity::Loop { .. } => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
-                [
-                    Some(self.get_pin_pos_for_direction(default_dir)),
-                    Some(self.get_pin_pos_for_direction(loop_dir)),
-                ]
-            }
-            Activity::While { .. } => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
-                [
-                    Some(self.get_pin_pos_for_direction(default_dir)),
-                    Some(self.get_pin_pos_for_direction(loop_dir)),
-                ]
-            }
-            Activity::TryCatch => {
-                let try_dir = self.get_preferred_output_direction(&BranchType::TryBranch);
-                let catch_dir = self.get_preferred_output_direction(&BranchType::CatchBranch);
-                [
-                    Some(self.get_pin_pos_for_direction(try_dir)),
-                    Some(self.get_pin_pos_for_direction(catch_dir)),
-                ]
-            }
-            Activity::CallScenario { .. } | Activity::RunPowershell { .. } => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
-                [
-                    Some(self.get_pin_pos_for_direction(default_dir)),
-                    Some(self.get_pin_pos_for_direction(error_dir)),
-                ]
-            }
-            _ => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                if self.activity.can_have_error_output() {
-                    let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
-                    [
-                        Some(self.get_pin_pos_for_direction(default_dir)),
-                        Some(self.get_pin_pos_for_direction(error_dir)),
-                    ]
-                } else {
-                    [Some(self.get_pin_pos_for_direction(default_dir)), None]
-                }
-            }
-        }
-    }
-
-    fn get_pin_pos_for_direction(&self, direction: OutputDirection) -> egui::Pos2 {
-        let center_x = self.width / 2.0;
-        let center_y = self.height / 2.0;
-        let bottom = self.height;
-        let right = self.width;
-
-        match direction {
-            OutputDirection::Down => self.position + egui::vec2(center_x, bottom),
-            OutputDirection::Right => self.position + egui::vec2(right, center_y),
-            OutputDirection::Left => self.position + egui::vec2(0.0, center_y),
-            OutputDirection::Up => self.position + egui::vec2(center_x, 0.0),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn get_output_pin_positions_horizontal(&self) -> Vec<egui::Pos2> {
-        let pin_count = self.get_output_pin_count();
-        if pin_count == 0 {
-            return vec![];
-        }
-
-        let right = self.width;
-        let spacing = self.height / (pin_count as f32 + 1.0);
-
-        (0..pin_count)
-            .map(|i| {
-                let y_offset = spacing * ((i as f32) + 1.0);
-                self.position + egui::vec2(right, y_offset)
-            })
-            .collect()
-    }
-
-    pub fn get_output_pin_pos_by_index(&self, index: usize) -> egui::Pos2 {
-        match self.get_output_pin_positions().get(index) {
-            Some(Some(pos)) => *pos,
-            _ => egui::Pos2::ZERO,
-        }
-    }
-
-    pub fn get_pin_index_for_branch(&self, branch_type: &BranchType) -> usize {
-        match &self.activity {
-            Activity::IfCondition { .. } => match branch_type {
-                BranchType::TrueBranch => 0,
-                BranchType::FalseBranch => 1,
-                _ => 0,
-            },
-            Activity::Loop { .. } => match branch_type {
-                BranchType::Default => 0,
-                BranchType::LoopBody => 1,
-                _ => 0,
-            },
-            Activity::While { .. } => match branch_type {
-                BranchType::Default => 0,
-                BranchType::LoopBody => 1,
-                _ => 0,
-            },
-            Activity::TryCatch => match branch_type {
-                BranchType::TryBranch => 0,
-                BranchType::CatchBranch => 1,
-                _ => 0,
-            },
-            _ => {
-                if self.activity.can_have_error_output() {
-                    match branch_type {
-                        BranchType::ErrorBranch => 1,
-                        _ => 0,
-                    }
-                } else {
-                    0
-                }
-            }
-        }
-    }
-
-    pub fn get_branch_type_for_pin(&self, pin_index: usize) -> BranchType {
-        match &self.activity {
-            Activity::IfCondition { .. } => {
-                if pin_index == 0 {
-                    BranchType::TrueBranch
-                } else {
-                    BranchType::FalseBranch
-                }
-            }
-            Activity::Loop { .. } | Activity::While { .. } => {
-                if pin_index == 1 {
-                    BranchType::LoopBody
-                } else {
-                    BranchType::Default
-                }
-            }
-            Activity::TryCatch => {
-                if pin_index == 0 {
-                    BranchType::TryBranch
-                } else {
-                    BranchType::CatchBranch
-                }
-            }
-            _ => {
-                if self.activity.can_have_error_output() {
-                    if pin_index == 0 {
-                        BranchType::Default
-                    } else {
-                        BranchType::ErrorBranch
-                    }
-                } else {
-                    BranchType::Default
                 }
             }
         }
@@ -630,23 +279,4 @@ pub enum BranchType {
     ErrorBranch,
     TryBranch,
     CatchBranch,
-}
-
-mod pos2_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S>(pos: &egui::Pos2, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (pos.x, pos.y).serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<egui::Pos2, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let (x, y) = <(f32, f32)>::deserialize(deserializer)?;
-        Ok(egui::pos2(x, y))
-    }
 }

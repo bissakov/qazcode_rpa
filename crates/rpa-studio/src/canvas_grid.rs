@@ -1,6 +1,7 @@
-use crate::constants::UiConstants;
-use crate::node_graph::Node;
+use crate::ext::NodeExt;
+use crate::ui_constants::UiConstants;
 use egui::{Color32, Painter, Pos2, Rect, Stroke, StrokeKind, pos2};
+use rpa_core::Node;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellState {
@@ -87,6 +88,7 @@ impl CanvasObstacleGrid {
         pos2(world_x, world_y)
     }
 
+    #[allow(dead_code)]
     pub fn is_occupied(&self, grid_x: usize, grid_y: usize) -> bool {
         if grid_x >= self.grid_width || grid_y >= self.grid_height {
             return false;
@@ -98,6 +100,7 @@ impl CanvasObstacleGrid {
         self.dirty = true;
     }
 
+    #[allow(dead_code)]
     pub fn dimensions(&self) -> (usize, usize) {
         (self.grid_width, self.grid_height)
     }
@@ -148,11 +151,11 @@ impl CanvasObstacleGrid {
         );
     }
 
-    fn compute_world_bounds(nodes: &[crate::node_graph::Node], cell_size: f32) -> Rect {
-        const PADDING: f32 = 500.0;
+    fn compute_world_bounds(nodes: &[Node], cell_size: f32) -> Rect {
+        let padding = UiConstants::CANVAS_WORLD_PADDING;
 
         if nodes.is_empty() {
-            return Rect::from_min_max(pos2(-PADDING, -PADDING), pos2(PADDING, PADDING));
+            return Rect::from_min_max(pos2(-padding, -padding), pos2(padding, padding));
         }
 
         let mut min_x = f32::MAX;
@@ -168,10 +171,10 @@ impl CanvasObstacleGrid {
             max_y = max_y.max(footprint.max.y);
         }
 
-        let min_x = (min_x - PADDING).floor();
-        let min_y = (min_y - PADDING).floor();
-        let max_x = (max_x + PADDING).ceil();
-        let max_y = (max_y + PADDING).ceil();
+        let min_x = (min_x - padding).floor();
+        let min_y = (min_y - padding).floor();
+        let max_x = (max_x + padding).ceil();
+        let max_y = (max_y + padding).ceil();
 
         Rect::from_min_max(pos2(min_x, min_y), pos2(max_x, max_y))
     }

@@ -189,10 +189,10 @@ impl RpaApp {
         let mut max_y = f32::MIN;
 
         for node in &self.clipboard.nodes {
-            min_x = min_x.min(node.position.x);
-            min_y = min_y.min(node.position.y);
-            max_x = max_x.max(node.position.x);
-            max_y = max_y.max(node.position.y);
+            min_x = min_x.min(node.x);
+            min_y = min_y.min(node.y);
+            max_x = max_x.max(node.x);
+            max_y = max_y.max(node.y);
         }
 
         let clipboard_center = egui::pos2((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
@@ -208,7 +208,8 @@ impl RpaApp {
             let new_id = NanoId::default();
             old_to_new_id.insert(new_node.id.clone(), new_id.clone());
             new_node.id = new_id;
-            new_node.position = (new_node.position.to_vec2() + offset).to_pos2();
+            new_node.x += offset.x;
+            new_node.y += offset.y;
             new_node_ids.push(new_node.id.clone());
             nodes_to_paste.push(new_node);
         }

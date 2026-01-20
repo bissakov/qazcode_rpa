@@ -1,3 +1,4 @@
+use crate::ext::NodeExt;
 use egui::{Color32, Painter, Pos2, Stroke};
 use rpa_core::{BranchType, Node};
 use shared::NanoId;

@@ -1,7 +1,9 @@
 use crate::Activity;
+use crate::constants::ActivityDefaults;
 use crate::log::LogLevel;
 use arc_script::VariableType;
 use shared::NanoId;
+use std::sync::LazyLock;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +31,36 @@ pub struct PinConfig {
     pub output_count: usize,
     pub pin_labels: &'static [&'static str],
 }
+
+const PIN_NONE: PinConfig = PinConfig {
+    output_count: 0,
+    pin_labels: &[],
+};
+
+const PIN_DEFAULT: PinConfig = PinConfig {
+    output_count: 1,
+    pin_labels: &["Default"],
+};
+
+const PIN_SUCCESS_ERROR: PinConfig = PinConfig {
+    output_count: 2,
+    pin_labels: &["Success", "Error"],
+};
+
+const PIN_BODY_NEXT: PinConfig = PinConfig {
+    output_count: 2,
+    pin_labels: &["Body", "Next"],
+};
+
+const PIN_TRUE_FALSE: PinConfig = PinConfig {
+    output_count: 2,
+    pin_labels: &["True", "False"],
+};
+
+const PIN_TRY_CATCH: PinConfig = PinConfig {
+    output_count: 2,
+    pin_labels: &["Try", "Catch"],
+};
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,28 +93,8 @@ pub struct ActivityMetadata {
     pub properties: &'static [PropertyDef],
 }
 
-impl ActivityMetadata {
-    pub fn for_activity(activity: &Activity) -> &'static ActivityMetadata {
-        match activity {
-            Activity::Start { .. } => &START_METADATA,
-            Activity::End { .. } => &END_METADATA,
-            Activity::Log { .. } => &LOG_METADATA,
-            Activity::Delay { .. } => &DELAY_METADATA,
-            Activity::SetVariable { .. } => &SET_VARIABLE_METADATA,
-            Activity::Evaluate { .. } => &EVALUATE_METADATA,
-            Activity::IfCondition { .. } => &IF_CONDITION_METADATA,
-            Activity::Loop { .. } => &LOOP_METADATA,
-            Activity::While { .. } => &WHILE_METADATA,
-            Activity::Continue => &CONTINUE_METADATA,
-            Activity::Break => &BREAK_METADATA,
-            Activity::CallScenario { .. } => &CALL_SCENARIO_METADATA,
-            Activity::RunPowershell { .. } => &RUN_POWERSHELL_METADATA,
-            Activity::Note { .. } => &NOTE_METADATA,
-            Activity::TryCatch => &TRY_CATCH_METADATA,
-        }
-    }
-
-    pub fn all_activities() -> Vec<(&'static ActivityMetadata, Activity)> {
+static ACTIVITY_DEFINITIONS: LazyLock<Vec<(&'static ActivityMetadata, Activity)>> =
+    LazyLock::new(|| {
         vec![
             (
                 &START_METADATA,
@@ -103,7 +115,12 @@ impl ActivityMetadata {
                     message: String::new(),
                 },
             ),
-            (&DELAY_METADATA, Activity::Delay { milliseconds: 1000 }),
+            (
+                &DELAY_METADATA,
+                Activity::Delay {
+                    milliseconds: ActivityDefaults::DELAY_MS,
+                },
+            ),
             (
                 &SET_VARIABLE_METADATA,
                 Activity::SetVariable {
@@ -128,10 +145,10 @@ impl ActivityMetadata {
             (
                 &LOOP_METADATA,
                 Activity::Loop {
-                    start: 0,
-                    end: 10,
-                    step: 1,
-                    index: String::from("i"),
+                    start: ActivityDefaults::LOOP_START,
+                    end: ActivityDefaults::LOOP_END,
+                    step: ActivityDefaults::LOOP_STEP,
+                    index: String::from(ActivityDefaults::LOOP_INDEX),
                 },
             ),
             (
@@ -140,6 +157,8 @@ impl ActivityMetadata {
                     condition: String::new(),
                 },
             ),
+            (&CONTINUE_METADATA, Activity::Continue),
+            (&BREAK_METADATA, Activity::Break),
             (&TRY_CATCH_METADATA, Activity::TryCatch),
             (
                 &CALL_SCENARIO_METADATA,
@@ -158,11 +177,36 @@ impl ActivityMetadata {
                 &NOTE_METADATA,
                 Activity::Note {
                     text: String::new(),
-                    width: 200.0,
-                    height: 100.0,
+                    width: 128.0,
+                    height: 64.0,
                 },
             ),
         ]
+    });
+
+impl ActivityMetadata {
+    pub fn for_activity(activity: &Activity) -> &'static ActivityMetadata {
+        match activity {
+            Activity::Start { .. } => &START_METADATA,
+            Activity::End { .. } => &END_METADATA,
+            Activity::Log { .. } => &LOG_METADATA,
+            Activity::Delay { .. } => &DELAY_METADATA,
+            Activity::SetVariable { .. } => &SET_VARIABLE_METADATA,
+            Activity::Evaluate { .. } => &EVALUATE_METADATA,
+            Activity::IfCondition { .. } => &IF_CONDITION_METADATA,
+            Activity::Loop { .. } => &LOOP_METADATA,
+            Activity::While { .. } => &WHILE_METADATA,
+            Activity::Continue => &CONTINUE_METADATA,
+            Activity::Break => &BREAK_METADATA,
+            Activity::CallScenario { .. } => &CALL_SCENARIO_METADATA,
+            Activity::RunPowershell { .. } => &RUN_POWERSHELL_METADATA,
+            Activity::Note { .. } => &NOTE_METADATA,
+            Activity::TryCatch => &TRY_CATCH_METADATA,
+        }
+    }
+
+    pub fn all_activities() -> Vec<(&'static ActivityMetadata, Activity)> {
+        ACTIVITY_DEFINITIONS.clone()
     }
 
     #[allow(clippy::type_complexity)]
@@ -171,108 +215,39 @@ impl ActivityMetadata {
         Vec<(&'static ActivityMetadata, Activity)>,
         bool,
     )> {
-        use ActivityCategory::*;
+        let all = &*ACTIVITY_DEFINITIONS;
+
         vec![
             (
-                Scenarios,
-                vec![
-                    (
-                        &START_METADATA,
-                        Activity::Start {
-                            scenario_id: NanoId::default(),
-                        },
-                    ),
-                    (
-                        &END_METADATA,
-                        Activity::End {
-                            scenario_id: NanoId::default(),
-                        },
-                    ),
-                    (
-                        &CALL_SCENARIO_METADATA,
-                        Activity::CallScenario {
-                            scenario_id: NanoId::default(),
-                            parameters: Vec::new(),
-                        },
-                    ),
-                ],
+                ActivityCategory::Scenarios,
+                all.iter()
+                    .filter(|(m, _)| m.category == ActivityCategory::Scenarios)
+                    .cloned()
+                    .collect(),
                 true,
             ),
             (
-                BasicActivities,
-                vec![
-                    (
-                        &LOG_METADATA,
-                        Activity::Log {
-                            level: LogLevel::Info,
-                            message: String::new(),
-                        },
-                    ),
-                    (&DELAY_METADATA, Activity::Delay { milliseconds: 1000 }),
-                    (
-                        &SET_VARIABLE_METADATA,
-                        Activity::SetVariable {
-                            name: String::new(),
-                            value: String::new(),
-                            var_type: VariableType::String,
-                            is_global: false,
-                        },
-                    ),
-                    (
-                        &EVALUATE_METADATA,
-                        Activity::Evaluate {
-                            expression: String::new(),
-                        },
-                    ),
-                    (
-                        &NOTE_METADATA,
-                        Activity::Note {
-                            text: String::new(),
-                            width: 200.0,
-                            height: 100.0,
-                        },
-                    ),
-                ],
+                ActivityCategory::BasicActivities,
+                all.iter()
+                    .filter(|(m, _)| m.category == ActivityCategory::BasicActivities)
+                    .cloned()
+                    .collect(),
                 false,
             ),
             (
-                ControlFlow,
-                vec![
-                    (
-                        &IF_CONDITION_METADATA,
-                        Activity::IfCondition {
-                            condition: String::new(),
-                        },
-                    ),
-                    (
-                        &LOOP_METADATA,
-                        Activity::Loop {
-                            start: 0,
-                            end: 10,
-                            step: 1,
-                            index: String::from("i"),
-                        },
-                    ),
-                    (
-                        &WHILE_METADATA,
-                        Activity::While {
-                            condition: String::new(),
-                        },
-                    ),
-                    (&CONTINUE_METADATA, Activity::Continue),
-                    (&BREAK_METADATA, Activity::Break),
-                    (&TRY_CATCH_METADATA, Activity::TryCatch),
-                ],
+                ActivityCategory::ControlFlow,
+                all.iter()
+                    .filter(|(m, _)| m.category == ActivityCategory::ControlFlow)
+                    .cloned()
+                    .collect(),
                 false,
             ),
             (
-                Scripting,
-                vec![(
-                    &RUN_POWERSHELL_METADATA,
-                    Activity::RunPowershell {
-                        code: String::new(),
-                    },
-                )],
+                ActivityCategory::Scripting,
+                all.iter()
+                    .filter(|(m, _)| m.category == ActivityCategory::Scripting)
+                    .cloned()
+                    .collect(),
                 false,
             ),
         ]
@@ -295,10 +270,7 @@ static START_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.start",
     category: ActivityCategory::Scenarios,
     color_category: ColorCategory::FlowControlStart,
-    pin_config: PinConfig {
-        output_count: 1,
-        pin_labels: &["Default"],
-    },
+    pin_config: PIN_DEFAULT,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "activity_descriptions.start",
@@ -312,10 +284,7 @@ static END_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.end",
     category: ActivityCategory::Scenarios,
     color_category: ColorCategory::FlowControlEnd,
-    pin_config: PinConfig {
-        output_count: 0,
-        pin_labels: &[],
-    },
+    pin_config: PIN_NONE,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "activity_descriptions.end",
@@ -329,10 +298,7 @@ static CALL_SCENARIO_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.call_scenario",
     category: ActivityCategory::Scenarios,
     color_category: ColorCategory::Execution,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["Success", "Error"],
-    },
+    pin_config: PIN_SUCCESS_ERROR,
     can_have_error_output: true,
     properties: &[PropertyDef {
         label_key: "properties.scenario",
@@ -346,10 +312,7 @@ static LOG_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.log",
     category: ActivityCategory::BasicActivities,
     color_category: ColorCategory::BasicOps,
-    pin_config: PinConfig {
-        output_count: 1,
-        pin_labels: &["Default"],
-    },
+    pin_config: PIN_DEFAULT,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "properties.message",
@@ -363,10 +326,7 @@ static DELAY_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.delay",
     category: ActivityCategory::BasicActivities,
     color_category: ColorCategory::BasicOps,
-    pin_config: PinConfig {
-        output_count: 1,
-        pin_labels: &["Default"],
-    },
+    pin_config: PIN_DEFAULT,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "properties.delay_ms",
@@ -380,10 +340,7 @@ static SET_VARIABLE_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.set_variable",
     category: ActivityCategory::BasicActivities,
     color_category: ColorCategory::Variables,
-    pin_config: PinConfig {
-        output_count: 1,
-        pin_labels: &["Default"],
-    },
+    pin_config: PIN_DEFAULT,
     can_have_error_output: false,
     properties: &[
         PropertyDef {
@@ -414,10 +371,7 @@ static EVALUATE_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.evaluate",
     category: ActivityCategory::BasicActivities,
     color_category: ColorCategory::Variables,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["Success", "Error"],
-    },
+    pin_config: PIN_SUCCESS_ERROR,
     can_have_error_output: true,
     properties: &[PropertyDef {
         label_key: "properties.evaluate_expression",
@@ -431,10 +385,7 @@ static NOTE_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.note",
     category: ActivityCategory::BasicActivities,
     color_category: ColorCategory::Note,
-    pin_config: PinConfig {
-        output_count: 0,
-        pin_labels: &[],
-    },
+    pin_config: PIN_NONE,
     can_have_error_output: false,
     properties: &[
         PropertyDef {
@@ -455,10 +406,7 @@ static IF_CONDITION_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.if_condition",
     category: ActivityCategory::ControlFlow,
     color_category: ColorCategory::ControlFlow,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["True", "False"],
-    },
+    pin_config: PIN_TRUE_FALSE,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "properties.condition",
@@ -472,10 +420,7 @@ static LOOP_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.loop",
     category: ActivityCategory::ControlFlow,
     color_category: ColorCategory::ControlFlow,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["Body", "Next"],
-    },
+    pin_config: PIN_BODY_NEXT,
     can_have_error_output: false,
     properties: &[
         PropertyDef {
@@ -506,10 +451,7 @@ static WHILE_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.while",
     category: ActivityCategory::ControlFlow,
     color_category: ColorCategory::ControlFlow,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["Body", "Next"],
-    },
+    pin_config: PIN_BODY_NEXT,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "properties.condition",
@@ -523,10 +465,7 @@ static CONTINUE_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.continue",
     category: ActivityCategory::ControlFlow,
     color_category: ColorCategory::ControlFlow,
-    pin_config: PinConfig {
-        output_count: 0,
-        pin_labels: &[],
-    },
+    pin_config: PIN_NONE,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "activity_descriptions.continue",
@@ -540,10 +479,7 @@ static BREAK_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.break",
     category: ActivityCategory::ControlFlow,
     color_category: ColorCategory::ControlFlow,
-    pin_config: PinConfig {
-        output_count: 0,
-        pin_labels: &[],
-    },
+    pin_config: PIN_NONE,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "activity_descriptions.break",
@@ -557,10 +493,7 @@ static TRY_CATCH_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.try_catch",
     category: ActivityCategory::ControlFlow,
     color_category: ColorCategory::ControlFlow,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["Try", "Catch"],
-    },
+    pin_config: PIN_TRY_CATCH,
     can_have_error_output: false,
     properties: &[PropertyDef {
         label_key: "properties.try_catch_info",
@@ -574,10 +507,7 @@ static RUN_POWERSHELL_METADATA: ActivityMetadata = ActivityMetadata {
     button_key: "activity_buttons.run_powershell",
     category: ActivityCategory::Scripting,
     color_category: ColorCategory::Execution,
-    pin_config: PinConfig {
-        output_count: 2,
-        pin_labels: &["Success", "Error"],
-    },
+    pin_config: PIN_SUCCESS_ERROR,
     can_have_error_output: true,
     properties: &[PropertyDef {
         label_key: "properties.run_powershell",

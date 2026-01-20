@@ -27,6 +27,8 @@ impl ColorPalette {
     pub const PIN_LOOP_NEXT: Color32 = Color32::from_rgb(150, 150, 150);
     pub const PIN_DEFAULT: Color32 = Color32::from_rgb(150, 150, 150);
 
+    pub const CANVAS_EXECUTING_BG_COLOR: Color32 = Color32::from_rgb(255, 30, 30);
+
     pub fn for_activity(activity: &Activity) -> Color32 {
         Self::for_color_category(&ActivityMetadata::for_activity(activity).color_category)
     }

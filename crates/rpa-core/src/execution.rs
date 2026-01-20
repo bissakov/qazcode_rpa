@@ -1,4 +1,4 @@
-use crate::constants::UiConstants;
+use crate::constants::CoreConstants;
 use crate::ir::{Instruction, IrProgram};
 use crate::log::{LogActivity, LogEntry, LogLevel};
 use crate::node_graph::{Project, VariableDirection};
@@ -62,8 +62,8 @@ pub fn get_timestamp(start_time: SystemTime) -> String {
     let elapsed = start_time.elapsed().unwrap_or_default();
     format!(
         "[{:02}:{:02}.{:02}]",
-        elapsed.as_secs() / 60,
-        elapsed.as_secs() % 60,
+        elapsed.as_secs() / CoreConstants::TIMESTAMP_FORMAT_MINUTES,
+        elapsed.as_secs() % CoreConstants::TIMESTAMP_FORMAT_MINUTES,
         elapsed.subsec_millis()
     )
 }
@@ -549,9 +549,18 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             } => {
                 let current = {
                     let ctx = self.context.read().unwrap();
-                    ctx.resolve_variable(index)
-                        .and_then(|v: Value| v.as_number())
-                        .unwrap() as i64
+                    match ctx.resolve_variable(index) {
+                        Some(Value::Number(n)) => n as i64,
+                        Some(other) => {
+                            return Err(format!(
+                                "Loop index '{}' has wrong type: expected number, got {:?}",
+                                index, other
+                            ));
+                        }
+                        None => {
+                            return Err(format!("Loop index '{}' not found", index));
+                        }
+                    }
                 };
 
                 let next = current + step;
@@ -651,8 +660,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 scenario_id,
                 parameters,
             } => {
-                if self.call_stack.len() >= 100 {
-                    return Err("Maximum scenario call depth exceeded (100)".to_string());
+                if self.call_stack.len() >= CoreConstants::MAX_CALL_STACK_DEPTH {
+                    return Err(format!(
+                        "Maximum scenario call depth exceeded ({})",
+                        CoreConstants::MAX_CALL_STACK_DEPTH
+                    ));
                 }
 
                 let scenario = self
@@ -782,7 +794,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         }
 
         self.context.write().unwrap().global_variables.set(
-            "last_error",
+            CoreConstants::ERROR_VARIABLE_NAME,
             Value::String(error.clone()),
             VariableScope::Global,
         );
@@ -892,6 +904,6 @@ pub fn execute_project_with_typed_vars(
         node_id: None,
         level: LogLevel::Info,
         activity: LogActivity::Execution,
-        message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+        message: CoreConstants::EXECUTION_COMPLETE_MARKER.to_string(),
     });
 }

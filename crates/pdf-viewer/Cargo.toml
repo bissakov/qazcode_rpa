@@ -1,0 +1,30 @@
+[package]
+name = "pdf-viewer"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[lib]
+name = "pdf_viewer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pdf-viewer"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.33"
+egui = { version = "0.33", features = ["serde"] }
+serde.workspace = true
+serde_json = "1.0"
+thiserror = "1.0"
+pdfium-render = "0.8.37"
+image = "0.25.9"
+parking_lot = "0.12.5"
+crossbeam = "0.8.4"
+rfd = "0.17.1"
+regex = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[dev-dependencies]

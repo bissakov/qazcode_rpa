@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::UiConstants;
+use crate::constants::CoreConstants;
 use shared::NanoId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,8 +87,8 @@ pub struct LogStorage {
 impl LogStorage {
     pub fn new() -> Self {
         Self {
-            values: VecDeque::with_capacity(UiConstants::DEFAULT_LOG_ENTRIES),
-            max_entry_count: UiConstants::DEFAULT_LOG_ENTRIES,
+            values: VecDeque::with_capacity(CoreConstants::DEFAULT_LOG_ENTRIES),
+            max_entry_count: CoreConstants::DEFAULT_LOG_ENTRIES,
         }
     }
 
@@ -103,12 +103,12 @@ impl LogStorage {
         self.values.get(idx)
     }
 
-    pub fn len(&mut self) -> usize {
+    pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    pub fn is_empty(&mut self) -> bool {
-        self.values.len() == 0
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 
     pub fn clear(&mut self) {

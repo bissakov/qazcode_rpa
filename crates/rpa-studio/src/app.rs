@@ -1,6 +1,7 @@
 use crate::state::RpaApp;
+
 use eframe::egui;
-use rpa_core::UiConstants;
+use rpa_core::CoreConstants;
 use rust_i18n::t;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -23,15 +24,12 @@ impl eframe::App for RpaApp {
             let ms = self.smoothed_frame_time.as_secs_f64() * 1000.0;
             let fps = 1.0 / self.smoothed_frame_time.as_secs_f64();
 
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(
-                format!(
-                    "{} — {:.1} FPS ({:.2} ms)",
-                    t!("window.title").as_ref(),
-                    fps,
-                    ms
-                )
-                .into(),
-            ));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
+                "{} — {:.1} FPS ({:.2} ms)",
+                t!("window.title").as_ref(),
+                fps,
+                ms
+            )));
         }
 
         self.process_execution_updates(ctx);
@@ -62,7 +60,7 @@ impl RpaApp {
         let mut execution_complete = false;
         if let Some(receiver) = self.log_receiver.as_ref() {
             for log_entry in receiver.try_iter() {
-                if log_entry.message == UiConstants::EXECUTION_COMPLETE_MARKER {
+                if log_entry.message == CoreConstants::EXECUTION_COMPLETE_MARKER {
                     execution_complete = true;
                     break;
                 } else {
@@ -127,10 +125,11 @@ impl RpaApp {
     }
 
     pub fn invalidate_current_scenario(&mut self) {
-        let scenario = match self.current_scenario_index {
-            None => &mut self.project.main_scenario,
-            Some(idx) => &mut self.project.scenarios[idx],
-        };
-        scenario.obstacle_grid.invalidate();
+        if let Some(grid) = self
+            .obstacle_grids
+            .get_mut(&self.get_current_scenario_key())
+        {
+            grid.invalidate();
+        }
     }
 }

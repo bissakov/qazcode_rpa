@@ -3,21 +3,21 @@ use eframe::egui;
 use shared::NanoId;
 use std::collections::HashSet;
 use ui_automation::{
-    automation::{Control, ControlId, WindowId, find_controls_in_window},
+    automation::{Element, ElementId, find_child_elements},
     win32::automation::Rect,
 };
 
-pub fn get_window_controls_by_hwnd(window_hwnd: isize) -> Result<Vec<Control>, String> {
-    let window_id = WindowId(window_hwnd);
-    find_controls_in_window(window_id.as_hwnd()).map_err(|e| e.to_string())
+pub fn get_window_controls_by_hwnd(window_hwnd: isize) -> Result<Vec<Element>, String> {
+    let window_id = ElementId(window_hwnd);
+    find_child_elements(window_id.as_hwnd()).map_err(|e| e.to_string())
 }
 
-pub fn get_control_child_controls(control_hwnd: isize) -> Result<Vec<Control>, String> {
-    let control_id = ControlId(control_hwnd);
-    find_controls_in_window(control_id.as_hwnd()).map_err(|e| e.to_string())
+pub fn get_control_child_controls(control_hwnd: isize) -> Result<Vec<Element>, String> {
+    let control_id = ElementId(control_hwnd);
+    find_child_elements(control_id.as_hwnd()).map_err(|e| e.to_string())
 }
 
-pub fn build_control_node(control: Control) -> WindowNode {
+pub fn build_control_node(control: Element) -> WindowNode {
     WindowNode::Control {
         id: NanoId::default(),
         class: control.class_name.clone(),

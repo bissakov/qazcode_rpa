@@ -1,6 +1,7 @@
 use crate::render::render_ui_explorer_content;
 use crate::state::UiExplorerState;
 
+#[derive(Default)]
 pub struct UiExplorerApp {
     state: UiExplorerState,
 }
@@ -8,14 +9,6 @@ pub struct UiExplorerApp {
 impl UiExplorerApp {
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-impl Default for UiExplorerApp {
-    fn default() -> Self {
-        Self {
-            state: UiExplorerState::default(),
-        }
     }
 }
 

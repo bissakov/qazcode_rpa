@@ -1,6 +1,7 @@
 use eframe::egui;
 use ui_automation::win32::automation::{
-    Control, ControlId, Rect, Window, WindowId, control_to_selector, window_to_selector,
+    Element, ElementId, ElementType as AutoElementType, Rect, control_to_selector,
+    window_to_selector,
 };
 
 use shared::NanoId;
@@ -74,12 +75,14 @@ fn render_window_properties(ui: &mut egui::Ui, element: &SelectedElement) {
 
     ui.separator();
 
-    let window = Window {
-        id: WindowId(element.window_hwnd),
-        title: element.window_title.clone(),
+    let window = Element {
+        id: ElementId(element.window_hwnd),
+        element_type: AutoElementType::Window,
         class_name: element.window_class.clone(),
+        text: element.window_title.clone(),
         bounds: element.window_bounds,
         visible: true,
+        enabled: true,
     };
 
     match window_to_selector(&window) {
@@ -149,17 +152,20 @@ fn render_control_properties(ui: &mut egui::Ui, element: &SelectedElement) {
 
     ui.separator();
 
-    let window = Window {
-        id: WindowId(element.window_hwnd),
-        title: element.window_title.clone(),
+    let window = Element {
+        id: ElementId(element.window_hwnd),
+        element_type: AutoElementType::Window,
         class_name: element.window_class.clone(),
+        text: element.window_title.clone(),
         bounds: element.window_bounds,
         visible: true,
+        enabled: true,
     };
 
     if let Some(control_hwnd) = element.control_hwnd {
-        let control = Control {
-            id: ControlId(control_hwnd),
+        let control = Element {
+            id: ElementId(control_hwnd),
+            element_type: AutoElementType::Control,
             class_name: element.control_class.clone().unwrap_or_default(),
             text: element.control_text.clone().unwrap_or_default(),
             bounds: element.control_bounds.unwrap_or(Rect::empty()),
@@ -195,12 +201,14 @@ fn render_control_properties(ui: &mut egui::Ui, element: &SelectedElement) {
 fn show_element_outline(element: &SelectedElement, focus: bool) {
     match element.element_type {
         ElementType::Window => {
-            let mut window = Window {
-                id: WindowId(element.window_hwnd),
-                title: element.window_title.clone(),
+            let mut window = Element {
+                id: ElementId(element.window_hwnd),
+                element_type: AutoElementType::Window,
                 class_name: element.window_class.clone(),
+                text: element.window_title.clone(),
                 bounds: element.window_bounds,
                 visible: true,
+                enabled: true,
             };
 
             // Refresh to get CURRENT bounds from the actual window
@@ -214,8 +222,9 @@ fn show_element_outline(element: &SelectedElement, focus: bool) {
         }
         ElementType::Control => {
             if let Some(control_hwnd) = element.control_hwnd {
-                let mut control = Control {
-                    id: ControlId(control_hwnd),
+                let mut control = Element {
+                    id: ElementId(control_hwnd),
+                    element_type: AutoElementType::Control,
                     class_name: element.control_class.clone().unwrap_or_default(),
                     text: element.control_text.clone().unwrap_or_default(),
                     bounds: element.control_bounds.unwrap_or(Rect::empty()),
@@ -226,10 +235,8 @@ fn show_element_outline(element: &SelectedElement, focus: bool) {
                 // Refresh to get CURRENT bounds from the actual control
                 let _ = control.refresh();
 
-                if focus {
-                    if !control.is_focused() {
-                        let _ = control.focus();
-                    }
+                if focus && !control.is_focused() {
+                    let _ = control.focus();
                 }
 
                 let _ = control.show_overlay();

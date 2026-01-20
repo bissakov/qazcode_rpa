@@ -1,4 +1,19 @@
 Cargo.lock
+icon.png
+README.md
+AGENTS.md
+
 target/
 .git/
 .claude/
+.opencode/
+resources/
+crates/arc_script/
+crates/office/
+crates/rpa-cli/
+crates/rpa-core/
+# crates/rpa-studio/
+crates/ui-automation/
+crates/ui-explorer/
+crates/pdf-viewer/
+tools/validate_locale/

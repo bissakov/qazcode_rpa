@@ -1,3 +1,4 @@
+use crate::constants::{CoreConstants, ValidationConstants};
 use crate::execution::LogOutput;
 use crate::log::{LogActivity, LogEntry, LogLevel};
 use crate::node_graph::{Activity, BranchType, Project, Scenario};
@@ -390,7 +391,7 @@ impl<'a> ScenarioValidator<'a> {
         issues.extend(self.check_loop_parameters(reachable_nodes));
         issues.extend(self.check_condition_syntax(reachable_nodes));
         issues.extend(self.check_scenario_references(reachable_nodes));
-        issues.extend(self.check_recursive_scenarios(100));
+        issues.extend(self.check_recursive_scenarios(CoreConstants::MAX_RECURSION_DEPTH));
 
         issues
     }
@@ -915,11 +916,12 @@ fn validate_condition_syntax(condition: &str) -> Result<(), String> {
         return Err("Condition is empty".to_string());
     }
 
-    let operators = ["==", "!=", ">=", "<=", ">", "<"];
-    let has_operator = operators.iter().any(|op| condition.contains(op));
+    let has_operator = ValidationConstants::COMPARISON_OPERATORS
+        .iter()
+        .any(|op| condition.contains(op));
 
     if has_operator {
-        for op in &operators {
+        for op in ValidationConstants::COMPARISON_OPERATORS {
             if let Some(pos) = condition.find(op) {
                 let left = condition[..pos].trim();
                 let right = condition[pos + op.len()..].trim();

@@ -1,23 +1,23 @@
+use crate::ext::{ActivityExt, NodeExt};
 use crate::ui::connection_renderer::{ConnectionPath, ConnectionRenderer};
-use crate::{activity_ext::ActivityExt, colors::ColorPalette, state::ScenarioViewState};
+use crate::ui_constants::{UiConstants, snap_to_grid};
+use crate::{colors::ColorPalette, state::ScenarioViewState};
 use arc_script::VariableType;
 use egui::{
     Color32, Popup, PopupCloseBehavior, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
 };
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use rpa_core::log::LogLevel;
-use rpa_core::{
-    Activity, ActivityMetadata, BranchType, Node, PropertyType, Scenario, UiConstants, snap_to_grid,
-};
+use rpa_core::{Activity, ActivityMetadata, BranchType, Node, PropertyType, Scenario};
 use rust_i18n::t;
 use shared::NanoId;
 use std::collections::{HashMap, HashSet};
 
 fn is_node_grid_aligned(node: &Node, grid_size: f32) -> bool {
-    let snapped_x = snap_to_grid(node.position.x, grid_size);
-    let snapped_y = snap_to_grid(node.position.y, grid_size);
+    let snapped_x = snap_to_grid(node.x, grid_size);
+    let snapped_y = snap_to_grid(node.y, grid_size);
 
-    (snapped_x - node.position.x).abs() <= 0.001 && (snapped_y - node.position.y).abs() <= 0.001
+    (snapped_x - node.x).abs() <= 0.001 && (snapped_y - node.y).abs() <= 0.001
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +71,7 @@ pub enum ParameterBindingAction {
 }
 
 pub struct RenderState<'a> {
+    pub is_executing: bool,
     pub selected_nodes: &'a mut HashSet<NanoId>,
     pub connection_from: &'a mut Option<(NanoId, usize)>,
     pub clipboard_empty: bool,
@@ -201,7 +202,7 @@ fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<C
     Popup::context_menu(response)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(100.0);
+            ui.set_min_width(UiConstants::CONTEXT_MENU_MIN_WIDTH);
 
             ui.label("Search:");
 
@@ -261,6 +262,7 @@ pub fn render_node_graph(
     scenario: &mut Scenario,
     state: &mut RenderState,
     view: &mut ScenarioViewState,
+    obstacle_grid: &mut crate::canvas_grid::CanvasObstacleGrid,
     show_grid_debug: bool,
 ) -> (
     ContextMenuAction,
@@ -286,7 +288,10 @@ pub fn render_node_graph(
     let node_index = build_node_index(&scenario.nodes);
 
     let rect = response.rect;
+
     painter.rect_filled(rect, 0.0, Color32::from_rgb(40, 40, 40));
+    draw_grid_transformed(&painter, rect, view.pan_offset, view.zoom);
+    draw_border(&painter, rect, state.is_executing);
 
     let mouse_world_pos = if let Some(mouse_pos) = ui.ctx().pointer_hover_pos() {
         (mouse_pos.to_vec2() - view.pan_offset) / view.zoom
@@ -355,7 +360,7 @@ pub fn render_node_graph(
                     .retain(|c| !(c.from_node == from_node && c.to_node == to_node));
                 connection_created = true;
             }
-            scenario.obstacle_grid.invalidate();
+            obstacle_grid.invalidate();
         }
         *state.knife_tool_active = false;
         state.knife_path.clear();
@@ -374,27 +379,24 @@ pub fn render_node_graph(
 
     let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
-    draw_grid_transformed(&painter, rect, view.pan_offset, view.zoom);
+    {
+        if obstacle_grid.is_dirty() {
+            let connection_segments: Vec<_> = scenario
+                .connections
+                .iter()
+                .filter_map(|conn| {
+                    let from_node =
+                        get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)?;
+                    let to_node = get_node_from_index(&scenario.nodes, &node_index, &conn.to_node)?;
+                    Some((from_node.get_output_pin_pos(), to_node.get_input_pin_pos()))
+                })
+                .collect();
+            obstacle_grid.rebuild(&scenario.nodes, &connection_segments);
+        }
 
-    if scenario.obstacle_grid.is_dirty() {
-        let connection_segments: Vec<_> = scenario
-            .connections
-            .iter()
-            .filter_map(|conn| {
-                let from_node = get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)?;
-                let to_node = get_node_from_index(&scenario.nodes, &node_index, &conn.to_node)?;
-                Some((from_node.get_output_pin_pos(), to_node.get_input_pin_pos()))
-            })
-            .collect();
-        scenario
-            .obstacle_grid
-            .rebuild(&scenario.nodes, &connection_segments);
-    }
-
-    if show_grid_debug {
-        scenario
-            .obstacle_grid
-            .paint_debug(&painter, to_screen, rect);
+        if show_grid_debug {
+            obstacle_grid.paint_debug(&painter, to_screen, rect);
+        }
     }
 
     view.connection_renderer.clear_cache();
@@ -515,18 +517,18 @@ pub fn render_node_graph(
     {
         if input_cache.pointer_any_released {
             if node.is_routable() {
-                let (snapped_pos, snapped_w, snapped_h) =
-                    node.snap_bounds(UiConstants::GRID_CELL_SIZE);
-                if (snapped_pos.x - node.position.x).abs() > 0.001
-                    || (snapped_pos.y - node.position.y).abs() > 0.001
+                let (snapped_pos, snapped_w, snapped_h) = node.snap_bounds(UiConstants::GRID_SIZE);
+                if (snapped_pos.x - node.x).abs() > 0.001
+                    || (snapped_pos.y - node.y).abs() > 0.001
                     || (snapped_w - node.width).abs() > 0.001
                     || (snapped_h - node.height).abs() > 0.001
                 {
-                    node.position = snapped_pos;
+                    node.x = snapped_pos.x;
+                    node.y = snapped_pos.y;
                     node.width = snapped_w;
                     node.height = snapped_h;
                     view.connection_renderer.increment_generation();
-                    scenario.obstacle_grid.invalidate();
+                    obstacle_grid.invalidate();
                 }
             }
             *state.resizing_node = None;
@@ -542,7 +544,7 @@ pub fn render_node_graph(
                 ResizeHandle::Left => {
                     let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                     let width_change = node.width - new_width;
-                    node.position.x += width_change;
+                    node.x += width_change;
                     node.width = new_width;
                     view.connection_renderer.increment_generation();
                 }
@@ -554,7 +556,7 @@ pub fn render_node_graph(
                     let new_height =
                         (node.height - delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                     let height_change = node.height - new_height;
-                    node.position.y += height_change;
+                    node.y += height_change;
                     node.height = new_height;
                     view.connection_renderer.increment_generation();
                 }
@@ -566,7 +568,7 @@ pub fn render_node_graph(
                 ResizeHandle::BottomLeft => {
                     let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                     let width_change = node.width - new_width;
-                    node.position.x += width_change;
+                    node.x += width_change;
                     node.width = new_width;
                     node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                     view.connection_renderer.increment_generation();
@@ -576,19 +578,19 @@ pub fn render_node_graph(
                     let new_height =
                         (node.height - delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                     let height_change = node.height - new_height;
-                    node.position.y += height_change;
+                    node.y += height_change;
                     node.height = new_height;
                     view.connection_renderer.increment_generation();
                 }
                 ResizeHandle::TopLeft => {
                     let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                     let width_change = node.width - new_width;
-                    node.position.x += width_change;
+                    node.x += width_change;
                     node.width = new_width;
                     let new_height =
                         (node.height - delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                     let height_change = node.height - new_height;
-                    node.position.y += height_change;
+                    node.y += height_change;
                     node.height = new_height;
                     view.connection_renderer.increment_generation();
                 }
@@ -810,7 +812,7 @@ pub fn render_node_graph(
                         state.selected_nodes.insert(node.id.clone());
                     }
 
-                    ui.set_min_width(150.0);
+                    ui.set_min_width(UiConstants::NODE_CONTEXT_MENU_MIN_WIDTH);
 
                     if ui.button(t!("context_menu.copy").as_ref()).clicked() {
                         context_action = ContextMenuAction::Copy;
@@ -863,7 +865,8 @@ pub fn render_node_graph(
     if let Some(drag_delta) = drag_delta_to_apply {
         for node in &mut scenario.nodes {
             if state.selected_nodes.contains(&node.id) {
-                node.position += drag_delta;
+                node.x += drag_delta.x;
+                node.y += drag_delta.y;
             }
         }
 
@@ -876,23 +879,21 @@ pub fn render_node_graph(
 
         for node in &mut scenario.nodes {
             if state.selected_nodes.contains(&node.id) && node.is_routable() {
-                let snapped_x = snap_to_grid(node.position.x, UiConstants::GRID_CELL_SIZE);
-                let snapped_y = snap_to_grid(node.position.y, UiConstants::GRID_CELL_SIZE);
+                let snapped_x = snap_to_grid(node.x, UiConstants::GRID_SIZE);
+                let snapped_y = snap_to_grid(node.y, UiConstants::GRID_SIZE);
 
-                if (snapped_x - node.position.x).abs() > 0.001
-                    || (snapped_y - node.position.y).abs() > 0.001
-                {
+                if (snapped_x - node.x).abs() > 0.001 || (snapped_y - node.y).abs() > 0.001 {
                     reroute_needed = true;
                 }
 
-                node.position.x = snapped_x;
-                node.position.y = snapped_y;
+                node.x = snapped_x;
+                node.y = snapped_y;
             }
         }
 
         if reroute_needed {
             view.connection_renderer.increment_generation();
-            scenario.obstacle_grid.invalidate();
+            obstacle_grid.invalidate();
         }
     }
 
@@ -929,8 +930,8 @@ pub fn render_node_graph(
                 get_node_from_index(&scenario.nodes, &node_index, &from_id),
                 get_node_from_index(&scenario.nodes, &node_index, &to_id),
             ) {
-                let from_pos = from_node.position;
-                let to_pos = to_node.position;
+                let from_pos = Pos2::new(from_node.x, from_node.y);
+                let to_pos = Pos2::new(to_node.x, to_node.y);
                 let mid_x = (from_pos.x + to_pos.x) * 0.5;
                 let mid_y = (from_pos.y + to_pos.y) * 0.5;
 
@@ -941,16 +942,16 @@ pub fn render_node_graph(
                     let push = required - distance;
 
                     for node in &mut scenario.nodes {
-                        if node.position.y >= to_pos.y {
-                            node.position.y += push;
+                        if node.y >= to_pos.y {
+                            node.y += push;
                         }
                     }
                 }
 
                 for node in &mut scenario.nodes {
                     if node.id == released_node_id {
-                        node.position.x = mid_x;
-                        node.position.y = mid_y;
+                        node.x = mid_x;
+                        node.y = mid_y;
                         break;
                     }
                 }
@@ -958,7 +959,7 @@ pub fn render_node_graph(
 
             scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
             scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
-            scenario.obstacle_grid.invalidate();
+            obstacle_grid.invalidate();
         }
     }
 
@@ -995,7 +996,7 @@ pub fn render_node_graph(
                     } else {
                         scenario.connections.retain(|c| c.from_node != node.id);
                     }
-                    scenario.obstacle_grid.invalidate();
+                    obstacle_grid.invalidate();
                 }
             }
         }
@@ -1102,7 +1103,7 @@ pub fn render_node_graph(
         }
 
         scenario.add_connection_with_branch(from, to, branch_type);
-        scenario.obstacle_grid.invalidate();
+        obstacle_grid.invalidate();
         connection_created = true;
     }
 
@@ -1173,7 +1174,7 @@ pub fn render_node_graph(
 
             for point in intersection_points {
                 let screen_point = to_screen(point);
-                let size = 8.0;
+                let size = UiConstants::ROUTING_GRID_SIZE;
                 painter.line_segment(
                     [
                         Pos2::new(screen_point.x - size, screen_point.y - size),
@@ -1202,6 +1203,19 @@ pub fn render_node_graph(
         resize_ended,
         rect,
     )
+}
+
+fn draw_border(painter: &egui::Painter, rect: Rect, is_executing: bool) {
+    painter.rect_stroke(
+        rect,
+        0.0,
+        if is_executing {
+            egui::Stroke::new(2.0, ColorPalette::CANVAS_EXECUTING_BG_COLOR)
+        } else {
+            egui::Stroke::new(2.0, egui::Color32::TRANSPARENT)
+        },
+        StrokeKind::Inside,
+    );
 }
 
 fn draw_grid_transformed(painter: &egui::Painter, rect: Rect, pan_offset: Vec2, zoom: f32) {
@@ -1321,7 +1335,7 @@ pub fn draw_node_transformed<F>(
             rect.max - Vec2::new(padding, padding),
         );
 
-        let font_id = egui::FontId::proportional(12.0 * zoom);
+        let font_id = egui::FontId::proportional(UiConstants::NOTE_FONT_SIZE * zoom);
         let mut job = egui::text::LayoutJob::default();
         job.wrap.max_width = text_rect.width();
         job.append(
@@ -1337,12 +1351,16 @@ pub fn draw_node_transformed<F>(
         let galley = painter.layout_job(job);
         painter.galley(text_rect.min, galley, Color32::from_rgb(60, 60, 60));
     } else if zoom >= UiConstants::GRID_MIN_ZOOM {
-        let text_pos = rect.min + Vec2::new(10.0 * zoom, 10.0 * zoom);
+        let text_pos = rect.min
+            + Vec2::new(
+                UiConstants::NOTE_PADDING * zoom,
+                UiConstants::NOTE_PADDING * zoom,
+            );
         painter.text(
             text_pos,
             egui::Align2::LEFT_TOP,
             node.activity.get_name(),
-            egui::FontId::proportional(14.0 * zoom),
+            egui::FontId::proportional(UiConstants::NODE_LABEL_FONT_SIZE * zoom),
             Color32::WHITE,
         );
     }
@@ -1412,13 +1430,15 @@ pub fn draw_node_transformed<F>(
                 );
 
                 if !label.is_empty() {
-                    let (label_offset, label_align) =
-                        (Vec2::new(0.0, -12.0 * zoom), egui::Align2::CENTER_BOTTOM);
+                    let (label_offset, label_align) = (
+                        Vec2::new(0.0, -UiConstants::PIN_LABEL_OFFSET * zoom),
+                        egui::Align2::CENTER_BOTTOM,
+                    );
                     painter.text(
                         pin_screen + label_offset,
                         label_align,
                         label,
-                        egui::FontId::proportional(10.0 * zoom),
+                        egui::FontId::proportional(UiConstants::PIN_LABEL_FONT_SIZE * zoom),
                         color,
                     );
                 }
@@ -1443,12 +1463,12 @@ fn render_minimap_internal(
 
     painter.rect_filled(
         minimap_rect,
-        5.0,
+        UiConstants::NODE_ROUNDING,
         egui::Color32::from_rgba_unmultiplied(30, 30, 30, 200),
     );
     painter.rect_stroke(
         minimap_rect,
-        5.0,
+        UiConstants::NODE_ROUNDING,
         egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 100)),
         egui::StrokeKind::Outside,
     );
@@ -1818,14 +1838,14 @@ pub fn render_node_properties(
     ui.label(
         t!(
             "properties.position",
-            x = node.position.x : {:.2},
-            y = node.position.y : {:.2}
+            x = node.x : {:.2},
+            y = node.y : {:.2}
         )
         .as_ref(),
     );
     ui.label(t!("properties.node_id", node_id = node.id,).as_ref());
 
-    let grid_aligned = is_node_grid_aligned(node, UiConstants::GRID_CELL_SIZE);
+    let grid_aligned = is_node_grid_aligned(node, UiConstants::GRID_SIZE);
     let grid_status_key = if grid_aligned {
         "properties.grid_status.aligned"
     } else {

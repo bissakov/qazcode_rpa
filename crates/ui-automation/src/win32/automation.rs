@@ -1,4 +1,3 @@
-use regex::Regex;
 use std::ffi::c_void;
 use std::fmt::{self, Display, Formatter};
 use std::thread::{self, sleep};
@@ -18,8 +17,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::System::Threading::TerminateProcess;
 use windows::Win32::System::Threading::{
     CreateProcessW, GetExitCodeProcess, OpenProcess, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION,
-    PROCESS_NAME_NATIVE, PROCESS_QUERY_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW,
-    STARTUPINFOW, WaitForSingleObject,
+    PROCESS_QUERY_INFORMATION, PROCESS_TERMINATE, STARTUPINFOW, WaitForSingleObject,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_TYPE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -27,11 +25,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos,
-    GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
-    IsIconic, IsWindowVisible, IsZoomed, SM_CXSCREEN, SM_CYSCREEN, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
+    BM_GETCHECK, BM_SETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetForegroundWindow,
+    GetSystemMetrics, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, IsZoomed, SM_CXSCREEN, SM_CYSCREEN, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+    SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos,
+    ShowWindow, WM_CLOSE, WM_GETTEXT, WM_SETTEXT,
 };
 use windows::core::BOOL;
 use windows::core::{PCWSTR, PWSTR};
@@ -72,34 +70,18 @@ const VK_LEFT: u16 = 0x25;
 const VK_UP: u16 = 0x26;
 const VK_RIGHT: u16 = 0x27;
 const VK_DOWN: u16 = 0x28;
-#[allow(dead_code)]
 const VK_F1: u16 = 0x70;
-#[allow(dead_code)]
-const VK_F2: u16 = 0x71;
-#[allow(dead_code)]
-const VK_F3: u16 = 0x72;
-#[allow(dead_code)]
-const VK_F4: u16 = 0x73;
-#[allow(dead_code)]
-const VK_F5: u16 = 0x74;
-#[allow(dead_code)]
-const VK_F6: u16 = 0x75;
-#[allow(dead_code)]
-const VK_F7: u16 = 0x76;
-#[allow(dead_code)]
-const VK_F8: u16 = 0x77;
-#[allow(dead_code)]
-const VK_F9: u16 = 0x78;
-#[allow(dead_code)]
-const VK_F10: u16 = 0x79;
-#[allow(dead_code)]
-const VK_F11: u16 = 0x7A;
-#[allow(dead_code)]
-const VK_F12: u16 = 0x7B;
 
 const OVERLAY_COLOR_DEFAULT: (u8, u8, u8) = (0, 255, 0);
 const OVERLAY_DURATION_DEFAULT_MS: u32 = 2000;
 const OVERLAY_BORDER_WIDTH_DEFAULT: i32 = 4;
+
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+const INPUT_SIZE: i32 = size_of::<INPUT>() as i32;
+#[allow(clippy::cast_possible_truncation)]
+const PROCESSENTRY32W_SIZE: u32 = size_of::<PROCESSENTRY32W>() as u32;
+#[allow(clippy::cast_possible_truncation)]
+const STARTUPINFOW_SIZE: u32 = size_of::<STARTUPINFOW>() as u32;
 
 #[derive(Debug)]
 pub enum AutomationError {
@@ -115,33 +97,33 @@ pub enum AutomationError {
 impl Display for AutomationError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            AutomationError::Win32Failure { code } => {
+            Self::Win32Failure { code } => {
                 let msg = error_code_to_message(*code);
-                write!(f, "Win32 error {}: {}", code, msg)
+                write!(f, "Win32 error {code}: {msg}")
             }
-            AutomationError::ApplicationNotFound { name } => {
-                write!(f, "Application '{}' not found in running processes", name)
+            Self::ApplicationNotFound { name } => {
+                write!(f, "Application '{name}' not found in running processes")
             }
-            AutomationError::WindowNotFound { title } => {
-                write!(f, "Window with title containing '{}' not found", title)
+            Self::WindowNotFound { title } => {
+                write!(f, "Window with title containing '{title}' not found")
             }
-            AutomationError::ProcessTerminated { pid } => {
-                write!(f, "Process with PID {} has terminated", pid)
+            Self::ProcessTerminated { pid } => {
+                write!(f, "Process with PID {pid} has terminated")
             }
-            AutomationError::ProcessNotFound { name } => {
-                write!(f, "Process '{}' not found", name)
+            Self::ProcessNotFound { name } => {
+                write!(f, "Process '{name}' not found")
             }
-            AutomationError::AccessDenied { operation } => {
-                write!(f, "Access denied for operation: {}", operation)
+            Self::AccessDenied { operation } => {
+                write!(f, "Access denied for operation: {operation}")
             }
-            AutomationError::Other(msg) => {
-                write!(f, "{}", msg)
+            Self::Other(msg) => {
+                write!(f, "{msg}")
             }
         }
     }
 }
 
-fn error_code_to_message(code: i32) -> &'static str {
+const fn error_code_to_message(code: i32) -> &'static str {
     match code {
         0 => "Success (no error)",
         2 => "File or path not found",
@@ -231,140 +213,13 @@ impl Application {
             }
         }
     }
-
-    pub fn get_name(&self) -> Result<String, AutomationError> {
-        unsafe {
-            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            let snapshot =
-                snapshot.map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-
-            let mut entry = PROCESSENTRY32W {
-                dwSize: size_of::<PROCESSENTRY32W>() as u32,
-                ..Default::default()
-            };
-
-            let result = Process32FirstW(snapshot, &raw mut entry);
-            if result.is_err() {
-                let _ = CloseHandle(snapshot);
-                return Err(AutomationError::Win32Failure {
-                    code: GetLastError().0.cast_signed(),
-                });
-            }
-
-            loop {
-                if entry.th32ProcessID == self.pid {
-                    let process_name = {
-                        let end_pos = entry
-                            .szExeFile
-                            .iter()
-                            .position(|&c| c == 0)
-                            .unwrap_or(entry.szExeFile.len());
-                        String::from_utf16_lossy(&entry.szExeFile[..end_pos])
-                    };
-                    let _ = CloseHandle(snapshot);
-                    return Ok(process_name);
-                }
-
-                if Process32NextW(snapshot, &raw mut entry).is_err() {
-                    break;
-                }
-            }
-
-            let _ = CloseHandle(snapshot);
-        }
-
-        Err(AutomationError::ProcessNotFound {
-            name: format!("PID {}", self.pid),
-        })
-    }
-
-    pub fn get_path(&self) -> Result<String, AutomationError> {
-        unsafe {
-            let mut buffer = [0u16; 260]; // MAX_PATH
-            let mut size = buffer.len() as u32;
-
-            let result = QueryFullProcessImageNameW(
-                self.handle,
-                PROCESS_NAME_NATIVE,
-                PWSTR(buffer.as_mut_ptr()),
-                &raw mut size,
-            );
-
-            if result.is_ok() {
-                let path = String::from_utf16_lossy(&buffer[..size as usize]);
-                Ok(path)
-            } else {
-                Err(AutomationError::Win32Failure {
-                    code: GetLastError().0.cast_signed(),
-                })
-            }
-        }
-    }
-
-    pub fn get_exit_code(&self) -> Result<u32, AutomationError> {
-        let mut exit_code: u32 = 0;
-        unsafe {
-            let result = GetExitCodeProcess(self.handle, &raw mut exit_code);
-            result.map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-            Ok(exit_code)
-        }
-    }
-
-    pub fn get_parent_pid(&self) -> Result<u32, AutomationError> {
-        unsafe {
-            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            let snapshot =
-                snapshot.map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-
-            let mut entry = PROCESSENTRY32W::default();
-            entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
-
-            let result = Process32FirstW(snapshot, &raw mut entry);
-            if result.is_err() {
-                let _ = CloseHandle(snapshot);
-                return Err(AutomationError::Win32Failure {
-                    code: GetLastError().0.cast_signed(),
-                });
-            }
-
-            loop {
-                if entry.th32ProcessID == self.pid {
-                    let parent_pid = entry.th32ParentProcessID;
-                    let _ = CloseHandle(snapshot);
-                    return Ok(parent_pid);
-                }
-
-                if Process32NextW(snapshot, &raw mut entry).is_err() {
-                    break;
-                }
-            }
-
-            let _ = CloseHandle(snapshot);
-        }
-
-        Err(AutomationError::ProcessNotFound {
-            name: format!("PID {}", self.pid),
-        })
-    }
-
-    pub fn kill(&self, exit_code: u32) -> Result<(), AutomationError> {
-        if !self.is_running() {
-            return Err(AutomationError::ProcessTerminated { pid: self.pid });
-        }
-
-        unsafe {
-            let result = TerminateProcess(self.handle, exit_code);
-            match result {
-                Ok(()) => Ok(()),
-                Err(e) => Err(AutomationError::Win32Failure { code: e.code().0 }),
-            }
-        }
-    }
 }
 
 pub fn launch_application(exe: &str, args: &str) -> Result<Application, AutomationError> {
-    let mut si = STARTUPINFOW::default();
-    si.cb = size_of::<STARTUPINFOW>() as u32;
+    let si = STARTUPINFOW {
+        cb: STARTUPINFOW_SIZE,
+        ..Default::default()
+    };
 
     let mut pi = PROCESS_INFORMATION::default();
 
@@ -412,8 +267,9 @@ pub fn show_overlay_on_rect(
     let _ = thread::spawn(move || {
         unsafe {
             // 1. Create pen with PS_SOLID, border_width, and RGB color
-            let color =
-                (color_rgb.0 as u32) | ((color_rgb.1 as u32) << 8) | ((color_rgb.2 as u32) << 16);
+            let color = u32::from(color_rgb.0)
+                | (u32::from(color_rgb.1) << 8)
+                | (u32::from(color_rgb.2) << 16);
 
             let hpen = CreatePen(PS_SOLID, border_width, COLORREF(color));
             if hpen.is_invalid() {
@@ -428,7 +284,7 @@ pub fn show_overlay_on_rect(
                 lbHatch: 0,
             };
 
-            let hbrush = CreateBrushIndirect(&brush);
+            let hbrush = CreateBrushIndirect(&raw const brush);
             if hbrush.is_invalid() {
                 log::warn!("Failed to create overlay brush");
                 let _ = DeleteObject(hpen.into());
@@ -437,7 +293,7 @@ pub fn show_overlay_on_rect(
 
             // 3. Get Display DC (works across all windows)
             let hdc = CreateDCA(
-                windows::core::PCSTR::from_raw("DISPLAY\0".as_ptr() as *mut u8),
+                windows::core::PCSTR::from_raw(c"DISPLAY".as_ptr().cast()),
                 windows::core::PCSTR::null(),
                 windows::core::PCSTR::null(),
                 None,
@@ -482,13 +338,7 @@ pub fn show_overlay_on_rect(
             left = left.min(right - 1);
             top = top.min(bottom - 1);
 
-            log::debug!(
-                "Drawing overlay at ({}, {}, {}, {})",
-                left,
-                top,
-                right,
-                bottom
-            );
+            log::debug!("Drawing overlay at ({left}, {top}, {right}, {bottom})");
             let _ = Rectangle(hdc, left, top, right, bottom);
 
             // 6. Clean up GDI objects
@@ -496,21 +346,28 @@ pub fn show_overlay_on_rect(
             let _ = DeleteObject(hpen.into());
             let _ = DeleteDC(hdc);
 
-            log::debug!("Overlay drawn, sleeping for {}ms", duration_ms);
+            log::debug!("Overlay drawn, sleeping for {duration_ms}ms");
         }
 
         // 7. Sleep for the duration
-        sleep(Duration::from_millis(duration_ms as u64));
+        sleep(Duration::from_millis(u64::from(duration_ms)));
         log::debug!("Overlay sleep complete");
     });
 
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WindowId(pub isize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementType {
+    Window,
+    Control,
+}
 
-impl WindowId {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ElementId(pub isize);
+
+impl ElementId {
+    #[must_use]
     pub const fn as_hwnd(&self) -> HWND {
         HWND(self.0 as *mut c_void)
     }
@@ -521,164 +378,14 @@ impl WindowId {
 }
 
 #[derive(Debug)]
-pub struct Window {
-    pub id: WindowId,
-    pub title: String,
+pub struct Element {
+    pub id: ElementId,
+    pub element_type: ElementType,
     pub class_name: String,
+    pub text: String,
     pub bounds: Rect,
     pub visible: bool,
-}
-
-impl Window {
-    pub fn activate(&self) -> Result<(), AutomationError> {
-        unsafe {
-            let _ = SetForegroundWindow(self.id.as_hwnd());
-            Ok(())
-        }
-    }
-
-    pub fn close(&self) -> Result<(), AutomationError> {
-        unsafe {
-            SendMessageW(
-                self.id.as_hwnd(),
-                WM_CLOSE,
-                Some(WPARAM(0)),
-                Some(LPARAM(0)),
-            );
-            Ok(())
-        }
-    }
-
-    pub fn minimize(&self) -> Result<(), AutomationError> {
-        unsafe {
-            let _ = ShowWindow(self.id.as_hwnd(), SW_MINIMIZE);
-            Ok(())
-        }
-    }
-
-    pub fn maximize(&self) -> Result<(), AutomationError> {
-        unsafe {
-            let _ = ShowWindow(self.id.as_hwnd(), SW_MAXIMIZE);
-            Ok(())
-        }
-    }
-
-    pub fn restore(&self) -> Result<(), AutomationError> {
-        unsafe {
-            let _ = ShowWindow(self.id.as_hwnd(), SW_RESTORE);
-            Ok(())
-        }
-    }
-
-    pub fn show(&self) -> Result<(), AutomationError> {
-        unsafe {
-            let _ = ShowWindow(self.id.as_hwnd(), SW_SHOW);
-            Ok(())
-        }
-    }
-
-    pub fn resize(&self, width: i32, height: i32) -> Result<(), AutomationError> {
-        unsafe {
-            SetWindowPos(
-                self.id.as_hwnd(),
-                None,
-                0,
-                0,
-                width,
-                height,
-                SWP_NOMOVE | SWP_NOZORDER,
-            )
-            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-            Ok(())
-        }
-    }
-
-    pub fn move_to(&self, x: i32, y: i32) -> Result<(), AutomationError> {
-        unsafe {
-            SetWindowPos(
-                self.id.as_hwnd(),
-                None,
-                x,
-                y,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER,
-            )
-            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-            Ok(())
-        }
-    }
-
-    #[must_use]
-    pub fn is_visible(&self) -> bool {
-        unsafe { IsWindowVisible(self.id.as_hwnd()).as_bool() }
-    }
-
-    #[must_use]
-    pub fn is_minimized(&self) -> bool {
-        unsafe { IsIconic(self.id.as_hwnd()).as_bool() }
-    }
-
-    #[must_use]
-    pub fn is_maximized(&self) -> bool {
-        unsafe { IsZoomed(self.id.as_hwnd()).as_bool() }
-    }
-
-    pub fn refresh(&mut self) -> Result<(), AutomationError> {
-        unsafe {
-            let updated = create_window_from_hwnd(self.id.as_hwnd())?;
-            self.title = updated.title;
-            self.class_name = updated.class_name;
-            self.bounds = updated.bounds;
-            self.visible = updated.visible;
-            Ok(())
-        }
-    }
-
-    #[must_use]
-    pub fn get_process_id(&self) -> u32 {
-        unsafe {
-            let mut pid = 0u32;
-            GetWindowThreadProcessId(self.id.as_hwnd(), Some(&raw mut pid));
-            pid
-        }
-    }
-
-    pub fn show_overlay(&self) -> Result<(), AutomationError> {
-        show_overlay_on_rect(
-            self.bounds,
-            OVERLAY_COLOR_DEFAULT,
-            OVERLAY_DURATION_DEFAULT_MS,
-            OVERLAY_BORDER_WIDTH_DEFAULT,
-        )
-    }
-
-    pub fn show_overlay_with_color(&self, color_rgb: (u8, u8, u8)) -> Result<(), AutomationError> {
-        show_overlay_on_rect(
-            self.bounds,
-            color_rgb,
-            OVERLAY_DURATION_DEFAULT_MS,
-            OVERLAY_BORDER_WIDTH_DEFAULT,
-        )
-    }
-
-    pub fn show_overlay_with_duration(&self, duration_ms: u32) -> Result<(), AutomationError> {
-        show_overlay_on_rect(
-            self.bounds,
-            OVERLAY_COLOR_DEFAULT,
-            duration_ms,
-            OVERLAY_BORDER_WIDTH_DEFAULT,
-        )
-    }
-
-    pub fn show_overlay_custom(
-        &self,
-        color_rgb: (u8, u8, u8),
-        duration_ms: u32,
-        border_width: i32,
-    ) -> Result<(), AutomationError> {
-        show_overlay_on_rect(self.bounds, color_rgb, duration_ms, border_width)
-    }
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -690,7 +397,8 @@ pub struct Rect {
 }
 
 impl Rect {
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             left: 0,
             top: 0,
@@ -700,32 +408,70 @@ impl Rect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ControlId(pub isize);
-
-impl ControlId {
-    pub const fn as_hwnd(&self) -> HWND {
-        HWND(self.0 as *mut c_void)
-    }
-
-    fn from_hwnd(hwnd: HWND) -> Self {
-        Self(hwnd.0 as isize)
-    }
-}
-
-#[derive(Debug)]
-pub struct Control {
-    pub id: ControlId,
-    pub class_name: String,
-    pub text: String,
-    pub bounds: Rect,
-    pub visible: bool,
-    pub enabled: bool,
-}
-
-impl Control {
-    fn as_hwnd(&self) -> HWND {
+impl Element {
+    const fn as_hwnd(&self) -> HWND {
         self.id.as_hwnd()
+    }
+
+    fn require_window(&self, operation: &str) -> Result<(), AutomationError> {
+        if self.element_type != ElementType::Window {
+            return Err(AutomationError::Other(format!(
+                "Cannot {} a control (only windows support this)",
+                operation
+            )));
+        }
+        Ok(())
+    }
+
+    fn require_control(&self, operation: &str) -> Result<(), AutomationError> {
+        if self.element_type != ElementType::Control {
+            return Err(AutomationError::Other(format!(
+                "Cannot {} on a window (only controls support this)",
+                operation
+            )));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn get_text_live(&mut self) -> Result<String, AutomationError> {
+        unsafe {
+            let mut buffer = [0u16; 1024];
+            let len = SendMessageW(
+                self.as_hwnd(),
+                WM_GETTEXT,
+                Some(WPARAM(buffer.len())),
+                Some(LPARAM(buffer.as_mut_ptr() as isize)),
+            )
+            .0
+            .cast_unsigned();
+
+            let text = if len > 0 {
+                String::from_utf16_lossy(&buffer[..len])
+            } else {
+                String::new()
+            };
+
+            self.text = text.clone();
+            Ok(text)
+        }
+    }
+
+    pub fn set_text(&self, text: &str) -> Result<(), AutomationError> {
+        let text_w: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        unsafe {
+            SendMessageW(
+                self.as_hwnd(),
+                WM_SETTEXT,
+                Some(WPARAM(0)),
+                Some(LPARAM(text_w.as_ptr() as isize)),
+            );
+            Ok(())
+        }
     }
 
     pub fn click(&self) -> Result<(), AutomationError> {
@@ -746,6 +492,7 @@ impl Control {
         double_click(center_x, center_y)
     }
 
+    #[must_use]
     pub fn is_focused(&self) -> bool {
         unsafe { self.as_hwnd() == GetForegroundWindow() }
     }
@@ -757,140 +504,29 @@ impl Control {
         }
     }
 
-    pub fn set_text(&self, text: &str) -> Result<(), AutomationError> {
-        let text_w: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-        unsafe {
-            SendMessageW(
-                self.as_hwnd(),
-                WM_SETTEXT,
-                Some(WPARAM(0)),
-                Some(LPARAM(text_w.as_ptr() as isize)),
-            );
-            Ok(())
-        }
-    }
-
-    pub fn get_text(&self) -> Result<String, AutomationError> {
-        unsafe {
-            let mut buffer = [0u16; 1024];
-            let len = SendMessageW(
-                self.as_hwnd(),
-                WM_GETTEXT,
-                Some(WPARAM(buffer.len())),
-                Some(LPARAM(buffer.as_mut_ptr() as isize)),
-            )
-            .0 as usize;
-
-            if len > 0 {
-                Ok(String::from_utf16_lossy(&buffer[..len]).to_string())
-            } else {
-                Ok(String::new())
-            }
-        }
-    }
-
-    pub fn is_checked(&self) -> Result<bool, AutomationError> {
-        unsafe {
-            let result = SendMessageW(self.as_hwnd(), BM_GETCHECK, None, None).0 as usize;
-
-            Ok(result == BST_CHECKED as usize)
-        }
-    }
-
-    pub fn set_checked(&self, checked: bool) -> Result<(), AutomationError> {
-        unsafe {
-            let state = if checked { BST_CHECKED } else { BST_UNCHECKED };
-            SendMessageW(self.as_hwnd(), BM_SETCHECK, Some(WPARAM(state)), None);
-            Ok(())
-        }
-    }
-
-    pub fn toggle_checkbox(&self) -> Result<(), AutomationError> {
-        let current = self.is_checked()?;
-        self.set_checked(!current)
-    }
-
-    pub fn clear_text(&self) -> Result<(), AutomationError> {
-        self.focus()?;
-        key_down_ctrl()?;
-        sleep(Duration::from_millis(50));
-        press_key('a')?;
-        sleep(Duration::from_millis(50));
-        key_up_ctrl()?;
-        sleep(Duration::from_millis(50));
-        press_delete()?;
-        Ok(())
-    }
-
-    pub fn copy_to_clipboard(&self) -> Result<(), AutomationError> {
-        self.focus()?;
-        key_down_ctrl()?;
-        sleep(Duration::from_millis(50));
-        press_key('a')?;
-        sleep(Duration::from_millis(50));
-        key_up_ctrl()?;
-        sleep(Duration::from_millis(50));
-        key_down_ctrl()?;
-        sleep(Duration::from_millis(50));
-        press_key('c')?;
-        sleep(Duration::from_millis(50));
-        key_up_ctrl()?;
-        Ok(())
-    }
-
-    pub fn paste_from_clipboard(&self) -> Result<(), AutomationError> {
-        self.focus()?;
-        key_down_ctrl()?;
-        sleep(Duration::from_millis(50));
-        press_key('v')?;
-        sleep(Duration::from_millis(50));
-        key_up_ctrl()?;
-        Ok(())
-    }
-
-    pub fn select_text(&self, start: i32, length: i32) -> Result<(), AutomationError> {
-        unsafe {
-            SendMessageW(
-                self.as_hwnd(),
-                EM_SETSEL,
-                Some(WPARAM(start as usize)),
-                Some(LPARAM(start as isize + length as isize)),
-            );
-            Ok(())
-        }
-    }
-
-    pub fn get_selected_text(&self) -> Result<String, AutomationError> {
-        unsafe {
-            let result = SendMessageW(self.as_hwnd(), EM_GETSEL, None, None).0 as isize;
-            let start = result & 0xFFFF;
-            let end = (result >> 16) & 0xFFFF;
-
-            if start == end {
-                return Ok(String::new());
-            }
-
-            let full_text = self.get_text()?;
-            let start_idx = start.max(0) as usize;
-            let end_idx = end.max(0) as usize;
-
-            if start_idx >= full_text.len() || end_idx > full_text.len() {
-                return Ok(String::new());
-            }
-
-            Ok(full_text[start_idx..end_idx.min(full_text.len())].to_string())
-        }
+    #[must_use]
+    pub fn is_visible(&self) -> bool {
+        unsafe { IsWindowVisible(self.as_hwnd()).as_bool() }
     }
 
     pub fn refresh(&mut self) -> Result<(), AutomationError> {
         unsafe {
-            let updated = create_control_from_hwnd(self.as_hwnd())?;
+            let updated = create_element_from_hwnd(self.as_hwnd(), self.element_type)?;
             self.class_name = updated.class_name;
             self.text = updated.text;
             self.bounds = updated.bounds;
             self.visible = updated.visible;
             self.enabled = updated.enabled;
             Ok(())
+        }
+    }
+
+    #[must_use]
+    pub fn get_process_id(&self) -> u32 {
+        unsafe {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(self.as_hwnd(), Some(&raw mut pid));
+            pid
         }
     }
 
@@ -903,24 +539,6 @@ impl Control {
         )
     }
 
-    pub fn show_overlay_with_color(&self, color_rgb: (u8, u8, u8)) -> Result<(), AutomationError> {
-        show_overlay_on_rect(
-            self.bounds,
-            color_rgb,
-            OVERLAY_DURATION_DEFAULT_MS,
-            OVERLAY_BORDER_WIDTH_DEFAULT,
-        )
-    }
-
-    pub fn show_overlay_with_duration(&self, duration_ms: u32) -> Result<(), AutomationError> {
-        show_overlay_on_rect(
-            self.bounds,
-            OVERLAY_COLOR_DEFAULT,
-            duration_ms,
-            OVERLAY_BORDER_WIDTH_DEFAULT,
-        )
-    }
-
     pub fn show_overlay_custom(
         &self,
         color_rgb: (u8, u8, u8),
@@ -928,6 +546,176 @@ impl Control {
         border_width: i32,
     ) -> Result<(), AutomationError> {
         show_overlay_on_rect(self.bounds, color_rgb, duration_ms, border_width)
+    }
+
+    pub fn close(&self) -> Result<(), AutomationError> {
+        unsafe {
+            SendMessageW(self.as_hwnd(), WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0)));
+            Ok(())
+        }
+    }
+
+    pub fn activate(&self) -> Result<(), AutomationError> {
+        self.require_window("activate")?;
+        unsafe {
+            let _ = SetForegroundWindow(self.as_hwnd());
+            Ok(())
+        }
+    }
+
+    pub fn minimize(&self) -> Result<(), AutomationError> {
+        self.require_window("minimize")?;
+        unsafe {
+            let _ = ShowWindow(self.as_hwnd(), SW_MINIMIZE);
+            Ok(())
+        }
+    }
+
+    pub fn maximize(&self) -> Result<(), AutomationError> {
+        self.require_window("maximize")?;
+        unsafe {
+            let _ = ShowWindow(self.as_hwnd(), SW_MAXIMIZE);
+            Ok(())
+        }
+    }
+
+    pub fn restore(&self) -> Result<(), AutomationError> {
+        self.require_window("restore")?;
+        unsafe {
+            let _ = ShowWindow(self.as_hwnd(), SW_RESTORE);
+            Ok(())
+        }
+    }
+
+    pub fn show(&self) -> Result<(), AutomationError> {
+        self.require_window("show")?;
+        unsafe {
+            let _ = ShowWindow(self.as_hwnd(), SW_SHOW);
+            Ok(())
+        }
+    }
+
+    pub fn resize(&self, width: i32, height: i32) -> Result<(), AutomationError> {
+        self.require_window("resize")?;
+        unsafe {
+            SetWindowPos(
+                self.as_hwnd(),
+                None,
+                0,
+                0,
+                width,
+                height,
+                SWP_NOMOVE | SWP_NOZORDER,
+            )
+            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
+            Ok(())
+        }
+    }
+
+    pub fn move_to(&self, x: i32, y: i32) -> Result<(), AutomationError> {
+        self.require_window("move_to")?;
+        unsafe {
+            SetWindowPos(self.as_hwnd(), None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
+                .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
+            Ok(())
+        }
+    }
+
+    #[must_use]
+    pub fn is_minimized(&self) -> bool {
+        self.element_type == ElementType::Window && unsafe { IsIconic(self.as_hwnd()).as_bool() }
+    }
+
+    #[must_use]
+    pub fn is_maximized(&self) -> bool {
+        self.element_type == ElementType::Window && unsafe { IsZoomed(self.as_hwnd()).as_bool() }
+    }
+
+    pub fn is_checked(&self) -> Result<bool, AutomationError> {
+        self.require_control("check state")?;
+        unsafe {
+            let result = SendMessageW(self.as_hwnd(), BM_GETCHECK, None, None)
+                .0
+                .cast_unsigned();
+
+            Ok(result == BST_CHECKED)
+        }
+    }
+
+    pub fn set_checked(&self, checked: bool) -> Result<(), AutomationError> {
+        self.require_control("set checked")?;
+        unsafe {
+            let state = if checked { BST_CHECKED } else { BST_UNCHECKED };
+            SendMessageW(self.as_hwnd(), BM_SETCHECK, Some(WPARAM(state)), None);
+            Ok(())
+        }
+    }
+
+    pub fn toggle_checkbox(&self) -> Result<(), AutomationError> {
+        self.require_control("toggle checkbox")?;
+        let current = self.is_checked()?;
+        self.set_checked(!current)
+    }
+
+    pub fn clear_text(&self) -> Result<(), AutomationError> {
+        self.require_control("clear text")?;
+        self.focus()?;
+        key_sequence("Ctrl+A")?;
+        sleep(Duration::from_millis(50));
+        press_key_by_name("delete")?;
+        Ok(())
+    }
+
+    pub fn copy_to_clipboard(&self) -> Result<(), AutomationError> {
+        self.require_control("copy to clipboard")?;
+        self.focus()?;
+        key_sequence("Ctrl+A")?;
+        sleep(Duration::from_millis(50));
+        key_sequence("Ctrl+C")?;
+        Ok(())
+    }
+
+    pub fn paste_from_clipboard(&self) -> Result<(), AutomationError> {
+        self.require_control("paste from clipboard")?;
+        self.focus()?;
+        key_sequence("Ctrl+V")?;
+        Ok(())
+    }
+
+    pub fn select_text(&self, start: i32, length: i32) -> Result<(), AutomationError> {
+        self.require_control("select text")?;
+        unsafe {
+            SendMessageW(
+                self.as_hwnd(),
+                EM_SETSEL,
+                Some(WPARAM(usize::try_from(start).unwrap_or(0))),
+                Some(LPARAM(start as isize + length as isize)),
+            );
+            Ok(())
+        }
+    }
+
+    pub fn get_selected_text(&mut self) -> Result<String, AutomationError> {
+        self.require_control("get selected text")?;
+        unsafe {
+            let result = SendMessageW(self.as_hwnd(), EM_GETSEL, None, None).0 as isize;
+            let start = result & 0xFFFF;
+            let end = (result >> 16) & 0xFFFF;
+
+            if start == end {
+                return Ok(String::new());
+            }
+
+            let full_text = self.get_text_live()?;
+            let start_idx = start.max(0).cast_unsigned();
+            let end_idx = end.max(0).cast_unsigned();
+
+            if start_idx >= full_text.len() || end_idx > full_text.len() {
+                return Ok(String::new());
+            }
+
+            Ok(full_text[start_idx..end_idx.min(full_text.len())].to_string())
+        }
     }
 }
 
@@ -938,8 +726,10 @@ pub fn find_processes_by_name(name: &str) -> Result<Vec<Application>, Automation
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         let snapshot = snapshot.map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
 
-        let mut entry = PROCESSENTRY32W::default();
-        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        let mut entry = PROCESSENTRY32W {
+            dwSize: PROCESSENTRY32W_SIZE,
+            ..Default::default()
+        };
 
         if Process32FirstW(snapshot, &raw mut entry).is_ok() {
             loop {
@@ -989,18 +779,23 @@ pub fn attach_to_process_by_name(name: &str) -> Result<Application, AutomationEr
         });
     }
 
-    Ok(processes.into_iter().next().unwrap())
+    processes
+        .into_iter()
+        .next()
+        .ok_or_else(|| AutomationError::ProcessNotFound {
+            name: name.to_string(),
+        })
 }
 
 unsafe fn get_window_text(hwnd: HWND) -> String {
     unsafe {
         let mut buffer = [0u16; 512];
         let len = GetWindowTextW(hwnd, &mut buffer);
-        if len > 0 {
-            String::from_utf16_lossy(&buffer[..len as usize])
-        } else {
-            String::new()
-        }
+
+        usize::try_from(len).map_or_else(
+            |_| String::new(),
+            |len_usize| String::from_utf16_lossy(&buffer[..len_usize]),
+        )
     }
 }
 
@@ -1008,11 +803,11 @@ unsafe fn get_window_class(hwnd: HWND) -> String {
     unsafe {
         let mut buffer = [0u16; 256];
         let len = GetClassNameW(hwnd, &mut buffer);
-        if len > 0 {
-            String::from_utf16_lossy(&buffer[..len as usize])
-        } else {
-            String::new()
-        }
+
+        usize::try_from(len).map_or_else(
+            |_| String::new(),
+            |len_usize| String::from_utf16_lossy(&buffer[..len_usize]),
+        )
     }
 }
 
@@ -1031,118 +826,20 @@ unsafe fn get_window_bounds(hwnd: HWND) -> Result<Rect, AutomationError> {
     }
 }
 
-unsafe fn create_window_from_hwnd(hwnd: HWND) -> Result<Window, AutomationError> {
+unsafe fn create_element_from_hwnd(
+    hwnd: HWND,
+    element_type: ElementType,
+) -> Result<Element, AutomationError> {
     unsafe {
-        let title = get_window_text(hwnd);
-        let class_name = get_window_class(hwnd);
-        let bounds = get_window_bounds(hwnd)?;
-        let visible = IsWindowVisible(hwnd).as_bool();
-
-        Ok(Window {
-            id: WindowId::from_hwnd(hwnd),
-            title,
-            class_name,
-            bounds,
-            visible,
-        })
-    }
-}
-
-struct EnumWindowsData {
-    windows: Vec<Window>,
-}
-
-unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    unsafe {
-        let data = &mut *(lparam.0 as *mut EnumWindowsData);
-
-        if let Ok(window) = create_window_from_hwnd(hwnd) {
-            data.windows.push(window);
-        }
-
-        BOOL(1)
-    }
-}
-
-pub fn find_windows() -> Result<Vec<Window>, AutomationError> {
-    unsafe {
-        let mut data = EnumWindowsData {
-            windows: Vec::new(),
-        };
-
-        let lparam = LPARAM(&raw mut data as isize);
-        EnumWindows(Some(enum_windows_callback), lparam)
-            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-
-        Ok(data.windows)
-    }
-}
-
-pub fn find_windows_by_title(title: &str) -> Result<Vec<Window>, AutomationError> {
-    let windows = find_windows()?;
-    Ok(windows
-        .into_iter()
-        .filter(|w| w.title.to_lowercase().contains(&title.to_lowercase()))
-        .collect())
-}
-
-pub fn find_windows_by_title_regex(pattern: &str) -> Result<Vec<Window>, AutomationError> {
-    let regex = Regex::new(pattern)
-        .map_err(|e| AutomationError::Other(format!("Invalid regex pattern: {e}")))?;
-
-    let windows = find_windows()?;
-    Ok(windows
-        .into_iter()
-        .filter(|w| regex.is_match(&w.title))
-        .collect())
-}
-
-pub fn find_windows_by_class(class_name: &str) -> Result<Vec<Window>, AutomationError> {
-    let windows = find_windows()?;
-    Ok(windows
-        .into_iter()
-        .filter(|w| {
-            w.class_name
-                .to_lowercase()
-                .contains(&class_name.to_lowercase())
-        })
-        .collect())
-}
-
-pub fn find_windows_by_process(pid: u32) -> Result<Vec<Window>, AutomationError> {
-    let windows = find_windows()?;
-    Ok(windows
-        .into_iter()
-        .filter(|w| unsafe {
-            let mut window_pid = 0u32;
-            GetWindowThreadProcessId(w.id.as_hwnd(), Some(&raw mut window_pid));
-            window_pid == pid
-        })
-        .collect())
-}
-
-pub fn get_foreground_window() -> Result<Window, AutomationError> {
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.0.is_null() {
-            return Err(AutomationError::WindowNotFound {
-                title: "No foreground window".to_string(),
-            });
-        }
-        create_window_from_hwnd(hwnd)
-    }
-}
-
-unsafe fn create_control_from_hwnd(hwnd: HWND) -> Result<Control, AutomationError> {
-    unsafe {
-        let class_name = get_window_class(hwnd);
         let text = get_window_text(hwnd);
+        let class_name = get_window_class(hwnd);
         let bounds = get_window_bounds(hwnd)?;
         let visible = IsWindowVisible(hwnd).as_bool();
         let enabled = true;
 
-        Ok(Control {
-            id: ControlId::from_hwnd(hwnd),
+        Ok(Element {
+            id: ElementId::from_hwnd(hwnd),
+            element_type,
             class_name,
             text,
             bounds,
@@ -1152,139 +849,85 @@ unsafe fn create_control_from_hwnd(hwnd: HWND) -> Result<Control, AutomationErro
     }
 }
 
-struct EnumControlsData {
-    controls: Vec<Control>,
+struct EnumWindowsData {
+    elements: Vec<Element>,
 }
 
-unsafe extern "system" fn enum_child_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
-        let data = &mut *(lparam.0 as *mut EnumControlsData);
+        let data = &mut *(lparam.0 as *mut EnumWindowsData);
 
-        if let Ok(control) = create_control_from_hwnd(hwnd) {
-            data.controls.push(control);
+        if let Ok(element) = create_element_from_hwnd(hwnd, ElementType::Window) {
+            data.elements.push(element);
         }
 
         BOOL(1)
     }
 }
 
-pub fn find_controls_in_window(parent_hwnd: HWND) -> Result<Vec<Control>, AutomationError> {
+pub fn find_windows() -> Result<Vec<Element>, AutomationError> {
+    unsafe {
+        let mut data = EnumWindowsData {
+            elements: Vec::new(),
+        };
+
+        let lparam = LPARAM(&raw mut data as isize);
+        EnumWindows(Some(enum_windows_callback), lparam)
+            .map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
+
+        Ok(data.elements)
+    }
+}
+
+pub fn get_foreground_window() -> Result<Element, AutomationError> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return Err(AutomationError::WindowNotFound {
+                title: "No foreground window".to_string(),
+            });
+        }
+        create_element_from_hwnd(hwnd, ElementType::Window)
+    }
+}
+
+struct EnumControlsData {
+    elements: Vec<Element>,
+}
+
+unsafe extern "system" fn enum_child_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+        let data = &mut *(lparam.0 as *mut EnumControlsData);
+
+        if let Ok(element) = create_element_from_hwnd(hwnd, ElementType::Control) {
+            data.elements.push(element);
+        }
+
+        BOOL(1)
+    }
+}
+
+pub fn find_child_elements(parent_hwnd: HWND) -> Result<Vec<Element>, AutomationError> {
     unsafe {
         let mut data = EnumControlsData {
-            controls: Vec::new(),
+            elements: Vec::new(),
         };
 
         let lparam = LPARAM(&raw mut data as isize);
         let _ = EnumChildWindows(Some(parent_hwnd), Some(enum_child_windows_callback), lparam);
 
-        Ok(data.controls)
+        Ok(data.elements)
     }
 }
 
-pub fn find_controls_by_class(
-    parent_hwnd: HWND,
-    class_name: &str,
-) -> Result<Vec<Control>, AutomationError> {
-    let controls = find_controls_in_window(parent_hwnd)?;
-    Ok(controls
-        .into_iter()
-        .filter(|c| {
-            c.class_name
-                .to_lowercase()
-                .contains(&class_name.to_lowercase())
-        })
-        .collect())
-}
-
-pub fn find_control_by_text(parent_hwnd: HWND, text: &str) -> Result<Control, AutomationError> {
-    let controls = find_controls_in_window(parent_hwnd)?;
-    controls
-        .into_iter()
-        .find(|c| c.text.to_lowercase().contains(&text.to_lowercase()))
-        .ok_or(AutomationError::WindowNotFound {
-            title: format!("Control with text '{}'", text),
-        })
-}
-
-pub fn find_control_by_text_exact(
-    parent_hwnd: HWND,
-    text: &str,
-) -> Result<Control, AutomationError> {
-    let controls = find_controls_in_window(parent_hwnd)?;
-    controls
-        .into_iter()
-        .find(|c| c.text == text)
-        .ok_or(AutomationError::WindowNotFound {
-            title: format!("Control with exact text '{}'", text),
-        })
-}
-
-pub fn find_control_by_class_exact(
-    parent_hwnd: HWND,
-    class_name: &str,
-) -> Result<Control, AutomationError> {
-    let controls = find_controls_in_window(parent_hwnd)?;
-    controls
-        .into_iter()
-        .find(|c| c.class_name == class_name)
-        .ok_or(AutomationError::WindowNotFound {
-            title: format!("Control with class '{}'", class_name),
-        })
-}
-
-pub fn find_window_by_selector(dsl: &str) -> Result<Window, AutomationError> {
+pub fn find_element_by_selector(dsl: &str) -> Result<Element, AutomationError> {
     let selector = selector::Selector::parse(dsl)?;
-    find_window_by_selector_obj(&selector)
+    find_element_by_selector_obj(&selector)
 }
 
-pub fn find_window_by_selector_obj(
+pub fn find_element_by_selector_obj(
     selector: &selector::Selector,
-) -> Result<Window, AutomationError> {
-    if selector.path.is_empty() {
-        return Err(AutomationError::Other("Selector has no paths".to_string()));
-    }
-
-    let first_path = &selector.path[0];
-    if first_path.element_type != "Window" {
-        return Err(AutomationError::Other(
-            "First selector path must be Window".to_string(),
-        ));
-    }
-
-    let windows = find_windows()?;
-    let mut matches = windows
-        .into_iter()
-        .filter(|w| {
-            selector::window_matches_criteria(&w.title, &w.class_name, &first_path.criteria)
-        })
-        .collect::<Vec<_>>();
-
-    if matches.is_empty() {
-        return Err(AutomationError::WindowNotFound {
-            title: format!("No window matches selector: {}", selector.original),
-        });
-    }
-
-    if matches.len() > 1 {
-        log::warn!(
-            "Selector '{}' matched {} windows, returning first. Windows: {:?}",
-            selector.original,
-            matches.len(),
-            matches.iter().map(|w| &w.title).collect::<Vec<_>>()
-        );
-    }
-
-    Ok(matches.remove(0))
-}
-
-pub fn find_control_by_selector(dsl: &str) -> Result<Control, AutomationError> {
-    let selector = selector::Selector::parse(dsl)?;
-    find_control_by_selector_obj(&selector)
-}
-
-pub fn find_control_by_selector_obj(
-    selector: &selector::Selector,
-) -> Result<Control, AutomationError> {
+) -> Result<Element, AutomationError> {
     if selector.path.is_empty() {
         return Err(AutomationError::Other("Selector has no paths".to_string()));
     }
@@ -1300,7 +943,7 @@ pub fn find_control_by_selector_obj(
     // Find the window
     let mut windows = find_windows()?;
     windows.retain(|w| {
-        selector::window_matches_criteria(&w.title, &w.class_name, &first_path.criteria)
+        selector::window_matches_criteria(&w.text, &w.class_name, &first_path.criteria)
     });
 
     if windows.is_empty() {
@@ -1310,15 +953,15 @@ pub fn find_control_by_selector_obj(
     }
 
     if windows.len() > 1 {
-        log::warn!(
-            "Selector window matched {} windows, using first. Windows: {:?}",
-            windows.len(),
-            windows.iter().map(|w| &w.title).collect::<Vec<_>>()
-        );
+        log::warn!("Selector matched {} windows, using first", windows.len());
     }
 
-    let window = windows.remove(0);
-    let mut current_parent_hwnd = window.id.as_hwnd();
+    let mut current_element = windows.remove(0);
+
+    // If only one path, return the window
+    if selector.path.len() == 1 {
+        return Ok(current_element);
+    }
 
     // Process remaining control paths
     for (path_idx, path) in selector.path.iter().enumerate().skip(1) {
@@ -1329,7 +972,7 @@ pub fn find_control_by_selector_obj(
             )));
         }
 
-        let controls = find_controls_in_window(current_parent_hwnd)?;
+        let controls = find_child_elements(current_element.id.as_hwnd())?;
         let mut matches = controls
             .into_iter()
             .filter(|c| selector::control_matches_criteria(&c.text, &c.class_name, &path.criteria))
@@ -1346,38 +989,45 @@ pub fn find_control_by_selector_obj(
 
         if matches.len() > 1 {
             log::warn!(
-                "Selector path {} matched {} controls, returning first. Controls: {:?}",
+                "Selector path {} matched {} controls, returning first",
                 path_idx,
-                matches.len(),
-                matches.iter().map(|c| &c.text).collect::<Vec<_>>()
+                matches.len()
             );
         }
 
-        let control = matches.remove(0);
-        current_parent_hwnd = control.id.as_hwnd();
-
-        // If this is the last path, return the control
-        if path_idx == selector.path.len() - 1 {
-            return Ok(control);
-        }
+        current_element = matches.remove(0);
     }
 
-    Err(AutomationError::Other(
-        "Selector resolution failed unexpectedly".to_string(),
-    ))
+    Ok(current_element)
+}
+
+pub fn find_window_by_selector(dsl: &str) -> Result<Element, AutomationError> {
+    let element = find_element_by_selector(dsl)?;
+    if element.element_type != ElementType::Window {
+        return Err(AutomationError::Other(
+            "Selector did not return a window".to_string(),
+        ));
+    }
+    Ok(element)
+}
+
+pub fn find_control_by_selector(dsl: &str) -> Result<Element, AutomationError> {
+    let element = find_element_by_selector(dsl)?;
+    if element.element_type != ElementType::Control {
+        return Err(AutomationError::Other(
+            "Selector did not return a control".to_string(),
+        ));
+    }
+    Ok(element)
 }
 
 /// Generate a selector DSL string from a Window
-pub fn window_to_selector(window: &Window) -> Result<String, AutomationError> {
-    selector::window_to_selector(window)
+pub fn window_to_selector(element: &Element) -> Result<String, AutomationError> {
+    selector::window_to_selector(element)
 }
 
-/// Generate a selector DSL string from a Control and its parent Window
-pub fn control_to_selector(
-    control: &Control,
-    parent_window: &Window,
-) -> Result<String, AutomationError> {
-    selector::control_to_selector(control, parent_window)
+pub fn control_to_selector(element: &Element, parent: &Element) -> Result<String, AutomationError> {
+    selector::control_to_selector(element, parent)
 }
 
 pub fn click(x: i32, y: i32) -> Result<(), AutomationError> {
@@ -1396,12 +1046,12 @@ pub fn click(x: i32, y: i32) -> Result<(), AutomationError> {
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         sleep(Duration::from_millis(50));
 
         input.Anonymous.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         Ok(())
     }
@@ -1423,12 +1073,12 @@ pub fn right_click(x: i32, y: i32) -> Result<(), AutomationError> {
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         sleep(Duration::from_millis(50));
 
         input.Anonymous.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         Ok(())
     }
@@ -1457,7 +1107,7 @@ pub fn move_mouse(x: i32, y: i32) -> Result<(), AutomationError> {
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         Ok(())
     }
@@ -1470,14 +1120,14 @@ pub fn type_text(text: &str) -> Result<(), AutomationError> {
         } else if ch == '\t' {
             press_key_code(0x09)?;
         } else {
-            type_char(ch)?;
+            type_char(ch);
         }
         sleep(Duration::from_millis(10));
     }
     Ok(())
 }
 
-fn type_char(ch: char) -> Result<(), AutomationError> {
+fn type_char(ch: char) {
     unsafe {
         let input = INPUT {
             r#type: INPUT_KEYBOARD,
@@ -1492,9 +1142,7 @@ fn type_char(ch: char) -> Result<(), AutomationError> {
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
-
-        Ok(())
+        SendInput(&[input], INPUT_SIZE);
     }
 }
 
@@ -1513,7 +1161,7 @@ pub fn key_down(key_code: u16) -> Result<(), AutomationError> {
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
         Ok(())
     }
 }
@@ -1533,7 +1181,7 @@ pub fn key_up(key_code: u16) -> Result<(), AutomationError> {
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
         Ok(())
     }
 }
@@ -1546,7 +1194,12 @@ pub fn press_key_code(key_code: u16) -> Result<(), AutomationError> {
 }
 
 pub fn press_key(key: char) -> Result<(), AutomationError> {
-    let key_code = match key.to_uppercase().next().unwrap() {
+    let c = key
+        .to_uppercase()
+        .next()
+        .ok_or_else(|| AutomationError::Other("Empty key".to_string()))?;
+
+    let key_code = match c {
         'A' => 0x41,
         'B' => 0x42,
         'C' => 0x43,
@@ -1583,21 +1236,9 @@ pub fn press_key(key: char) -> Result<(), AutomationError> {
         '7' => 0x37,
         '8' => 0x38,
         '9' => 0x39,
-        _ => return Err(AutomationError::Other(format!("Unsupported key: {}", key))),
+        _ => return Err(AutomationError::Other(format!("Unsupported key: {key}"))),
     };
     press_key_code(key_code)
-}
-
-pub fn press_enter() -> Result<(), AutomationError> {
-    press_key_code(0x0D)
-}
-
-pub fn press_escape() -> Result<(), AutomationError> {
-    press_key_code(0x1B)
-}
-
-pub fn press_tab() -> Result<(), AutomationError> {
-    press_key_code(0x09)
 }
 
 pub fn key_combination(modifier: &str, key_code: u16) -> Result<(), AutomationError> {
@@ -1608,8 +1249,7 @@ pub fn key_combination(modifier: &str, key_code: u16) -> Result<(), AutomationEr
             "ALT" => 0xA4,
             _ => {
                 return Err(AutomationError::Other(format!(
-                    "Unsupported modifier: {}",
-                    modifier
+                    "Unsupported modifier: {modifier}"
                 )));
             }
         };
@@ -1627,79 +1267,34 @@ pub fn key_combination(modifier: &str, key_code: u16) -> Result<(), AutomationEr
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         sleep(Duration::from_millis(50));
 
         input.Anonymous.ki.wVk = VIRTUAL_KEY(key_code);
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         sleep(Duration::from_millis(50));
 
         input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         sleep(Duration::from_millis(50));
 
         input.Anonymous.ki.wVk = VIRTUAL_KEY(modifier_code);
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
 
         Ok(())
     }
 }
 
-pub fn press_backspace() -> Result<(), AutomationError> {
-    press_key_code(VK_BACKSPACE)
-}
-
-pub fn press_delete() -> Result<(), AutomationError> {
-    press_key_code(VK_DELETE)
-}
-
-pub fn press_home() -> Result<(), AutomationError> {
-    press_key_code(VK_HOME)
-}
-
-pub fn press_end() -> Result<(), AutomationError> {
-    press_key_code(VK_END)
-}
-
-pub fn press_page_up() -> Result<(), AutomationError> {
-    press_key_code(VK_PAGE_UP)
-}
-
-pub fn press_page_down() -> Result<(), AutomationError> {
-    press_key_code(VK_PAGE_DOWN)
-}
-
-pub fn press_arrow_up() -> Result<(), AutomationError> {
-    press_key_code(VK_UP)
-}
-
-pub fn press_arrow_down() -> Result<(), AutomationError> {
-    press_key_code(VK_DOWN)
-}
-
-pub fn press_arrow_left() -> Result<(), AutomationError> {
-    press_key_code(VK_LEFT)
-}
-
-pub fn press_arrow_right() -> Result<(), AutomationError> {
-    press_key_code(VK_RIGHT)
-}
-
-pub fn press_insert() -> Result<(), AutomationError> {
-    press_key_code(VK_INSERT)
-}
-
 pub fn press_f_key(n: u8) -> Result<(), AutomationError> {
-    if n < 1 || n > 12 {
+    if !(1..=12).contains(&n) {
         return Err(AutomationError::Other(format!(
-            "F key must be F1-F12, got F{}",
-            n
+            "F key must be F1-F12, got F{n}"
         )));
     }
-    let key_code = VK_F1 + (n - 1) as u16;
+    let key_code = VK_F1 + u16::from(n - 1);
     press_key_code(key_code)
 }
 
@@ -1727,51 +1322,23 @@ pub fn press_key_by_name(name: &str) -> Result<(), AutomationError> {
         "alt" => VK_ALT,
         _ if name_lower.starts_with('f') && name_lower.len() <= 3 => {
             if let Ok(n) = name_lower[1..].parse::<u8>() {
-                if n >= 1 && n <= 12 {
-                    VK_F1 + (n - 1) as u16
+                if (1..=12).contains(&n) {
+                    VK_F1 + u16::from(n - 1)
                 } else {
                     return Err(AutomationError::Other(format!(
-                        "F key must be F1-F12, got {}",
-                        name
+                        "F key must be F1-F12, got {name}"
                     )));
                 }
             } else {
-                return Err(AutomationError::Other(format!("Invalid F key: {}", name)));
+                return Err(AutomationError::Other(format!("Invalid F key: {name}")));
             }
         }
         _ => {
-            return Err(AutomationError::Other(format!(
-                "Unknown key name: {}",
-                name
-            )));
+            return Err(AutomationError::Other(format!("Unknown key name: {name}",)));
         }
     };
 
     press_key_code(key_code)
-}
-
-pub fn key_down_shift() -> Result<(), AutomationError> {
-    key_down(0xA0)
-}
-
-pub fn key_up_shift() -> Result<(), AutomationError> {
-    key_up(0xA0)
-}
-
-pub fn key_down_ctrl() -> Result<(), AutomationError> {
-    key_down(0xA2)
-}
-
-pub fn key_up_ctrl() -> Result<(), AutomationError> {
-    key_up(0xA2)
-}
-
-pub fn key_down_alt() -> Result<(), AutomationError> {
-    key_down(0xA4)
-}
-
-pub fn key_up_alt() -> Result<(), AutomationError> {
-    key_up(0xA4)
 }
 
 fn poll_until<F, T>(
@@ -1783,8 +1350,8 @@ where
     F: FnMut() -> Option<T>,
 {
     let start = Instant::now();
-    let timeout = Duration::from_millis(timeout_ms as u64);
-    let poll_interval = Duration::from_millis(poll_interval_ms as u64);
+    let timeout = Duration::from_millis(u64::from(timeout_ms));
+    let poll_interval = Duration::from_millis(u64::from(poll_interval_ms));
 
     loop {
         if let Some(result) = predicate() {
@@ -1793,8 +1360,7 @@ where
 
         if start.elapsed() >= timeout {
             return Err(AutomationError::Other(format!(
-                "Timeout after {}ms waiting for condition",
-                timeout_ms
+                "Timeout after {timeout_ms}ms waiting for condition"
             )));
         }
 
@@ -1803,39 +1369,22 @@ where
 }
 
 pub fn wait_for_window(
-    title_contains: &str,
+    dsl: &str,
     timeout_ms: u32,
     poll_interval_ms: u32,
-) -> Result<Window, AutomationError> {
+) -> Result<Element, AutomationError> {
     poll_until(timeout_ms, poll_interval_ms, || {
-        find_windows_by_title(title_contains)
-            .ok()
-            .and_then(|windows| windows.into_iter().next())
-    })
-}
-
-pub fn wait_for_window_by_class(
-    class_name: &str,
-    timeout_ms: u32,
-    poll_interval_ms: u32,
-) -> Result<Window, AutomationError> {
-    poll_until(timeout_ms, poll_interval_ms, || {
-        find_windows_by_class(class_name)
-            .ok()
-            .and_then(|windows| windows.into_iter().next())
+        find_window_by_selector(dsl).ok()
     })
 }
 
 pub fn wait_for_control(
-    parent_hwnd: HWND,
-    class_name: &str,
+    dsl: &str,
     timeout_ms: u32,
     poll_interval_ms: u32,
-) -> Result<Control, AutomationError> {
+) -> Result<Element, AutomationError> {
     poll_until(timeout_ms, poll_interval_ms, || {
-        find_controls_by_class(parent_hwnd, class_name)
-            .ok()
-            .and_then(|controls| controls.into_iter().next())
+        find_control_by_selector(dsl).ok()
     })
 }
 
@@ -1844,11 +1393,11 @@ pub fn wait_for_control_text(
     text: &str,
     timeout_ms: u32,
     poll_interval_ms: u32,
-) -> Result<Control, AutomationError> {
+) -> Result<Element, AutomationError> {
     poll_until(timeout_ms, poll_interval_ms, || {
-        find_controls_in_window(parent_hwnd)
+        find_child_elements(parent_hwnd)
             .ok()
-            .and_then(|controls| {
+            .and_then(|controls: Vec<Element>| {
                 controls
                     .into_iter()
                     .find(|c| c.text.to_lowercase().contains(&text.to_lowercase()))
@@ -1857,7 +1406,7 @@ pub fn wait_for_control_text(
 }
 
 pub fn key_sequence(sequence: &str) -> Result<(), AutomationError> {
-    let parts: Vec<&str> = sequence.split('+').map(|s| s.trim()).collect();
+    let parts: Vec<&str> = sequence.split('+').map(str::trim).collect();
 
     if parts.is_empty() {
         return Err(AutomationError::Other("Empty key sequence".to_string()));
@@ -1876,13 +1425,12 @@ pub fn key_sequence(sequence: &str) -> Result<(), AutomationError> {
 
     for modifier in &modifiers {
         match modifier.as_str() {
-            "ctrl" | "control" => key_down_ctrl()?,
-            "shift" => key_down_shift()?,
-            "alt" => key_down_alt()?,
+            "ctrl" | "control" => key_down(0xA2)?,
+            "shift" => key_down(0xA0)?,
+            "alt" => key_down(0xA4)?,
             _ => {
                 return Err(AutomationError::Other(format!(
-                    "Unknown modifier: {}",
-                    modifier
+                    "Unknown modifier: {modifier}",
                 )));
             }
         }
@@ -1894,22 +1442,14 @@ pub fn key_sequence(sequence: &str) -> Result<(), AutomationError> {
     for modifier in modifiers.iter().rev() {
         sleep(Duration::from_millis(50));
         match modifier.as_str() {
-            "ctrl" | "control" => key_up_ctrl()?,
-            "shift" => key_up_shift()?,
-            "alt" => key_up_alt()?,
+            "ctrl" | "control" => key_up(0xA2)?,
+            "shift" => key_up(0xA0)?,
+            "alt" => key_up(0xA4)?,
             _ => {}
         }
     }
 
     Ok(())
-}
-
-fn get_current_mouse_position() -> Result<(i32, i32), AutomationError> {
-    unsafe {
-        let mut point = windows::Win32::Foundation::POINT::default();
-        GetCursorPos(&mut point).map_err(|e| AutomationError::Win32Failure { code: e.code().0 })?;
-        Ok((point.x, point.y))
-    }
 }
 
 pub fn scroll_wheel_at(
@@ -1930,8 +1470,7 @@ pub fn scroll_wheel_at(
         "down" => -(WHEEL_DELTA * amount),
         _ => {
             return Err(AutomationError::Other(format!(
-                "Invalid scroll direction: {}. Use 'up' or 'down'",
-                direction
+                "Invalid scroll direction: {direction}. Use 'up' or 'down'"
             )));
         }
     };
@@ -1947,7 +1486,7 @@ pub fn scroll_wheel_at(
                     mi: MOUSEINPUT {
                         dx: x,
                         dy: y,
-                        mouseData: delta as u32,
+                        mouseData: delta.cast_unsigned(),
                         dwFlags: MOUSEEVENTF_WHEEL,
                         time: 0,
                         dwExtraInfo: 0,
@@ -1955,7 +1494,7 @@ pub fn scroll_wheel_at(
                 },
             };
 
-            SendInput(&[input], size_of::<INPUT>() as i32);
+            SendInput(&[input], INPUT_SIZE);
         }
         sleep(Duration::from_millis(50));
     }
@@ -1986,8 +1525,7 @@ pub fn scroll_in_window(
         "right" => SB_LINERIGHT,
         _ => {
             return Err(AutomationError::Other(format!(
-                "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'",
-                direction
+                "Invalid scroll direction: {direction}. Use 'up', 'down', 'left', or 'right'"
             )));
         }
     };
@@ -2002,35 +1540,17 @@ pub fn scroll_in_window(
     Ok(())
 }
 
-pub fn scroll_up() -> Result<(), AutomationError> {
-    let (x, y) = get_current_mouse_position()?;
-    scroll_wheel_at(x, y, "up", 1)
-}
-
-pub fn scroll_down() -> Result<(), AutomationError> {
-    let (x, y) = get_current_mouse_position()?;
-    scroll_wheel_at(x, y, "down", 1)
-}
-
-pub fn scroll_page_up(hwnd: HWND) -> Result<(), AutomationError> {
-    scroll_in_window(hwnd, "up", 5)
-}
-
-pub fn scroll_page_down(hwnd: HWND) -> Result<(), AutomationError> {
-    scroll_in_window(hwnd, "down", 5)
-}
-
 fn linspace(from: (i32, i32), to: (i32, i32), steps: u32) -> Vec<(f64, f64)> {
     if steps == 0 {
-        return vec![(from.0 as f64, from.1 as f64)];
+        return vec![(f64::from(from.0), f64::from(from.1))];
     }
 
     (0..=steps)
         .map(|i| {
-            let t = i as f64 / steps as f64;
+            let t = f64::from(i) / f64::from(steps);
             (
-                from.0 as f64 + (to.0 - from.0) as f64 * t,
-                from.1 as f64 + (to.1 - from.1) as f64 * t,
+                f64::from(to.0 - from.0).mul_add(t, f64::from(from.0)),
+                f64::from(to.1 - from.1).mul_add(t, f64::from(from.1)),
             )
         })
         .collect()
@@ -2067,7 +1587,7 @@ pub fn drag_mouse(
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
     }
     sleep(Duration::from_millis(50));
 
@@ -2075,6 +1595,7 @@ pub fn drag_mouse(
     let steps = linspace((from_x, from_y), (to_x, to_y), step_count);
 
     for (x, y) in steps {
+        #[allow(clippy::cast_possible_truncation)]
         move_mouse(x as i32, y as i32)?;
         sleep(Duration::from_millis(50));
     }
@@ -2094,14 +1615,14 @@ pub fn drag_mouse(
             },
         };
 
-        SendInput(&[input], size_of::<INPUT>() as i32);
+        SendInput(&[input], INPUT_SIZE);
     }
 
     Ok(())
 }
 
 pub fn drag_control(
-    source: &Control,
+    source: &Element,
     to_x: i32,
     to_y: i32,
     duration_ms: u32,

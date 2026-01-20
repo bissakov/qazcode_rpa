@@ -17,7 +17,7 @@ fn test_selector_find_window_by_title() {
     assert!(window.is_ok());
 
     let win = window.unwrap();
-    assert!(win.title.to_lowercase().contains("notepad"));
+    assert!(win.text.to_lowercase().contains("notepad"));
 
     app.close().unwrap();
     sleep(Duration::from_millis(100));
@@ -66,9 +66,12 @@ fn test_selector_find_control_with_multiple_criteria() {
     let app = result.unwrap();
     sleep(Duration::from_millis(300));
 
-    let windows = find_windows_by_title("Notepad").unwrap();
-    let window = &windows[0];
-    let controls = find_controls_in_window(window.id.as_hwnd()).unwrap();
+    let windows = find_windows().unwrap();
+    let window = windows
+        .iter()
+        .find(|w| w.text.to_lowercase().contains("notepad"))
+        .unwrap();
+    let controls = find_child_elements(window.id.as_hwnd()).unwrap();
     let edit_control = controls
         .iter()
         .find(|c| c.class_name.to_lowercase().contains("edit"));
@@ -189,7 +192,7 @@ fn test_selector_control_interaction() {
     assert!(ctrl.set_text("Selector Test").is_ok());
     sleep(Duration::from_millis(100));
 
-    let text = ctrl.get_text().unwrap();
+    let text = ctrl.text();
     assert_eq!(text, "Selector Test");
 
     app.close().unwrap();
@@ -264,7 +267,7 @@ fn test_selector_window_by_selector_obj() {
     sleep(Duration::from_millis(300));
 
     let selector = selector::Selector::parse("Window>title~Notepad").unwrap();
-    let window = find_window_by_selector_obj(&selector);
+    let window = find_element_by_selector_obj(&selector);
     assert!(window.is_ok());
 
     app.close().unwrap();
@@ -280,7 +283,7 @@ fn test_selector_control_by_selector_obj() {
     sleep(Duration::from_millis(300));
 
     let selector = selector::Selector::parse("Window>title~Notepad>Control>class~Edit").unwrap();
-    let control = find_control_by_selector_obj(&selector);
+    let control = find_element_by_selector_obj(&selector);
     assert!(control.is_ok());
 
     app.close().unwrap();
@@ -317,7 +320,7 @@ fn test_selector_regex_window_title_basic() {
     assert!(window.is_ok());
 
     let win = window.unwrap();
-    assert!(win.title.to_lowercase().contains("notepad"));
+    assert!(win.text.to_lowercase().contains("notepad"));
 
     app.close().unwrap();
     sleep(Duration::from_millis(100));
@@ -395,9 +398,10 @@ fn test_selector_regex_no_match() {
 
 #[test]
 fn test_window_to_selector_title_and_class() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Notepad".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Notepad".to_string(),
         class_name: "#32770".to_string(),
         bounds: Rect {
             left: 0,
@@ -406,6 +410,7 @@ fn test_window_to_selector_title_and_class() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -414,9 +419,10 @@ fn test_window_to_selector_title_and_class() {
 
 #[test]
 fn test_window_to_selector_title_only() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Notepad".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Notepad".to_string(),
         class_name: "".to_string(),
         bounds: Rect {
             left: 0,
@@ -425,6 +431,7 @@ fn test_window_to_selector_title_only() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -433,9 +440,10 @@ fn test_window_to_selector_title_only() {
 
 #[test]
 fn test_window_to_selector_class_only() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "".to_string(),
         class_name: "#32770".to_string(),
         bounds: Rect {
             left: 0,
@@ -444,6 +452,7 @@ fn test_window_to_selector_class_only() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -452,9 +461,10 @@ fn test_window_to_selector_class_only() {
 
 #[test]
 fn test_window_to_selector_both_empty_error() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "".to_string(),
         class_name: "".to_string(),
         bounds: Rect {
             left: 0,
@@ -463,6 +473,7 @@ fn test_window_to_selector_both_empty_error() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let result = window_to_selector(&window);
@@ -472,9 +483,10 @@ fn test_window_to_selector_both_empty_error() {
 
 #[test]
 fn test_window_to_selector_with_escaped_greater_than() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Report > Analysis".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Report > Analysis".to_string(),
         class_name: "MainWindow".to_string(),
         bounds: Rect {
             left: 0,
@@ -483,6 +495,7 @@ fn test_window_to_selector_with_escaped_greater_than() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -494,9 +507,10 @@ fn test_window_to_selector_with_escaped_greater_than() {
 
 #[test]
 fn test_window_to_selector_with_escaped_semicolon() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Data; Export".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Data; Export".to_string(),
         class_name: "MyApp".to_string(),
         bounds: Rect {
             left: 0,
@@ -505,6 +519,7 @@ fn test_window_to_selector_with_escaped_semicolon() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -513,9 +528,10 @@ fn test_window_to_selector_with_escaped_semicolon() {
 
 #[test]
 fn test_window_to_selector_with_escaped_backslash() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Path\\File".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Path\\File".to_string(),
         class_name: "App".to_string(),
         bounds: Rect {
             left: 0,
@@ -524,6 +540,7 @@ fn test_window_to_selector_with_escaped_backslash() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -532,9 +549,10 @@ fn test_window_to_selector_with_escaped_backslash() {
 
 #[test]
 fn test_window_to_selector_with_multiple_escaped_chars() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "A > B; C\\D".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "A > B; C\\D".to_string(),
         class_name: "App".to_string(),
         bounds: Rect {
             left: 0,
@@ -543,6 +561,7 @@ fn test_window_to_selector_with_multiple_escaped_chars() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -552,9 +571,10 @@ fn test_window_to_selector_with_multiple_escaped_chars() {
 #[test]
 fn test_window_to_selector_long_title() {
     let long_title = "A".repeat(500);
-    let window = Window {
-        id: WindowId(12345),
-        title: long_title.clone(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: long_title.clone(),
         class_name: "#32770".to_string(),
         bounds: Rect {
             left: 0,
@@ -563,6 +583,7 @@ fn test_window_to_selector_long_title() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -571,9 +592,10 @@ fn test_window_to_selector_long_title() {
 
 #[test]
 fn test_control_to_selector_class_and_text() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Notepad".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Notepad".to_string(),
         class_name: "#32770".to_string(),
         bounds: Rect {
             left: 0,
@@ -582,10 +604,12 @@ fn test_control_to_selector_class_and_text() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
-    let control = Control {
-        id: ControlId(54321),
+    let control = Element {
+        id: ElementId(54321),
+        element_type: ElementType::Control,
         class_name: "Edit".to_string(),
         text: "Search".to_string(),
         bounds: Rect {
@@ -607,9 +631,10 @@ fn test_control_to_selector_class_and_text() {
 
 #[test]
 fn test_control_to_selector_class_only() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "App".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "App".to_string(),
         class_name: "MainWindow".to_string(),
         bounds: Rect {
             left: 0,
@@ -618,10 +643,12 @@ fn test_control_to_selector_class_only() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
-    let control = Control {
-        id: ControlId(54321),
+    let control = Element {
+        id: ElementId(54321),
+        element_type: ElementType::Control,
         class_name: "Button".to_string(),
         text: "".to_string(),
         bounds: Rect {
@@ -641,9 +668,10 @@ fn test_control_to_selector_class_only() {
 
 #[test]
 fn test_control_to_selector_text_only() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "App".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "App".to_string(),
         class_name: "MainWindow".to_string(),
         bounds: Rect {
             left: 0,
@@ -652,10 +680,12 @@ fn test_control_to_selector_text_only() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
-    let control = Control {
-        id: ControlId(54321),
+    let control = Element {
+        id: ElementId(54321),
+        element_type: ElementType::Control,
         class_name: "".to_string(),
         text: "OK".to_string(),
         bounds: Rect {
@@ -676,9 +706,10 @@ fn test_control_to_selector_text_only() {
 
 #[test]
 fn test_control_to_selector_both_empty_error() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "App".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "App".to_string(),
         class_name: "MainWindow".to_string(),
         bounds: Rect {
             left: 0,
@@ -687,10 +718,12 @@ fn test_control_to_selector_both_empty_error() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
-    let control = Control {
-        id: ControlId(54321),
+    let control = Element {
+        id: ElementId(54321),
+        element_type: ElementType::Control,
         class_name: "".to_string(),
         text: "".to_string(),
         bounds: Rect {
@@ -710,9 +743,10 @@ fn test_control_to_selector_both_empty_error() {
 
 #[test]
 fn test_control_to_selector_with_escaped_chars_in_text() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "App".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "App".to_string(),
         class_name: "MainWindow".to_string(),
         bounds: Rect {
             left: 0,
@@ -721,10 +755,12 @@ fn test_control_to_selector_with_escaped_chars_in_text() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
-    let control = Control {
-        id: ControlId(54321),
+    let control = Element {
+        id: ElementId(54321),
+        element_type: ElementType::Control,
         class_name: "Button".to_string(),
         text: "Save; Export > Now".to_string(),
         bounds: Rect {
@@ -743,9 +779,10 @@ fn test_control_to_selector_with_escaped_chars_in_text() {
 
 #[test]
 fn test_roundtrip_window_parse() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Notepad".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Notepad".to_string(),
         class_name: "#32770".to_string(),
         bounds: Rect {
             left: 0,
@@ -754,6 +791,7 @@ fn test_roundtrip_window_parse() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector_str = window_to_selector(&window).unwrap();
@@ -775,9 +813,10 @@ fn test_roundtrip_window_parse() {
 
 #[test]
 fn test_roundtrip_with_escaped_chars() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "Report > Data".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "Report > Data".to_string(),
         class_name: "MyApp".to_string(),
         bounds: Rect {
             left: 0,
@@ -786,6 +825,7 @@ fn test_roundtrip_with_escaped_chars() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector_str = window_to_selector(&window).unwrap();
@@ -798,9 +838,10 @@ fn test_roundtrip_with_escaped_chars() {
 
 #[test]
 fn test_generated_selector_format() {
-    let window = Window {
-        id: WindowId(12345),
-        title: "App".to_string(),
+    let window = Element {
+        id: ElementId(12345),
+        element_type: ElementType::Window,
+        text: "App".to_string(),
         class_name: "Window".to_string(),
         bounds: Rect {
             left: 0,
@@ -809,6 +850,7 @@ fn test_generated_selector_format() {
             height: 600,
         },
         visible: true,
+        enabled: true,
     };
 
     let selector = window_to_selector(&window).unwrap();
@@ -844,7 +886,7 @@ fn test_window_selector_finds_notepad() {
         }
     };
 
-    let notepad = match windows.iter().find(|w| w.title.contains("Notepad")) {
+    let notepad = match windows.iter().find(|w| w.text.contains("Notepad")) {
         Some(w) => w,
         None => {
             let _ = app.close();
@@ -895,7 +937,7 @@ fn test_control_selector_finds_edit_in_notepad() {
     };
 
     // Find Edit control
-    let controls = match find_controls_in_window(window.id.as_hwnd()) {
+    let controls = match find_child_elements(window.id.as_hwnd()) {
         Ok(c) => c,
         Err(_) => {
             let _ = app.close();

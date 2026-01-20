@@ -1,4 +1,5 @@
-use rpa_core::UiConstants;
+use crate::ui_constants::UiConstants;
+use rpa_core::CoreConstants;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
@@ -18,7 +19,7 @@ impl Default for AppSettings {
             show_minimap: true,
             allow_node_resize: false,
             language: "en".to_string(),
-            current_max_entry_size: UiConstants::DEFAULT_LOG_ENTRIES,
+            current_max_entry_size: CoreConstants::DEFAULT_LOG_ENTRIES,
         }
     }
 }

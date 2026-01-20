@@ -1,4 +1,5 @@
 use arc_script::VariableType;
+use rpa_core::IrProgram;
 use rpa_core::node_graph::VariableDirection;
 use shared::NanoId;
 use ui_explorer::state::UiExplorerState;
@@ -73,7 +74,7 @@ pub struct DebugDialogs {
     pub show_inspection_ui: bool,
     pub show_grid_debug: bool,
     pub show_ir_view: bool,
-    pub compiled_ir_program: Option<rpa_core::IrProgram>,
+    pub compiled_ir_program: Option<IrProgram>,
     pub compilation_error: Option<String>,
 }
 

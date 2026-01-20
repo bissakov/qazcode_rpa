@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
 use shared::NanoId;
-use ui_automation::automation::{Rect, Window, find_windows};
+use ui_automation::automation::{Element, Rect, find_windows};
 
 use crate::properties::{SelectedElement, WindowNode};
 
-fn is_real_window(window: &Window) -> bool {
+fn is_real_window(window: &Element) -> bool {
     window.visible
         && window.class_name != "ThumbnailDeviceHelperWnd"
         && window.class_name != "PseudoConsoleWindow"
@@ -16,7 +16,7 @@ fn is_real_window(window: &Window) -> bool {
         && window.class_name != "DummyDWMListenerWindow"
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct UiExplorerState {
     pub show: bool,
     pub root_node: Option<WindowNode>,
@@ -30,23 +30,9 @@ pub struct UiExplorerState {
 
 impl UiExplorerState {
     pub fn new_shown() -> Self {
-        let mut state = Self::default();
-        state.show = true;
-        state
-    }
-}
-
-impl Default for UiExplorerState {
-    fn default() -> Self {
         Self {
-            show: false,
-            root_node: None,
-            selected_element: None,
-            is_refreshing: false,
-            error_message: None,
-            show_hidden_windows: false,
-            expanded_nodes: HashSet::new(),
-            selected_node_id: None,
+            show: true,
+            ..Self::default()
         }
     }
 }
@@ -68,7 +54,7 @@ impl UiExplorerState {
 
                     root_children.push(WindowNode::Window {
                         id: NanoId::default(),
-                        title: window.title.clone(),
+                        title: window.text.clone(),
                         class: window.class_name.clone(),
                         children: Vec::new(),
                         window_hwnd: window.id.0,

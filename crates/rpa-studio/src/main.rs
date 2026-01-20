@@ -1,21 +1,23 @@
-mod activity_ext;
 mod app;
+mod canvas_grid;
 mod colors;
 mod custom;
 mod dialogs;
 mod events;
+mod ext;
 mod file_io;
-mod loglevel_ext;
 mod settings;
 mod state;
 mod ui;
+mod ui_constants;
 mod undo_redo;
 
+use crate::ui_constants::UiConstants;
 use eframe::egui;
 use egui::IconData;
 use rpa_core::execution::{ExecutionContext, ScopeFrame};
 use rpa_core::log::{LogActivity, LogEntry, LogLevel};
-use rpa_core::{IrBuilder, ScenarioValidator, UiConstants, get_timestamp};
+use rpa_core::{CoreConstants, IrBuilder, ScenarioValidator, get_timestamp};
 use rust_i18n::t;
 use state::RpaApp;
 use std::sync::mpsc::channel;
@@ -140,7 +142,7 @@ impl RpaApp {
                 node_id: None,
                 level: LogLevel::Info,
                 activity: LogActivity::System,
-                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+                message: CoreConstants::EXECUTION_COMPLETE_MARKER.to_string(),
             });
             self.is_executing = false;
             return;
@@ -167,7 +169,7 @@ impl RpaApp {
                     node_id: None,
                     level: LogLevel::Info,
                     activity: LogActivity::System,
-                    message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+                    message: CoreConstants::EXECUTION_COMPLETE_MARKER.to_string(),
                 });
                 self.is_executing = false;
                 return;
@@ -246,7 +248,7 @@ impl RpaApp {
                 node_id: None,
                 level: LogLevel::Info,
                 activity: LogActivity::System,
-                message: UiConstants::EXECUTION_COMPLETE_MARKER.to_string(),
+                message: CoreConstants::EXECUTION_COMPLETE_MARKER.to_string(),
             });
         });
     }

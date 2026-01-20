@@ -1,4 +1,4 @@
-use crate::UiConstants;
+use crate::constants::CoreConstants;
 use crate::log::LogLevel;
 use crate::variables::VariableScope;
 use crate::{
@@ -139,7 +139,6 @@ struct LoopContext {
 #[derive(Debug)]
 pub struct IrBuilder<'a> {
     scenario: &'a Scenario,
-    #[allow(dead_code)]
     project: &'a Project,
     program: IrProgram,
     reachable_nodes: &'a HashSet<NanoId>,
@@ -238,7 +237,7 @@ impl<'a> IrBuilder<'a> {
             .ok_or_else(|| "Continue/Break statement found outside of loop".to_string())
     }
 
-    fn first_next_node(&self, node_id: NanoId, branch: BranchType) -> Option<NanoId> {
+    fn find_next_node_by_branch(&self, node_id: NanoId, branch: BranchType) -> Option<NanoId> {
         self.scenario
             .connections
             .iter()
@@ -247,7 +246,7 @@ impl<'a> IrBuilder<'a> {
     }
 
     fn compile_default_next(&mut self, node_id: NanoId) -> Result<(), String> {
-        if let Some(next) = self.first_next_node(node_id, BranchType::Default) {
+        if let Some(next) = self.find_next_node_by_branch(node_id, BranchType::Default) {
             self.compile_from_node(next)?;
         }
         Ok(())
@@ -262,10 +261,10 @@ impl<'a> IrBuilder<'a> {
             return Ok(());
         }
 
-        if self.compilation_depth >= UiConstants::IR_COMPILATION_MAX_DEPTH {
+        if self.compilation_depth >= CoreConstants::IR_COMPILATION_MAX_DEPTH {
             return Err(format!(
                 "IR compilation recursion depth limit exceeded ({} levels). Node: {}",
-                UiConstants::IR_COMPILATION_MAX_DEPTH,
+                CoreConstants::IR_COMPILATION_MAX_DEPTH,
                 node_id
             ));
         }
@@ -293,8 +292,11 @@ impl<'a> IrBuilder<'a> {
 
         match &node.activity {
             Activity::Start { scenario_id } => {
-                self.global_variables
-                    .set("last_error", Value::Undefined, VariableScope::Global);
+                self.global_variables.set(
+                    CoreConstants::ERROR_VARIABLE_NAME,
+                    Value::Undefined,
+                    VariableScope::Global,
+                );
                 self.program.add_instruction(Instruction::Start {
                     scenario_id: scenario_id.clone(),
                 });
@@ -406,8 +408,8 @@ impl<'a> IrBuilder<'a> {
     }
 
     fn compile_if_node(&mut self, node_id: NanoId, condition: &str) -> Result<(), String> {
-        let true_target = self.first_next_node(node_id.clone(), BranchType::TrueBranch);
-        let false_target = self.first_next_node(node_id.clone(), BranchType::FalseBranch);
+        let true_target = self.find_next_node_by_branch(node_id.clone(), BranchType::TrueBranch);
+        let false_target = self.find_next_node_by_branch(node_id.clone(), BranchType::FalseBranch);
 
         let expr = parse_expr(condition).map_err(|e| {
             format!(
@@ -464,8 +466,8 @@ impl<'a> IrBuilder<'a> {
         step: i64,
         index: &str,
     ) -> Result<(), String> {
-        let body_node = self.first_next_node(node_id.clone(), BranchType::LoopBody);
-        let after_node = self.first_next_node(node_id.clone(), BranchType::Default);
+        let body_node = self.find_next_node_by_branch(node_id.clone(), BranchType::LoopBody);
+        let after_node = self.find_next_node_by_branch(node_id.clone(), BranchType::Default);
 
         if body_node.is_none() {
             if let Some(n) = after_node {
@@ -701,10 +703,10 @@ impl<'a> IrBuilder<'a> {
             return Ok(());
         }
 
-        if self.compilation_depth >= UiConstants::IR_COMPILATION_MAX_DEPTH {
+        if self.compilation_depth >= CoreConstants::IR_COMPILATION_MAX_DEPTH {
             return Err(format!(
                 "IR compilation recursion depth limit exceeded ({} levels). Scenario: {}, Node: {}",
-                UiConstants::IR_COMPILATION_MAX_DEPTH,
+                CoreConstants::IR_COMPILATION_MAX_DEPTH,
                 scenario.id,
                 node_id
             ));
@@ -785,10 +787,16 @@ impl<'a> IrBuilder<'a> {
                 self.compile_default_next_called(scenario, node_id)?;
             }
             Activity::IfCondition { condition } => {
-                let true_next =
-                    self.first_next_node_called(scenario, node_id.clone(), BranchType::TrueBranch);
-                let false_next =
-                    self.first_next_node_called(scenario, node_id.clone(), BranchType::FalseBranch);
+                let true_next = self.find_next_node_by_branch_called(
+                    scenario,
+                    node_id.clone(),
+                    BranchType::TrueBranch,
+                );
+                let false_next = self.find_next_node_by_branch_called(
+                    scenario,
+                    node_id.clone(),
+                    BranchType::FalseBranch,
+                );
 
                 let expr = parse_expr(condition)?;
 
@@ -872,7 +880,7 @@ impl<'a> IrBuilder<'a> {
         Ok(())
     }
 
-    fn first_next_node_called(
+    fn find_next_node_by_branch_called(
         &self,
         scenario: &Scenario,
         node_id: NanoId,
@@ -890,7 +898,9 @@ impl<'a> IrBuilder<'a> {
         scenario: &Scenario,
         node_id: NanoId,
     ) -> Result<(), String> {
-        if let Some(next) = self.first_next_node_called(scenario, node_id, BranchType::Default) {
+        if let Some(next) =
+            self.find_next_node_by_branch_called(scenario, node_id, BranchType::Default)
+        {
             self.compile_from_called_scenario(scenario, next)?;
         }
         Ok(())
@@ -906,9 +916,9 @@ impl<'a> IrBuilder<'a> {
         index: &str,
     ) -> Result<(), String> {
         let body_node =
-            self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
+            self.find_next_node_by_branch_called(scenario, node_id.clone(), BranchType::LoopBody);
         let after_node =
-            self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
+            self.find_next_node_by_branch_called(scenario, node_id.clone(), BranchType::Default);
 
         if body_node.is_none() {
             if let Some(n) = after_node {
@@ -992,9 +1002,9 @@ impl<'a> IrBuilder<'a> {
         condition: &str,
     ) -> Result<(), String> {
         let body_node =
-            self.first_next_node_called(scenario, node_id.clone(), BranchType::LoopBody);
+            self.find_next_node_by_branch_called(scenario, node_id.clone(), BranchType::LoopBody);
         let after_loop =
-            self.first_next_node_called(scenario, node_id.clone(), BranchType::Default);
+            self.find_next_node_by_branch_called(scenario, node_id.clone(), BranchType::Default);
 
         if body_node.is_none() {
             if let Some(after_node) = after_loop {

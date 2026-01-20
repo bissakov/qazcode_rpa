@@ -1,5 +1,6 @@
+use crate::ui_constants::UiConstants;
 use egui::util::undoer::Undoer;
-use rpa_core::{Project, UiConstants};
+use rpa_core::Project;
 
 pub struct UndoRedoManager {
     undoer: Undoer<Project>,

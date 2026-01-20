@@ -1,14 +1,15 @@
-use crate::loglevel_ext::LogLevelExt;
+use crate::ext::{LogLevelExt, ProjectExt, ScenarioExt};
 use crate::state::RpaApp;
 use crate::ui::canvas;
+use crate::ui_constants::{UiConstants, snap_to_grid};
 use arc_script::{Value, VariableType};
 use eframe::egui;
 use egui::{DragValue, Slider};
 use egui_extras::{Column, TableBuilder};
 use rpa_core::log::{LogActivity, LogEntry, LogLevel};
 use rpa_core::{
-    Activity, Project, Scenario, UiConstants, Variables, node_graph::VariableDirection,
-    snap_to_grid, variables::VariableScope,
+    Activity, CoreConstants, Project, Scenario, Variables, node_graph::VariableDirection,
+    variables::VariableScope,
 };
 use rust_i18n::t;
 use ui_explorer::render::render_ui_explorer_content;
@@ -28,14 +29,32 @@ impl RpaApp {
                 let clipboard_empty = self.clipboard.nodes.is_empty();
                 let show_minimap = self.settings.show_minimap;
                 let allow_node_resize = self.settings.allow_node_resize;
+                let show_grid_debug = self.dialogs.debug.show_grid_debug;
 
                 let current_scenario_index = self.current_scenario_index;
+
+                let scenario_id = match current_scenario_index {
+                    None => self.project.main_scenario.id.clone(),
+                    Some(i) => self.project.scenarios[i].id.clone(),
+                };
+
                 let scenario = match current_scenario_index {
                     None => &mut self.project.main_scenario,
                     Some(i) => &mut self.project.scenarios[i],
                 };
 
+                let view = self.scenario_views.entry(scenario_id.clone()).or_default();
+
+                use crate::ui_constants::UiConstants;
+                let obstacle_grid = self
+                    .obstacle_grids
+                    .entry(scenario_id.clone())
+                    .or_insert_with(|| {
+                        crate::canvas_grid::CanvasObstacleGrid::new(UiConstants::ROUTING_GRID_SIZE)
+                    });
+
                 let mut render_state = canvas::RenderState {
+                    is_executing: self.is_executing,
                     selected_nodes: &mut self.selected_nodes,
                     connection_from: &mut self.connection_from,
                     clipboard_empty,
@@ -47,16 +66,15 @@ impl RpaApp {
                     searched_activity: &mut self.searched_activity,
                 };
 
-                let view = self.scenario_views.entry(scenario.id.clone()).or_default();
-
                 let (canvas_result, dropped_activity) =
-                    ui.dnd_drop_zone::<Activity, _>(egui::Frame::default(), |ui| {
+                    ui.dnd_drop_zone::<Activity, _>(egui::Frame::new(), |ui| {
                         canvas::render_node_graph(
                             ui,
                             scenario,
                             &mut render_state,
                             view,
-                            self.dialogs.debug.show_grid_debug,
+                            obstacle_grid,
+                            show_grid_debug,
                         )
                     });
 
@@ -117,11 +135,14 @@ impl RpaApp {
                                 };
 
                             let snapped_pos = egui::Pos2::new(
-                                snap_to_grid(world_pos.x, UiConstants::GRID_CELL_SIZE),
-                                snap_to_grid(world_pos.y, UiConstants::GRID_CELL_SIZE),
+                                snap_to_grid(world_pos.x, UiConstants::GRID_SIZE),
+                                snap_to_grid(world_pos.y, UiConstants::GRID_SIZE),
                             );
-                            self.get_current_scenario_mut()
-                                .add_node(final_activity, snapped_pos);
+                            self.get_current_scenario_mut().add_node(
+                                final_activity,
+                                snapped_pos.x,
+                                snapped_pos.y,
+                            );
                             self.invalidate_current_scenario();
                             self.undo_redo.add_undo(&self.project);
                         }
@@ -171,7 +192,7 @@ impl RpaApp {
                     .max_scroll_height(available_height);
 
                 table
-                    .header(20.0, |mut header| {
+                    .header(UiConstants::TABLE_HEADER_HEIGHT, |mut header| {
                         header.col(|ui| {
                             ui.strong(t!("output_table.timestamp").as_ref());
                         });
@@ -332,7 +353,7 @@ impl RpaApp {
                         ui.label(t!("settings_dialog.log_entry_count").as_ref());
                         ui.add(Slider::new(
                             &mut temp.current_max_entry_size,
-                            10..=UiConstants::MAX_LOG_ENTRIES,
+                            10..=CoreConstants::MAX_LOG_ENTRIES,
                         ));
 
                         self.project.execution_log.max_entry_count = temp.current_max_entry_size;
@@ -888,7 +909,7 @@ impl RpaApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(t!("menu.file").as_ref(), |ui| {
                     if ui.button(t!("menu.new_project").as_ref()).clicked() {
-                        self.project = Project::new(
+                        self.project = Project::new_empty(
                             t!("default_values.new_project_name").as_ref(),
                             Variables::new(),
                         );
@@ -1075,7 +1096,7 @@ impl RpaApp {
                 )
                 .to_string();
 
-                self.project.scenarios.push(Scenario::new(&name));
+                self.project.scenarios.push(Scenario::new_empty(&name));
                 self.undo_redo.add_undo(&self.project);
 
                 self.open_scenario(new_tab_idx);
@@ -1161,7 +1182,7 @@ impl RpaApp {
                 number = self.project.scenarios.len() + 1
             )
             .to_string();
-            self.project.scenarios.push(Scenario::new(&name));
+            self.project.scenarios.push(Scenario::new_empty(&name));
             self.undo_redo.add_undo(&self.project);
         }
     }
@@ -1247,8 +1268,11 @@ impl RpaApp {
                     let offset = self.get_current_scenario().nodes.len() as f32
                         * UiConstants::NEW_NODE_OFFSET_INCREMENT;
                     let new_node_pos = world_pos + egui::vec2(offset, offset);
-                    self.get_current_scenario_mut()
-                        .add_node(activity, new_node_pos);
+                    self.get_current_scenario_mut().add_node(
+                        activity,
+                        new_node_pos.x,
+                        new_node_pos.y,
+                    );
                     self.invalidate_current_scenario();
                 }
             });
@@ -1295,7 +1319,8 @@ impl RpaApp {
 
                             if let Some(activity) = activity {
                                 if changed {
-                                    self.property_edit_debounce = 0.0;
+                                    self.property_edit_debounce =
+                                        UiConstants::PROPERTY_EDIT_DEBOUNCE_MS;
                                 }
 
                                 match param_action {
@@ -1350,7 +1375,7 @@ impl RpaApp {
                             }
                         } else {
                             ui.vertical_centered(|ui| {
-                                ui.add_space(20.0);
+                                ui.add_space(UiConstants::PANEL_SECTION_SPACING);
                                 ui.label(t!("status.no_node_selected").as_ref());
                             });
                         }
