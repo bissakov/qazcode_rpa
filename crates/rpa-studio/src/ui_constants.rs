@@ -47,6 +47,7 @@ impl UiConstants {
 
     pub const NODE_ROUNDING: f32 = 5.0;
     pub const NODE_SHADOW_OFFSET: f32 = 2.0;
+    pub const NODE_SELECTED_STROKE_WIDTH: f32 = 2.0;
 
     pub const PIN_RADIUS: f32 = 5.0;
     pub const PIN_INTERACT_SIZE: f32 = 12.0;
@@ -68,6 +69,7 @@ impl UiConstants {
     pub const MINIMAP_OFFSET_Y: f32 = 20.0;
     pub const MINIMAP_PADDING: f32 = 10.0;
     pub const MINIMAP_WORLD_PADDING: f32 = 20.0;
+    pub const MINIMAP_NODE_STROKE_WIDTH: f32 = 2.0;
 
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
     pub const MIN_NODE_SPACING: f32 = 100.0;
@@ -94,6 +96,7 @@ impl UiConstants {
     pub const PIN_LABEL_OFFSET: f32 = 12.0;
 
     pub const CANVAS_WORLD_PADDING: f32 = 500.0;
+    pub const CANVAS_BORDER_STROKE_WIDTH: f32 = 2.0;
 
     pub const TABLE_HEADER_HEIGHT: f32 = 20.0;
     pub const PANEL_SECTION_SPACING: f32 = 20.0;

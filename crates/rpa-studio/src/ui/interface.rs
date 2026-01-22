@@ -54,28 +54,28 @@ impl RpaApp {
                     });
 
                 let mut render_state = canvas::RenderState {
-                    is_executing: self.is_executing,
                     selected_nodes: &mut self.selected_nodes,
                     connection_from: &mut self.connection_from,
                     clipboard_empty,
-                    show_minimap,
                     knife_tool_active: &mut self.knife_tool_active,
                     knife_path: &mut self.knife_path,
                     resizing_node: &mut self.resizing_node,
-                    allow_node_resize,
                     searched_activity: &mut self.searched_activity,
+                };
+
+                let canvas_config = crate::ui::config::CanvasConfig {
+                    show_grid: true,
+                    show_minimap,
+                    is_executing: self.is_executing,
+                    allow_node_resize,
                 };
 
                 let (canvas_result, dropped_activity) =
                     ui.dnd_drop_zone::<Activity, _>(egui::Frame::new(), |ui| {
-                        canvas::render_node_graph(
-                            ui,
-                            scenario,
-                            &mut render_state,
-                            view,
-                            obstacle_grid,
-                            show_grid_debug,
-                        )
+                        canvas::CanvasRenderer::new(scenario, view, &mut render_state, obstacle_grid)
+                            .with_config(canvas_config)
+                            .with_grid_debug(show_grid_debug)
+                            .render(ui)
                     });
 
                 let (
