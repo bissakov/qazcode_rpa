@@ -1,7 +1,7 @@
 use crate::colors::ColorPalette;
 use crate::ext::{ActivityExt, NodeExt};
 use crate::ui::config::{GridStyle, NodeStyle, PinStyle};
-use crate::ui::connection_renderer::{calculate_manhattan_waypoints, ConnectionPath};
+use crate::ui::connection_renderer::{ConnectionPath, calculate_manhattan_waypoints};
 use crate::ui_constants::UiConstants;
 use egui::{Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use rpa_core::{Activity, BranchType, Node, Scenario};

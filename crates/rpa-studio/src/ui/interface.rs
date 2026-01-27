@@ -76,8 +76,11 @@ impl RpaApp {
                     drag_ended,
                     _resize_started,
                     resize_ended,
+                    is_interacting,
                     canvas_rect,
                 ) = canvas_result.inner;
+
+                self.is_interacting = is_interacting;
 
                 // Store actual canvas rect for focus calculations
                 self.last_canvas_rect = Some(canvas_rect);
@@ -87,14 +90,17 @@ impl RpaApp {
 
                 if connection_created {
                     self.undo_redo.add_undo(&self.project);
+                    self.needs_repaint = true;
                 }
 
                 if drag_ended && !self.is_executing {
                     self.undo_redo.add_undo(&self.project);
+                    self.needs_repaint = true;
                 }
 
                 if resize_ended && !self.is_executing {
                     self.undo_redo.add_undo(&self.project);
+                    self.needs_repaint = true;
                 }
 
                 if let Some(activity) = dropped_activity {
@@ -135,6 +141,9 @@ impl RpaApp {
                             );
                             self.invalidate_current_scenario();
                             self.undo_redo.add_undo(&self.project);
+                            self.needs_repaint = true;
+                            let view = self.get_current_scenario_view_mut();
+                            view.minimap_needs_update = true;
                         }
                     }
                 }

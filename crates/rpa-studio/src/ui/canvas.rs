@@ -57,6 +57,7 @@ pub enum ContextMenuAction {
     Paste,
     Delete,
     SelectAll,
+    SpawnNode(Activity),
 }
 
 pub enum ParameterBindingAction {
@@ -179,7 +180,11 @@ fn find_intersecting_connections(
     (intersecting, intersection_points)
 }
 
-fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<ContextMenuAction> {
+fn canvas_context_menu(
+    state: &mut RenderState,
+    response: &Response,
+    current_scenario_id: &NanoId,
+) -> Option<ContextMenuAction> {
     let mut action = None;
 
     Popup::context_menu(response)
@@ -195,11 +200,64 @@ fn canvas_context_menu(state: &mut RenderState, response: &Response) -> Option<C
                 response.request_focus();
             }
 
+            let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+
             if !state.searched_activity.is_empty() {
-                for activity in Activity::iter_as_str()
-                    .filter(|name| name.contains(state.searched_activity.as_str()))
-                {
-                    ui.label(activity);
+                let all_activities = ActivityMetadata::all_activities();
+
+                let filtered: Vec<_> = all_activities
+                    .into_iter()
+                    .filter(|(metadata, _)| {
+                        let display_name = t!(metadata.button_key).to_lowercase();
+                        let search_term = state.searched_activity.to_lowercase();
+                        display_name.contains(&search_term)
+                    })
+                    .take(5)
+                    .collect();
+
+                let fix_activity = |activity: Activity| -> Activity {
+                    match activity {
+                        Activity::Start { .. } => Activity::Start {
+                            scenario_id: current_scenario_id.clone(),
+                        },
+                        Activity::End { .. } => Activity::End {
+                            scenario_id: current_scenario_id.clone(),
+                        },
+                        Activity::CallScenario { .. } => Activity::CallScenario {
+                            scenario_id: NanoId::default(),
+                            parameters: Vec::new(),
+                        },
+                        _ => activity,
+                    }
+                };
+
+                if enter_pressed && !filtered.is_empty() {
+                    let (_, activity) = &filtered[0];
+                    let fixed_activity = fix_activity(activity.clone());
+                    state.searched_activity.clear();
+                    action = Some(ContextMenuAction::SpawnNode(fixed_activity));
+                    ui.close();
+                }
+
+                if filtered.is_empty() {
+                    ui.label("No activities found");
+                } else {
+                    for (idx, (metadata, activity)) in filtered.into_iter().enumerate() {
+                        let fixed_activity = fix_activity(activity);
+                        let display_name = t!(metadata.button_key);
+
+                        let button = if idx == 0 {
+                            ui.button(display_name.as_ref()).highlight()
+                        } else {
+                            ui.button(display_name.as_ref())
+                        };
+
+                        if button.clicked() {
+                            state.searched_activity.clear();
+                            action = Some(ContextMenuAction::SpawnNode(fixed_activity));
+                            ui.close();
+                        }
+                    }
                 }
             }
 
@@ -258,7 +316,7 @@ impl<'a> CanvasRenderer<'a> {
         state: &'a mut RenderState<'a>,
     ) -> Self {
         use crate::ui::config::*;
-        
+
         Self {
             scenario,
             view,
@@ -287,18 +345,20 @@ impl<'a> CanvasRenderer<'a> {
         bool,
         bool,
         bool,
+        bool,
         egui::Rect,
     ) {
         let scenario = &mut self.scenario;
         let view = &mut self.view;
         let state = &mut self.state;
-        
+
         let mut context_action = ContextMenuAction::None;
         let mut connection_created = false;
         let mut drag_started = false;
         let mut drag_ended = false;
         let mut resize_started = false;
         let mut resize_ended = false;
+        let mut is_interacting = false;
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
@@ -310,8 +370,15 @@ impl<'a> CanvasRenderer<'a> {
 
         painter.rect_filled(rect, 0.0, Color32::from_rgb(40, 40, 40));
 
-        self.grid_renderer.draw(&painter, rect, view.pan_offset, view.zoom, self.config.show_grid);
-        self.grid_renderer.draw_border(&painter, rect, self.config.is_executing);
+        self.grid_renderer.draw(
+            &painter,
+            rect,
+            view.pan_offset,
+            view.zoom,
+            self.config.show_grid,
+        );
+        self.grid_renderer
+            .draw_border(&painter, rect, self.config.is_executing);
 
         let mouse_world_pos = if let Some(mouse_pos) = ui.ctx().pointer_hover_pos() {
             (mouse_pos.to_vec2() - view.pan_offset) / view.zoom
@@ -330,7 +397,8 @@ impl<'a> CanvasRenderer<'a> {
                 view.zoom =
                     (view.zoom + zoom_delta).clamp(UiConstants::ZOOM_MIN, UiConstants::ZOOM_MAX);
 
-                let mouse_world_before = ((mouse_pos.to_vec2() - view.pan_offset) / old_zoom).to_pos2();
+                let mouse_world_before =
+                    ((mouse_pos.to_vec2() - view.pan_offset) / old_zoom).to_pos2();
                 let mouse_world_after = mouse_world_before;
                 let mouse_screen_after =
                     (mouse_world_after.to_vec2() * view.zoom + view.pan_offset).to_pos2();
@@ -338,6 +406,7 @@ impl<'a> CanvasRenderer<'a> {
 
                 if zoom_delta != 0.0 {
                     view.connection_renderer.increment_generation();
+                    view.minimap_needs_update = true;
                 }
             }
         }
@@ -348,7 +417,9 @@ impl<'a> CanvasRenderer<'a> {
             let pan_delta = response.drag_delta();
             view.pan_offset += pan_delta;
             view.connection_renderer.increment_generation();
+            view.minimap_needs_update = true;
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            is_interacting = true;
         }
 
         let alt_rmb = input_cache.alt_rmb;
@@ -356,6 +427,7 @@ impl<'a> CanvasRenderer<'a> {
         if alt_rmb && !*state.knife_tool_active {
             *state.knife_tool_active = true;
             state.knife_path.clear();
+            is_interacting = true;
         }
 
         if *state.knife_tool_active && !alt_rmb {
@@ -379,6 +451,7 @@ impl<'a> CanvasRenderer<'a> {
                         .connections
                         .retain(|c| !(c.from_node == from_node && c.to_node == to_node));
                     connection_created = true;
+                    view.minimap_needs_update = true;
                 }
             }
             *state.knife_tool_active = false;
@@ -398,15 +471,17 @@ impl<'a> CanvasRenderer<'a> {
 
         let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
 
-        view.connection_renderer.clear_cache();
-
         for connection in &scenario.connections {
             if let (Some(from_node), Some(to_node)) = (
                 get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
                 get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
             ) {
-                let path =
-                    ConnectionPath::new(from_node, to_node, &scenario.nodes, &connection.branch_type);
+                let path = ConnectionPath::new(
+                    from_node,
+                    to_node,
+                    &scenario.nodes,
+                    &connection.branch_type,
+                );
                 let color = get_connection_color(&connection.branch_type, from_node);
                 path.draw(
                     &painter,
@@ -487,7 +562,8 @@ impl<'a> CanvasRenderer<'a> {
 
         let node_hovering_connection = if state.selected_nodes.len() == 1
             && let Some(selected_id) = state.selected_nodes.iter().next().cloned()
-            && let Some(selected_node) = get_node_from_index(&scenario.nodes, &node_index, &selected_id)
+            && let Some(selected_node) =
+                get_node_from_index(&scenario.nodes, &node_index, &selected_id)
             && input_cache.pointer_primary_down
             && state.connection_from.is_none()
         {
@@ -516,7 +592,8 @@ impl<'a> CanvasRenderer<'a> {
         {
             if input_cache.pointer_any_released {
                 if node.is_routable() {
-                    let (snapped_pos, snapped_w, snapped_h) = node.snap_bounds(UiConstants::GRID_SIZE);
+                    let (snapped_pos, snapped_w, snapped_h) =
+                        node.snap_bounds(UiConstants::GRID_SIZE);
                     if (snapped_pos.x - node.x).abs() > 0.001
                         || (snapped_pos.y - node.y).abs() > 0.001
                         || (snapped_w - node.width).abs() > 0.001
@@ -527,6 +604,7 @@ impl<'a> CanvasRenderer<'a> {
                         node.width = snapped_w;
                         node.height = snapped_h;
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                 }
                 *state.resizing_node = None;
@@ -538,17 +616,22 @@ impl<'a> CanvasRenderer<'a> {
                     ResizeHandle::Right => {
                         node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::Left => {
-                        let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                        let new_width =
+                            (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                         let width_change = node.width - new_width;
                         node.x += width_change;
                         node.width = new_width;
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::Bottom => {
-                        node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                        node.height =
+                            (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::Top => {
                         let new_height =
@@ -557,19 +640,25 @@ impl<'a> CanvasRenderer<'a> {
                         node.y += height_change;
                         node.height = new_height;
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::BottomRight => {
                         node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
-                        node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                        node.height =
+                            (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::BottomLeft => {
-                        let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                        let new_width =
+                            (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                         let width_change = node.width - new_width;
                         node.x += width_change;
                         node.width = new_width;
-                        node.height = (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
+                        node.height =
+                            (node.height + delta_world.y).max(UiConstants::NOTE_MIN_HEIGHT);
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::TopRight => {
                         node.width = (node.width + delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
@@ -579,9 +668,11 @@ impl<'a> CanvasRenderer<'a> {
                         node.y += height_change;
                         node.height = new_height;
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                     ResizeHandle::TopLeft => {
-                        let new_width = (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
+                        let new_width =
+                            (node.width - delta_world.x).max(UiConstants::NOTE_MIN_WIDTH);
                         let width_change = node.width - new_width;
                         node.x += width_change;
                         node.width = new_width;
@@ -591,6 +682,7 @@ impl<'a> CanvasRenderer<'a> {
                         node.y += height_change;
                         node.height = new_height;
                         view.connection_renderer.increment_generation();
+                        view.minimap_needs_update = true;
                     }
                 }
                 if let Activity::Note { width, height, .. } = &mut node.activity {
@@ -624,6 +716,8 @@ impl<'a> CanvasRenderer<'a> {
                 && state.connection_from.is_none()
                 && !is_panning
                 && state.resizing_node.is_none()
+                && !*state.knife_tool_active
+                && box_select_rect.is_none()
             {
                 let handle_size = UiConstants::NOTE_RESIZE_HANDLE_SIZE * view.zoom;
 
@@ -831,7 +925,7 @@ impl<'a> CanvasRenderer<'a> {
                     });
             }
 
-            if node_response.hovered() {
+            if node_response.hovered() && !is_panning {
                 any_node_hovered = true;
             }
 
@@ -852,8 +946,10 @@ impl<'a> CanvasRenderer<'a> {
                 view.zoom,
             );
 
-            self.pin_renderer.draw_input_pin(&painter, node, to_screen, view.zoom);
-            self.pin_renderer.draw_output_pins(&painter, node, to_screen, view.zoom);
+            self.pin_renderer
+                .draw_input_pin(&painter, node, to_screen, view.zoom);
+            self.pin_renderer
+                .draw_output_pins(&painter, node, to_screen, view.zoom);
         }
 
         if let Some(dragged_id) = node_being_dragged {
@@ -872,6 +968,8 @@ impl<'a> CanvasRenderer<'a> {
             }
 
             view.connection_renderer.increment_generation();
+            view.minimap_needs_update = true;
+            is_interacting = true;
         }
 
         if drag_ended && !state.selected_nodes.is_empty() {
@@ -893,6 +991,7 @@ impl<'a> CanvasRenderer<'a> {
 
             if reroute_needed {
                 view.connection_renderer.increment_generation();
+                view.minimap_needs_update = true;
             }
         }
 
@@ -961,98 +1060,100 @@ impl<'a> CanvasRenderer<'a> {
             }
         }
 
-        for i in (0..scenario.nodes.len()).rev() {
-            let node = &scenario.nodes[i];
+        if !is_panning && !*state.knife_tool_active {
+            for i in (0..scenario.nodes.len()).rev() {
+                let node = &scenario.nodes[i];
 
-            if node.has_output_pin() {
-                let pin_count = node.get_output_pin_count();
+                if node.has_output_pin() {
+                    let pin_count = node.get_output_pin_count();
 
-                for pin_index in 0..pin_count {
-                    let output_pin = to_screen(node.get_output_pin_pos_by_index(pin_index));
-                    let output_pin_rect = egui::Rect::from_center_size(
-                        output_pin,
+                    for pin_index in 0..pin_count {
+                        let output_pin = to_screen(node.get_output_pin_pos_by_index(pin_index));
+                        let output_pin_rect = egui::Rect::from_center_size(
+                            output_pin,
+                            egui::vec2(
+                                UiConstants::PIN_INTERACT_SIZE * view.zoom,
+                                UiConstants::PIN_INTERACT_SIZE * view.zoom,
+                            ),
+                        );
+                        let output_response = ui.interact(
+                            output_pin_rect,
+                            ui.id().with(("output", node.id.clone(), pin_index)),
+                            egui::Sense::click_and_drag(),
+                        );
+
+                        if output_response.drag_started() && !*state.knife_tool_active {
+                            *state.connection_from = Some((node.id.clone(), pin_index));
+
+                            let branch_type = node.get_branch_type_for_pin(pin_index);
+
+                            if node.get_output_pin_count() > 1 {
+                                scenario.connections.retain(|c| {
+                                    !(c.from_node == node.id && c.branch_type == branch_type)
+                                });
+                            } else {
+                                scenario.connections.retain(|c| c.from_node != node.id);
+                            }
+                        }
+                    }
+                }
+
+                if node.has_input_pin() {
+                    let input_pin = to_screen(node.get_input_pin_pos());
+                    let input_pin_rect = egui::Rect::from_center_size(
+                        input_pin,
                         egui::vec2(
                             UiConstants::PIN_INTERACT_SIZE * view.zoom,
                             UiConstants::PIN_INTERACT_SIZE * view.zoom,
                         ),
                     );
-                    let output_response = ui.interact(
-                        output_pin_rect,
-                        ui.id().with(("output", node.id.clone(), pin_index)),
+                    let input_response = ui.interact(
+                        input_pin_rect,
+                        ui.id().with(("input", node.id.clone())),
                         egui::Sense::click_and_drag(),
                     );
 
-                    if output_response.drag_started() && !*state.knife_tool_active {
-                        *state.connection_from = Some((node.id.clone(), pin_index));
+                    let node_rect_world = node.get_rect();
+                    let node_rect_screen = egui::Rect::from_min_max(
+                        to_screen(node_rect_world.min),
+                        to_screen(node_rect_world.max),
+                    );
+                    let node_body_response = ui.interact(
+                        node_rect_screen,
+                        ui.id().with(("input_body", node.id.clone())),
+                        egui::Sense::hover(),
+                    );
 
-                        let branch_type = node.get_branch_type_for_pin(pin_index);
-
-                        if node.get_output_pin_count() > 1 {
-                            scenario
-                                .connections
-                                .retain(|c| !(c.from_node == node.id && c.branch_type == branch_type));
-                        } else {
-                            scenario.connections.retain(|c| c.from_node != node.id);
-                        }
-                    }
-                }
-            }
-
-            if node.has_input_pin() {
-                let input_pin = to_screen(node.get_input_pin_pos());
-                let input_pin_rect = egui::Rect::from_center_size(
-                    input_pin,
-                    egui::vec2(
-                        UiConstants::PIN_INTERACT_SIZE * view.zoom,
-                        UiConstants::PIN_INTERACT_SIZE * view.zoom,
-                    ),
-                );
-                let input_response = ui.interact(
-                    input_pin_rect,
-                    ui.id().with(("input", node.id.clone())),
-                    egui::Sense::click_and_drag(),
-                );
-
-                let node_rect_world = node.get_rect();
-                let node_rect_screen = egui::Rect::from_min_max(
-                    to_screen(node_rect_world.min),
-                    to_screen(node_rect_world.max),
-                );
-                let node_body_response = ui.interact(
-                    node_rect_screen,
-                    ui.id().with(("input_body", node.id.clone())),
-                    egui::Sense::hover(),
-                );
-
-                if input_response.drag_started()
-                    && !*state.knife_tool_active
-                    && let Some(conn) = scenario
-                        .connections
-                        .iter()
-                        .find(|c| c.to_node == node.id)
-                        .cloned()
-                {
-                    if let Some(from_node) =
-                        get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)
+                    if input_response.drag_started()
+                        && !*state.knife_tool_active
+                        && let Some(conn) = scenario
+                            .connections
+                            .iter()
+                            .find(|c| c.to_node == node.id)
+                            .cloned()
                     {
-                        let pin_index = from_node.get_pin_index_for_branch(&conn.branch_type);
-                        *state.connection_from = Some((conn.from_node.clone(), pin_index));
+                        if let Some(from_node) =
+                            get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)
+                        {
+                            let pin_index = from_node.get_pin_index_for_branch(&conn.branch_type);
+                            *state.connection_from = Some((conn.from_node.clone(), pin_index));
+                        }
+
+                        scenario
+                            .connections
+                            .retain(|c| c.from_node == conn.from_node && c.to_node == node.id);
                     }
 
-                    scenario
-                        .connections
-                        .retain(|c| c.from_node == conn.from_node && c.to_node == node.id);
-                }
-
-                if let Some((from_id, pin_index)) = state.connection_from.as_ref()
-                    && (input_response.hovered() || node_body_response.hovered())
-                    && input_cache.pointer_any_released
-                    && !*state.knife_tool_active
-                {
-                    if from_id != &node.id {
-                        new_connection = Some((from_id.clone(), *pin_index, node.id.clone()));
+                    if let Some((from_id, pin_index)) = state.connection_from.as_ref()
+                        && (input_response.hovered() || node_body_response.hovered())
+                        && input_cache.pointer_any_released
+                        && !*state.knife_tool_active
+                    {
+                        if from_id != &node.id {
+                            new_connection = Some((from_id.clone(), *pin_index, node.id.clone()));
+                        }
+                        *state.connection_from = None;
                     }
-                    *state.connection_from = None;
                 }
             }
         }
@@ -1101,6 +1202,7 @@ impl<'a> CanvasRenderer<'a> {
 
             scenario.add_connection_with_branch(from, to, branch_type);
             connection_created = true;
+            view.minimap_needs_update = true;
         }
 
         if let Some(clicked) = clicked_node {
@@ -1123,7 +1225,7 @@ impl<'a> CanvasRenderer<'a> {
         }
 
         if !*state.knife_tool_active
-            && let Some(action) = canvas_context_menu(state, &response)
+            && let Some(action) = canvas_context_menu(state, &response, &scenario.id)
         {
             context_action = action;
         }
@@ -1139,6 +1241,10 @@ impl<'a> CanvasRenderer<'a> {
                 view.zoom,
                 rect,
             );
+
+            if view.minimap_needs_update {
+                view.minimap_needs_update = false;
+            }
         }
 
         if *state.knife_tool_active {
@@ -1188,6 +1294,18 @@ impl<'a> CanvasRenderer<'a> {
             }
         }
 
+        if state.resizing_node.is_some() {
+            is_interacting = true;
+        }
+
+        if state.connection_from.is_some() {
+            is_interacting = true;
+        }
+
+        if box_select_rect.is_some() {
+            is_interacting = true;
+        }
+
         (
             context_action,
             mouse_world_pos,
@@ -1196,6 +1314,7 @@ impl<'a> CanvasRenderer<'a> {
             drag_ended,
             resize_started,
             resize_ended,
+            is_interacting,
             rect,
         )
     }

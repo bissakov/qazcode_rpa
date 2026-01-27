@@ -1,5 +1,5 @@
-use crate::ui_constants::{enforce_minimum_cells, UiConstants};
-use egui::{pos2, vec2, Pos2, Rect};
+use crate::ui_constants::{UiConstants, enforce_minimum_cells};
+use egui::{Pos2, Rect, pos2, vec2};
 use rpa_core::{BranchType, Node};
 
 pub trait NodeExt {

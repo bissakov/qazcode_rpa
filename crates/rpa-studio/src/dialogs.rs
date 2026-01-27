@@ -1,6 +1,6 @@
 use arc_script::VariableType;
-use rpa_core::node_graph::VariableDirection;
 use rpa_core::IrProgram;
+use rpa_core::node_graph::VariableDirection;
 use shared::NanoId;
 use ui_explorer::state::UiExplorerState;
 

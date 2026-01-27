@@ -1,4 +1,5 @@
 use crate::{
+    ext::ScenarioExt,
     state::{ClipboardData, RpaApp},
     ui::canvas,
 };
@@ -66,6 +67,9 @@ impl RpaApp {
                 }
                 self.invalidate_current_scenario();
                 self.selected_nodes.clear();
+                let view = self.get_current_scenario_view_mut();
+                view.connection_renderer.increment_generation();
+                view.minimap_needs_update = true;
                 handled = true;
             }
 
@@ -83,7 +87,7 @@ impl RpaApp {
         }
 
         if handled {
-            // ctx.request_repaint();
+            self.needs_repaint = true;
         }
     }
 
@@ -95,12 +99,15 @@ impl RpaApp {
         match action {
             canvas::ContextMenuAction::Copy => {
                 self.copy_selected_nodes();
+                self.needs_repaint = true;
             }
             canvas::ContextMenuAction::Cut => {
                 self.cut_selected_nodes();
+                self.needs_repaint = true;
             }
             canvas::ContextMenuAction::Paste => {
                 self.paste_clipboard_nodes(mouse_world_pos);
+                self.needs_repaint = true;
             }
             canvas::ContextMenuAction::Delete => {
                 if !self.selected_nodes.is_empty() {
@@ -112,8 +119,10 @@ impl RpaApp {
                     self.invalidate_current_scenario();
                     self.selected_nodes.clear();
                     let view = self.get_current_scenario_view_mut();
-                    view.connection_renderer.clear_cache();
+                    view.connection_renderer.increment_generation();
+                    view.minimap_needs_update = true;
                     self.undo_redo.add_undo(&self.project);
+                    self.needs_repaint = true;
                 }
             }
             canvas::ContextMenuAction::SelectAll => {
@@ -127,6 +136,27 @@ impl RpaApp {
                 for node_id in node_ids {
                     self.selected_nodes.insert(node_id);
                 }
+                self.needs_repaint = true;
+            }
+            canvas::ContextMenuAction::SpawnNode(activity) => {
+                let snapped_pos = egui::Pos2::new(
+                    crate::ui_constants::snap_to_grid(
+                        mouse_world_pos.x,
+                        crate::ui_constants::UiConstants::GRID_SIZE,
+                    ),
+                    crate::ui_constants::snap_to_grid(
+                        mouse_world_pos.y,
+                        crate::ui_constants::UiConstants::GRID_SIZE,
+                    ),
+                );
+
+                self.get_current_scenario_mut()
+                    .add_node(activity, snapped_pos.x, snapped_pos.y);
+
+                self.invalidate_current_scenario();
+                self.undo_redo.add_undo(&self.project);
+                self.needs_repaint = true;
+                self.get_current_scenario_view_mut().minimap_needs_update = true;
             }
             canvas::ContextMenuAction::None => {}
         }
@@ -175,7 +205,8 @@ impl RpaApp {
 
         self.selected_nodes.clear();
         let view = self.get_current_scenario_view_mut();
-        view.connection_renderer.clear_cache();
+        view.connection_renderer.increment_generation();
+        view.minimap_needs_update = true;
     }
 
     pub fn paste_clipboard_nodes(&mut self, mouse_world_pos: egui::Vec2) {
@@ -239,6 +270,7 @@ impl RpaApp {
 
         self.invalidate_current_scenario();
         let view = self.get_current_scenario_view_mut();
-        view.connection_renderer.clear_cache();
+        view.connection_renderer.increment_generation();
+        view.minimap_needs_update = true;
     }
 }

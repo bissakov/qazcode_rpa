@@ -49,6 +49,8 @@ pub struct RpaApp {
     pub last_frame: Instant,
     pub title_timer: Duration,
     pub smoothed_frame_time: Duration,
+    pub needs_repaint: bool,
+    pub is_interacting: bool,
 }
 
 impl Default for RpaApp {
@@ -80,6 +82,8 @@ impl Default for RpaApp {
             last_frame: Instant::now(),
             title_timer: Duration::ZERO,
             smoothed_frame_time: Duration::from_secs_f64(1.0 / 60.0),
+            needs_repaint: true,
+            is_interacting: false,
         }
     }
 }
@@ -243,6 +247,7 @@ pub struct ScenarioViewState {
     pub pan_offset: egui::Vec2,
     pub zoom: f32,
     pub connection_renderer: ConnectionRenderer,
+    pub minimap_needs_update: bool,
 }
 
 impl Default for ScenarioViewState {
@@ -251,6 +256,7 @@ impl Default for ScenarioViewState {
             pan_offset: egui::Vec2::ZERO,
             zoom: 1.0,
             connection_renderer: ConnectionRenderer::new(),
+            minimap_needs_update: true,
         }
     }
 }
@@ -262,6 +268,7 @@ impl ScenarioViewState {
             pan_offset,
             zoom,
             connection_renderer: ConnectionRenderer::new(),
+            minimap_needs_update: true,
         }
     }
 }

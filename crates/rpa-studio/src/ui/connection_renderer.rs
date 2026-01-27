@@ -238,7 +238,8 @@ impl ConnectionPath {
         id: &NanoId,
         transform: impl Fn(Pos2) -> Pos2,
     ) {
-        let segments = round_manhattan_corners(&self.waypoints, UiConstants::CONNECTION_CORNER_RADIUS);
+        let segments =
+            round_manhattan_corners(&self.waypoints, UiConstants::CONNECTION_CORNER_RADIUS);
         let stroke = Stroke::new(2.0, color);
 
         for segment in segments {
@@ -354,10 +355,6 @@ impl ConnectionRenderer {
                 points: pts,
             },
         );
-    }
-
-    pub fn clear_cache(&mut self) {
-        self.cache.clear();
     }
 }
 

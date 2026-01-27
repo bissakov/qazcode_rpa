@@ -51,13 +51,17 @@ impl eframe::App for RpaApp {
         self.render_ui_explorer(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
-        ctx.request_repaint();
+        if self.needs_repaint || self.is_interacting {
+            ctx.request_repaint();
+            self.needs_repaint = false;
+        }
     }
 }
 
 impl RpaApp {
     pub fn process_execution_updates(&mut self, _ctx: &egui::Context) {
         let mut execution_complete = false;
+        let mut has_updates = false;
         if let Some(receiver) = self.log_receiver.as_ref() {
             for log_entry in receiver.try_iter() {
                 if log_entry.message == CoreConstants::EXECUTION_COMPLETE_MARKER {
@@ -65,6 +69,7 @@ impl RpaApp {
                     break;
                 } else {
                     self.project.execution_log.push(log_entry);
+                    has_updates = true;
                 }
             }
         }
@@ -72,6 +77,11 @@ impl RpaApp {
         if execution_complete {
             self.is_executing = false;
             self.log_receiver = None;
+            self.needs_repaint = true;
+        }
+
+        if has_updates {
+            self.needs_repaint = true;
         }
     }
 
@@ -94,6 +104,10 @@ impl RpaApp {
 
             self.validate_scenario_indices();
             self.invalidate_current_scenario();
+
+            let view = self.get_current_scenario_view_mut();
+            view.connection_renderer.increment_generation();
+            view.minimap_needs_update = true;
         }
     }
 
@@ -108,6 +122,10 @@ impl RpaApp {
 
             self.validate_scenario_indices();
             self.invalidate_current_scenario();
+
+            let view = self.get_current_scenario_view_mut();
+            view.connection_renderer.increment_generation();
+            view.minimap_needs_update = true;
         }
     }
 
