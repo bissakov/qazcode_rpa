@@ -1,13 +1,3 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputDirection {
-    Down,
-    Right,
-    #[allow(dead_code)]
-    Left,
-    #[allow(dead_code)]
-    Up,
-}
-
 pub fn snap_to_grid(value: f32, grid_size: f32) -> f32 {
     (value / grid_size).floor() * grid_size
 }
@@ -39,11 +29,6 @@ pub struct UiConstants;
 
 impl UiConstants {
     pub const GRID_SIZE: f32 = 32.0;
-    pub const DEFAULT_INITIAL_X: f32 = 1000.0;
-    pub const DEFAULT_INITIAL_Y: f32 = 550.0;
-
-    pub const DEFAULT_NODE_WIDTH: f32 = 128.0;
-    pub const DEFAULT_NODE_HEIGHT: f32 = 64.0;
 
     pub const NODE_ROUNDING: f32 = 5.0;
     pub const NODE_SHADOW_OFFSET: f32 = 2.0;
@@ -56,8 +41,6 @@ impl UiConstants {
     pub const GRID_MIN_ZOOM: f32 = 0.1;
     pub const MAX_GRID_LINES: usize = 200;
     pub const MIN_NODE_CELLS: u32 = 2;
-
-    pub const DEBUG_CIRCLE_RADIUS: f32 = 2.0;
 
     pub const LEFT_PANEL_WIDTH: f32 = 200.0;
     pub const PROPERTIES_PANEL_WIDTH: f32 = 280.0;
@@ -73,8 +56,10 @@ impl UiConstants {
 
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
     pub const MIN_NODE_SPACING: f32 = 100.0;
-    pub const ROUTING_OBSTACLE_PADDING: f32 = 15.0;
-    pub const ROUTING_GRID_SIZE: f32 = 8.0;
+
+    pub const CONNECTION_ALIGNMENT_THRESHOLD: f32 = 5.0;
+    pub const CONNECTION_PIN_EXIT_OFFSET: f32 = 64.0;
+    pub const CONNECTION_CORNER_RADIUS: f32 = 12.0;
 
     pub const ZOOM_MIN: f32 = 0.1;
     pub const ZOOM_MAX: f32 = 3.0;
@@ -95,6 +80,7 @@ impl UiConstants {
     pub const PIN_LABEL_FONT_SIZE: f32 = 10.0;
     pub const PIN_LABEL_OFFSET: f32 = 12.0;
 
+    #[allow(dead_code)]
     pub const CANVAS_WORLD_PADDING: f32 = 500.0;
     pub const CANVAS_BORDER_STROKE_WIDTH: f32 = 2.0;
 

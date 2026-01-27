@@ -1,4 +1,6 @@
 use crate::ext::NodeExt;
+use crate::ui_constants::UiConstants;
+use egui::epaint::CubicBezierShape;
 use egui::{Color32, Painter, Pos2, Stroke};
 use rpa_core::{BranchType, Node};
 use shared::NanoId;
@@ -57,6 +59,141 @@ fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> Option<Pos2> {
     None
 }
 
+pub fn calculate_manhattan_waypoints(start: Pos2, end: Pos2) -> Vec<Pos2> {
+    let dx = (end.x - start.x).abs();
+
+    if dx < UiConstants::CONNECTION_ALIGNMENT_THRESHOLD {
+        return vec![start, end];
+    }
+
+    let mid_y = start.y + UiConstants::CONNECTION_PIN_EXIT_OFFSET;
+
+    vec![
+        start,
+        Pos2::new(start.x, mid_y),
+        Pos2::new(end.x, mid_y),
+        end,
+    ]
+}
+
+enum PathSegment {
+    Line(Pos2, Pos2),
+    Bezier {
+        start: Pos2,
+        ctrl1: Pos2,
+        ctrl2: Pos2,
+        end: Pos2,
+    },
+}
+
+fn round_manhattan_corners(waypoints: &[Pos2], radius: f32) -> Vec<PathSegment> {
+    if waypoints.len() < 3 {
+        if waypoints.len() == 2 {
+            return vec![PathSegment::Line(waypoints[0], waypoints[1])];
+        }
+        return vec![];
+    }
+
+    let mut segments = Vec::new();
+    let mut current_pos = waypoints[0];
+
+    for i in 0..waypoints.len() - 1 {
+        let p0 = waypoints[i];
+        let p1 = waypoints[i + 1];
+
+        let v = p1 - p0;
+        let length = v.length();
+
+        if i == waypoints.len() - 2 {
+            segments.push(PathSegment::Line(current_pos, p1));
+            break;
+        }
+
+        let p2 = waypoints[i + 2];
+        let v_next = p2 - p1;
+        let next_length = v_next.length();
+
+        let use_radius = radius.min(length * 0.5).min(next_length * 0.5);
+
+        if use_radius < 1.0 || length < 0.1 {
+            segments.push(PathSegment::Line(current_pos, p1));
+            current_pos = p1;
+            continue;
+        }
+
+        let dir = v / length;
+        let dir_next = v_next / next_length;
+
+        let corner_start = p1 - dir * use_radius;
+        let corner_end = p1 + dir_next * use_radius;
+
+        if (current_pos - corner_start).length() > 0.1 {
+            segments.push(PathSegment::Line(current_pos, corner_start));
+        }
+
+        let ctrl_factor = 0.5522847498;
+        let ctrl1 = corner_start + dir * use_radius * ctrl_factor;
+        let ctrl2 = corner_end - dir_next * use_radius * ctrl_factor;
+
+        segments.push(PathSegment::Bezier {
+            start: corner_start,
+            ctrl1,
+            ctrl2,
+            end: corner_end,
+        });
+
+        current_pos = corner_end;
+    }
+
+    segments
+}
+
+fn sample_bezier(start: Pos2, ctrl1: Pos2, ctrl2: Pos2, end: Pos2, steps: usize) -> Vec<Pos2> {
+    let mut points = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let mt = 1.0 - t;
+        let mt2 = mt * mt;
+        let mt3 = mt2 * mt;
+
+        let x = mt3 * start.x + 3.0 * mt2 * t * ctrl1.x + 3.0 * mt * t2 * ctrl2.x + t3 * end.x;
+        let y = mt3 * start.y + 3.0 * mt2 * t * ctrl1.y + 3.0 * mt * t2 * ctrl2.y + t3 * end.y;
+
+        points.push(Pos2::new(x, y));
+    }
+    points
+}
+
+fn segments_to_points(segments: &[PathSegment]) -> Vec<Pos2> {
+    let mut points = Vec::new();
+    for segment in segments {
+        match segment {
+            PathSegment::Line(start, end) => {
+                if points.is_empty() {
+                    points.push(*start);
+                }
+                points.push(*end);
+            }
+            PathSegment::Bezier {
+                start,
+                ctrl1,
+                ctrl2,
+                end,
+            } => {
+                let sampled = sample_bezier(*start, *ctrl1, *ctrl2, *end, 10);
+                if points.is_empty() {
+                    points.extend(sampled);
+                } else {
+                    points.extend(&sampled[1..]);
+                }
+            }
+        }
+    }
+    points
+}
+
 pub struct ConnectionPath {
     waypoints: Vec<Pos2>,
 }
@@ -67,11 +204,11 @@ impl ConnectionPath {
         let end = to.get_input_pin_pos();
 
         Self {
-            waypoints: vec![start, end],
+            waypoints: calculate_manhattan_waypoints(start, end),
         }
     }
 
-    fn get_output_pin_for_branch(node: &Node, branch: &BranchType) -> Pos2 {
+    pub fn get_output_pin_for_branch(node: &Node, branch: &BranchType) -> Pos2 {
         match branch {
             BranchType::TrueBranch => node.get_output_pin_pos_by_index(0),
             BranchType::FalseBranch => node.get_output_pin_pos_by_index(1),
@@ -101,15 +238,37 @@ impl ConnectionPath {
         id: &NanoId,
         transform: impl Fn(Pos2) -> Pos2,
     ) {
-        let pts: Vec<Pos2> = self
-            .get_path_points(renderer, id)
-            .into_iter()
-            .map(transform)
-            .collect();
+        let segments = round_manhattan_corners(&self.waypoints, UiConstants::CONNECTION_CORNER_RADIUS);
+        let stroke = Stroke::new(2.0, color);
 
-        if !pts.is_empty() {
-            painter.add(egui::Shape::line(pts, Stroke::new(2.0, color)));
+        for segment in segments {
+            match segment {
+                PathSegment::Line(start, end) => {
+                    painter.line_segment([transform(start), transform(end)], stroke);
+                }
+                PathSegment::Bezier {
+                    start,
+                    ctrl1,
+                    ctrl2,
+                    end,
+                } => {
+                    let points = [
+                        transform(start),
+                        transform(ctrl1),
+                        transform(ctrl2),
+                        transform(end),
+                    ];
+                    painter.add(CubicBezierShape::from_points_stroke(
+                        points,
+                        false,
+                        Color32::TRANSPARENT,
+                        stroke,
+                    ));
+                }
+            }
         }
+
+        renderer.cache_segments(id, &self.waypoints);
     }
 
     pub fn hit_test(
@@ -168,7 +327,8 @@ impl ConnectionRenderer {
         {
             return e.points.clone();
         }
-        let pts = wp.to_vec();
+        let segments = round_manhattan_corners(wp, UiConstants::CONNECTION_CORNER_RADIUS);
+        let pts = segments_to_points(&segments);
         self.cache.insert(
             id.clone(),
             CacheEntry {
@@ -177,6 +337,23 @@ impl ConnectionRenderer {
             },
         );
         pts
+    }
+
+    pub fn cache_segments(&mut self, id: &NanoId, wp: &[Pos2]) {
+        if let Some(e) = self.cache.get(id) {
+            if e.generation == self.generation {
+                return;
+            }
+        }
+        let segments = round_manhattan_corners(wp, UiConstants::CONNECTION_CORNER_RADIUS);
+        let pts = segments_to_points(&segments);
+        self.cache.insert(
+            id.clone(),
+            CacheEntry {
+                generation: self.generation,
+                points: pts,
+            },
+        );
     }
 
     pub fn clear_cache(&mut self) {

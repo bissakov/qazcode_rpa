@@ -1,5 +1,5 @@
-use crate::ui_constants::{OutputDirection, UiConstants, enforce_minimum_cells};
-use egui::{Pos2, Rect, pos2, vec2};
+use crate::ui_constants::{enforce_minimum_cells, UiConstants};
+use egui::{pos2, vec2, Pos2, Rect};
 use rpa_core::{BranchType, Node};
 
 pub trait NodeExt {
@@ -7,12 +7,10 @@ pub trait NodeExt {
     fn get_rect(&self) -> Rect;
     fn is_routable(&self) -> bool;
     fn snap_bounds(&self, grid_size: f32) -> (Pos2, f32, f32);
-    fn get_routing_footprint(&self, grid_size: f32) -> Rect;
     #[allow(dead_code)]
     fn get_visual_bounds(&self) -> Rect;
     fn get_input_pin_pos(&self) -> Pos2;
     fn get_output_pin_pos(&self) -> Pos2;
-    fn get_preferred_output_direction(&self, branch_type: &BranchType) -> OutputDirection;
     fn get_output_pin_positions(&self) -> [Option<Pos2>; 2];
     fn get_output_pin_pos_by_index(&self, index: usize) -> Pos2;
     fn get_pin_index_for_branch(&self, branch_type: &BranchType) -> usize;
@@ -52,11 +50,6 @@ impl NodeExt for Node {
         (snapped_pos, snapped_width, snapped_height)
     }
 
-    fn get_routing_footprint(&self, grid_size: f32) -> Rect {
-        let (pos, w, h) = self.snap_bounds(grid_size);
-        Rect::from_min_size(pos, vec2(w, h))
-    }
-
     fn get_visual_bounds(&self) -> Rect {
         self.get_rect()
     }
@@ -69,95 +62,19 @@ impl NodeExt for Node {
         self.position() + vec2(self.width / 2.0, self.height)
     }
 
-    fn get_preferred_output_direction(&self, branch_type: &BranchType) -> OutputDirection {
-        match &self.activity {
-            rpa_core::Activity::IfCondition { .. } => match branch_type {
-                BranchType::TrueBranch => OutputDirection::Down,
-                BranchType::FalseBranch => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            rpa_core::Activity::Loop { .. } => match branch_type {
-                BranchType::Default => OutputDirection::Down,
-                BranchType::LoopBody => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            rpa_core::Activity::While { .. } => match branch_type {
-                BranchType::Default => OutputDirection::Down,
-                BranchType::LoopBody => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            rpa_core::Activity::TryCatch => match branch_type {
-                BranchType::TryBranch => OutputDirection::Down,
-                BranchType::CatchBranch => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-            _ => match branch_type {
-                BranchType::ErrorBranch => OutputDirection::Right,
-                _ => OutputDirection::Down,
-            },
-        }
-    }
-
     fn get_output_pin_positions(&self) -> [Option<Pos2>; 2] {
         let pin_count = self.get_output_pin_count();
         if pin_count == 0 {
             return [None, None];
         }
 
-        match &self.activity {
-            rpa_core::Activity::End { .. } | rpa_core::Activity::Note { .. } => [None, None],
-            rpa_core::Activity::IfCondition { .. } => {
-                let true_dir = self.get_preferred_output_direction(&BranchType::TrueBranch);
-                let false_dir = self.get_preferred_output_direction(&BranchType::FalseBranch);
-                [
-                    Some(get_pin_pos_for_direction(self, true_dir)),
-                    Some(get_pin_pos_for_direction(self, false_dir)),
-                ]
-            }
-            rpa_core::Activity::Loop { .. } => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
-                [
-                    Some(get_pin_pos_for_direction(self, default_dir)),
-                    Some(get_pin_pos_for_direction(self, loop_dir)),
-                ]
-            }
-            rpa_core::Activity::While { .. } => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                let loop_dir = self.get_preferred_output_direction(&BranchType::LoopBody);
-                [
-                    Some(get_pin_pos_for_direction(self, default_dir)),
-                    Some(get_pin_pos_for_direction(self, loop_dir)),
-                ]
-            }
-            rpa_core::Activity::TryCatch => {
-                let try_dir = self.get_preferred_output_direction(&BranchType::TryBranch);
-                let catch_dir = self.get_preferred_output_direction(&BranchType::CatchBranch);
-                [
-                    Some(get_pin_pos_for_direction(self, try_dir)),
-                    Some(get_pin_pos_for_direction(self, catch_dir)),
-                ]
-            }
-            rpa_core::Activity::CallScenario { .. } | rpa_core::Activity::RunPowershell { .. } => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
-                [
-                    Some(get_pin_pos_for_direction(self, default_dir)),
-                    Some(get_pin_pos_for_direction(self, error_dir)),
-                ]
-            }
-            _ => {
-                let default_dir = self.get_preferred_output_direction(&BranchType::Default);
-                if self.activity.can_have_error_output() {
-                    let error_dir = self.get_preferred_output_direction(&BranchType::ErrorBranch);
-                    [
-                        Some(get_pin_pos_for_direction(self, default_dir)),
-                        Some(get_pin_pos_for_direction(self, error_dir)),
-                    ]
-                } else {
-                    [Some(get_pin_pos_for_direction(self, default_dir)), None]
-                }
-            }
+        if pin_count == 1 {
+            [Some(self.get_output_pin_pos()), None]
+        } else {
+            let bottom = self.position().y + self.height;
+            let left_x = self.position().x + UiConstants::GRID_SIZE;
+            let right_x = self.position().x + self.width - UiConstants::GRID_SIZE;
+            [Some(pos2(left_x, bottom)), Some(pos2(right_x, bottom))]
         }
     }
 
@@ -238,20 +155,5 @@ impl NodeExt for Node {
                 }
             }
         }
-    }
-}
-
-fn get_pin_pos_for_direction(node: &Node, direction: OutputDirection) -> Pos2 {
-    let center_x = node.width / 2.0;
-    let center_y = node.height / 2.0;
-    let bottom = node.height;
-    let right = node.width;
-    let pos = pos2(node.x, node.y);
-
-    match direction {
-        OutputDirection::Down => pos + vec2(center_x, bottom),
-        OutputDirection::Right => pos + vec2(right, center_y),
-        OutputDirection::Left => pos + vec2(0.0, center_y),
-        OutputDirection::Up => pos + vec2(center_x, 0.0),
     }
 }

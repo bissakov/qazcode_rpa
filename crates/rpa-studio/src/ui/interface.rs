@@ -29,7 +29,6 @@ impl RpaApp {
                 let clipboard_empty = self.clipboard.nodes.is_empty();
                 let show_minimap = self.settings.show_minimap;
                 let allow_node_resize = self.settings.allow_node_resize;
-                let show_grid_debug = self.dialogs.debug.show_grid_debug;
 
                 let current_scenario_index = self.current_scenario_index;
 
@@ -44,14 +43,6 @@ impl RpaApp {
                 };
 
                 let view = self.scenario_views.entry(scenario_id.clone()).or_default();
-
-                use crate::ui_constants::UiConstants;
-                let obstacle_grid = self
-                    .obstacle_grids
-                    .entry(scenario_id.clone())
-                    .or_insert_with(|| {
-                        crate::canvas_grid::CanvasObstacleGrid::new(UiConstants::ROUTING_GRID_SIZE)
-                    });
 
                 let mut render_state = canvas::RenderState {
                     selected_nodes: &mut self.selected_nodes,
@@ -72,9 +63,8 @@ impl RpaApp {
 
                 let (canvas_result, dropped_activity) =
                     ui.dnd_drop_zone::<Activity, _>(egui::Frame::new(), |ui| {
-                        canvas::CanvasRenderer::new(scenario, view, &mut render_state, obstacle_grid)
+                        canvas::CanvasRenderer::new(scenario, view, &mut render_state)
                             .with_config(canvas_config)
-                            .with_grid_debug(show_grid_debug)
                             .render(ui)
                     });
 
@@ -955,16 +945,6 @@ impl RpaApp {
                     if ui.button(t!("menu.ir_view").as_ref()).clicked() {
                         self.dialogs.debug.show_ir_view = true;
                         self.compile_ir_for_debug();
-                        ui.close();
-                    }
-
-                    if ui
-                        .toggle_value(
-                            &mut self.dialogs.debug.show_grid_debug,
-                            t!("menu.grid_debug").as_ref(),
-                        )
-                        .clicked()
-                    {
                         ui.close();
                     }
                 });

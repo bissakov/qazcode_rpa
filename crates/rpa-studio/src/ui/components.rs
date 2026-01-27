@@ -1,6 +1,7 @@
 use crate::colors::ColorPalette;
 use crate::ext::{ActivityExt, NodeExt};
 use crate::ui::config::{GridStyle, NodeStyle, PinStyle};
+use crate::ui::connection_renderer::{calculate_manhattan_waypoints, ConnectionPath};
 use crate::ui_constants::UiConstants;
 use egui::{Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use rpa_core::{Activity, BranchType, Node, Scenario};
@@ -437,12 +438,15 @@ impl MinimapRenderer {
                 get_node_from_index(&scenario.nodes, &node_index, &connection.from_node),
                 get_node_from_index(&scenario.nodes, &node_index, &connection.to_node),
             ) {
-                let from_pos = to_minimap(from_node.get_output_pin_pos());
-                let to_pos = to_minimap(to_node.get_input_pin_pos());
-                painter.line_segment(
-                    [from_pos, to_pos],
+                let from_pos_world =
+                    ConnectionPath::get_output_pin_for_branch(from_node, &connection.branch_type);
+                let to_pos_world = to_node.get_input_pin_pos();
+                let waypoints = calculate_manhattan_waypoints(from_pos_world, to_pos_world);
+                let minimap_points: Vec<Pos2> = waypoints.iter().map(|p| to_minimap(*p)).collect();
+                painter.add(egui::Shape::line(
+                    minimap_points,
                     Stroke::new(1.0, Color32::from_rgb(150, 150, 150)),
-                );
+                ));
             }
         }
 

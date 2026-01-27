@@ -1,5 +1,4 @@
 mod app;
-mod canvas_grid;
 mod colors;
 mod custom;
 mod dialogs;

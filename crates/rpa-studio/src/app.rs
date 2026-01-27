@@ -124,12 +124,5 @@ impl RpaApp {
         }
     }
 
-    pub fn invalidate_current_scenario(&mut self) {
-        if let Some(grid) = self
-            .obstacle_grids
-            .get_mut(&self.get_current_scenario_key())
-        {
-            grid.invalidate();
-        }
-    }
+    pub fn invalidate_current_scenario(&mut self) {}
 }

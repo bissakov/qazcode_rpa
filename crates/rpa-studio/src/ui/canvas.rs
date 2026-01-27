@@ -244,13 +244,11 @@ pub struct CanvasRenderer<'a> {
     scenario: &'a mut Scenario,
     view: &'a mut ScenarioViewState,
     state: &'a mut RenderState<'a>,
-    obstacle_grid: &'a mut crate::canvas_grid::CanvasObstacleGrid,
     config: crate::ui::config::CanvasConfig,
     node_renderer: NodeRenderer,
     pin_renderer: PinRenderer,
     grid_renderer: GridRenderer,
     minimap_renderer: MinimapRenderer,
-    show_grid_debug: bool,
 }
 
 impl<'a> CanvasRenderer<'a> {
@@ -258,7 +256,6 @@ impl<'a> CanvasRenderer<'a> {
         scenario: &'a mut Scenario,
         view: &'a mut ScenarioViewState,
         state: &'a mut RenderState<'a>,
-        obstacle_grid: &'a mut crate::canvas_grid::CanvasObstacleGrid,
     ) -> Self {
         use crate::ui::config::*;
         
@@ -266,23 +263,16 @@ impl<'a> CanvasRenderer<'a> {
             scenario,
             view,
             state,
-            obstacle_grid,
             config: CanvasConfig::default(),
             node_renderer: NodeRenderer::default(),
             pin_renderer: PinRenderer::default(),
             grid_renderer: GridRenderer::default(),
             minimap_renderer: MinimapRenderer::new(),
-            show_grid_debug: false,
         }
     }
 
     pub fn with_config(mut self, config: crate::ui::config::CanvasConfig) -> Self {
         self.config = config;
-        self
-    }
-
-    pub fn with_grid_debug(mut self, enabled: bool) -> Self {
-        self.show_grid_debug = enabled;
         self
     }
 
@@ -302,8 +292,6 @@ impl<'a> CanvasRenderer<'a> {
         let scenario = &mut self.scenario;
         let view = &mut self.view;
         let state = &mut self.state;
-        let obstacle_grid = &mut self.obstacle_grid;
-        let show_grid_debug = self.show_grid_debug;
         
         let mut context_action = ContextMenuAction::None;
         let mut connection_created = false;
@@ -392,7 +380,6 @@ impl<'a> CanvasRenderer<'a> {
                         .retain(|c| !(c.from_node == from_node && c.to_node == to_node));
                     connection_created = true;
                 }
-                obstacle_grid.invalidate();
             }
             *state.knife_tool_active = false;
             state.knife_path.clear();
@@ -410,26 +397,6 @@ impl<'a> CanvasRenderer<'a> {
         let zoom = view.zoom;
 
         let to_screen = |pos: Pos2| -> Pos2 { (pos.to_vec2() * zoom + pan_offset).to_pos2() };
-
-        {
-            if obstacle_grid.is_dirty() {
-                let connection_segments: Vec<_> = scenario
-                    .connections
-                    .iter()
-                    .filter_map(|conn| {
-                        let from_node =
-                            get_node_from_index(&scenario.nodes, &node_index, &conn.from_node)?;
-                        let to_node = get_node_from_index(&scenario.nodes, &node_index, &conn.to_node)?;
-                        Some((from_node.get_output_pin_pos(), to_node.get_input_pin_pos()))
-                    })
-                    .collect();
-                obstacle_grid.rebuild(&scenario.nodes, &connection_segments);
-            }
-
-            if show_grid_debug {
-                obstacle_grid.paint_debug(&painter, to_screen, rect);
-            }
-        }
 
         view.connection_renderer.clear_cache();
 
@@ -560,7 +527,6 @@ impl<'a> CanvasRenderer<'a> {
                         node.width = snapped_w;
                         node.height = snapped_h;
                         view.connection_renderer.increment_generation();
-                        obstacle_grid.invalidate();
                     }
                 }
                 *state.resizing_node = None;
@@ -927,7 +893,6 @@ impl<'a> CanvasRenderer<'a> {
 
             if reroute_needed {
                 view.connection_renderer.increment_generation();
-                obstacle_grid.invalidate();
             }
         }
 
@@ -993,7 +958,6 @@ impl<'a> CanvasRenderer<'a> {
 
                 scenario.add_connection_with_branch(from_id, released_node_id.clone(), branch_type);
                 scenario.add_connection_with_branch(released_node_id, to_id, BranchType::Default);
-                obstacle_grid.invalidate();
             }
         }
 
@@ -1030,7 +994,6 @@ impl<'a> CanvasRenderer<'a> {
                         } else {
                             scenario.connections.retain(|c| c.from_node != node.id);
                         }
-                        obstacle_grid.invalidate();
                     }
                 }
             }
@@ -1137,7 +1100,6 @@ impl<'a> CanvasRenderer<'a> {
             }
 
             scenario.add_connection_with_branch(from, to, branch_type);
-            obstacle_grid.invalidate();
             connection_created = true;
         }
 
@@ -1207,7 +1169,7 @@ impl<'a> CanvasRenderer<'a> {
 
                 for point in intersection_points {
                     let screen_point = to_screen(point);
-                    let size = UiConstants::ROUTING_GRID_SIZE;
+                    let size = 8.0;
                     painter.line_segment(
                         [
                             Pos2::new(screen_point.x - size, screen_point.y - size),

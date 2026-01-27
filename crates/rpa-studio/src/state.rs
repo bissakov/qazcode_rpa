@@ -1,4 +1,3 @@
-use crate::canvas_grid::CanvasObstacleGrid;
 use crate::dialogs::DialogState;
 use crate::ext::{NodeExt, ProjectExt};
 use crate::settings::AppSettings;
@@ -44,7 +43,6 @@ pub struct RpaApp {
     #[allow(dead_code)]
     pub property_edit_debounce: f32,
     pub scenario_views: HashMap<NanoId, ScenarioViewState>,
-    pub obstacle_grids: HashMap<NanoId, CanvasObstacleGrid>,
     pub execution_context: Option<Arc<RwLock<ExecutionContext>>>,
     pub pending_node_focus: Option<NanoId>,
     pub last_canvas_rect: Option<egui::Rect>,
@@ -76,7 +74,6 @@ impl Default for RpaApp {
             undo_redo: UndoRedoManager::new(),
             property_edit_debounce: 0.0,
             scenario_views: HashMap::new(),
-            obstacle_grids: HashMap::new(),
             execution_context: None,
             pending_node_focus: None,
             last_canvas_rect: None,
@@ -112,24 +109,6 @@ impl RpaApp {
             None => &self.project.main_scenario.id,
             Some(i) => &self.project.scenarios[i].id,
         }
-    }
-
-    pub fn get_current_scenario_key(&self) -> NanoId {
-        self.get_current_scenario_id().clone()
-    }
-
-    #[allow(dead_code)]
-    pub fn get_obstacle_grid_mut(&mut self, scenario_id: &NanoId) -> &mut CanvasObstacleGrid {
-        use crate::ui_constants::UiConstants;
-        self.obstacle_grids
-            .entry(scenario_id.clone())
-            .or_insert_with(|| CanvasObstacleGrid::new(UiConstants::ROUTING_GRID_SIZE))
-    }
-
-    #[allow(dead_code)]
-    pub fn get_current_obstacle_grid_mut(&mut self) -> &mut CanvasObstacleGrid {
-        let scenario_id = self.get_current_scenario_id().clone();
-        self.get_obstacle_grid_mut(&scenario_id)
     }
 
     pub fn open_scenario(&mut self, index: usize) {

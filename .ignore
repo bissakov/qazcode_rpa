@@ -11,7 +11,7 @@ resources/
 crates/arc_script/
 crates/office/
 crates/rpa-cli/
-crates/rpa-core/
+# crates/rpa-core/
 # crates/rpa-studio/
 crates/ui-automation/
 crates/ui-explorer/
