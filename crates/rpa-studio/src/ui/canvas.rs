@@ -1,3 +1,6 @@
+use crate::collision::{
+    check_collision, find_nearest_valid_position, find_valid_position_for_nodes,
+};
 use crate::ext::{ActivityExt, NodeExt};
 use crate::ui::components::{GridRenderer, MinimapRenderer, NodeRenderer, PinRenderer};
 use crate::ui::connection_renderer::{ConnectionPath, ConnectionRenderer};
@@ -26,6 +29,9 @@ struct InputCache {
     pub pointer_delta: Vec2,
     pub pointer_primary_down: bool,
     pub key_escape: bool,
+    pub shift_rmb: bool,
+    pub ctrl_shift_rmb: bool,
+    pub secondary_released: bool,
 }
 
 impl InputCache {
@@ -46,6 +52,18 @@ impl InputCache {
             pointer_delta: ui.input(|i| i.pointer.delta()),
             pointer_primary_down: ui.input(|i| i.pointer.primary_down()),
             key_escape: ui.input(|i| i.key_pressed(egui::Key::Escape)),
+            shift_rmb: ui.input(|i| {
+                i.modifiers.shift
+                    && !i.modifiers.ctrl
+                    && i.pointer.button_down(egui::PointerButton::Secondary)
+            }),
+            ctrl_shift_rmb: ui.input(|i| {
+                i.modifiers.shift
+                    && i.modifiers.ctrl
+                    && i.pointer.button_down(egui::PointerButton::Secondary)
+            }),
+            secondary_released: ui
+                .input(|i| i.pointer.button_released(egui::PointerButton::Secondary)),
         }
     }
 }
@@ -78,6 +96,7 @@ pub struct RenderState<'a> {
     pub knife_path: &'a mut Vec<Pos2>,
     pub resizing_node: &'a mut Option<(NanoId, ResizeHandle)>,
     pub searched_activity: &'a mut String,
+    pub quick_connect_start_pos: &'a mut Option<Pos2>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -178,6 +197,23 @@ fn find_intersecting_connections(
     }
 
     (intersecting, intersection_points)
+}
+
+fn collect_downstream_nodes(scenario: &Scenario, start_id: &NanoId) -> HashSet<NanoId> {
+    let mut downstream = HashSet::new();
+    let mut stack = vec![start_id.clone()];
+
+    while let Some(current) = stack.pop() {
+        if downstream.insert(current.clone()) {
+            for conn in &scenario.connections {
+                if conn.from_node == current && !downstream.contains(&conn.to_node) {
+                    stack.push(conn.to_node.clone());
+                }
+            }
+        }
+    }
+
+    downstream
 }
 
 fn canvas_context_menu(
@@ -567,14 +603,14 @@ impl<'a> CanvasRenderer<'a> {
             && input_cache.pointer_primary_down
             && state.connection_from.is_none()
         {
-            let node_center_screen = to_screen(selected_node.get_rect().center());
+            let node_center_world = selected_node.get_rect().center();
             if find_connection_near_point(
                 scenario,
                 &node_index,
-                node_center_screen,
+                node_center_world,
                 view.pan_offset,
                 view.zoom,
-                UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
+                UiConstants::LINK_INSERT_THRESHOLD,
                 &mut view.connection_renderer,
             )
             .is_some()
@@ -925,6 +961,35 @@ impl<'a> CanvasRenderer<'a> {
                     });
             }
 
+            if (input_cache.shift_rmb || input_cache.ctrl_shift_rmb)
+                && node_response.hovered()
+                && state.connection_from.is_none()
+                && !*state.knife_tool_active
+                && !is_panning
+                && node.has_output_pin()
+            {
+                let pin_index = if input_cache.ctrl_shift_rmb && node.get_output_pin_count() > 1 {
+                    1
+                } else {
+                    0
+                };
+
+                *state.connection_from = Some((node.id.clone(), pin_index));
+
+                if let Some(cursor_pos) = ui.ctx().pointer_interact_pos() {
+                    *state.quick_connect_start_pos = Some(cursor_pos);
+                }
+
+                let branch_type = node.get_branch_type_for_pin(pin_index);
+                if node.get_output_pin_count() > 1 {
+                    scenario
+                        .connections
+                        .retain(|c| !(c.from_node == node.id && c.branch_type == branch_type));
+                } else {
+                    scenario.connections.retain(|c| c.from_node != node.id);
+                }
+            }
+
             if node_response.hovered() && !is_panning {
                 any_node_hovered = true;
             }
@@ -975,17 +1040,55 @@ impl<'a> CanvasRenderer<'a> {
         if drag_ended && !state.selected_nodes.is_empty() {
             let mut reroute_needed = false;
 
-            for node in &mut scenario.nodes {
-                if state.selected_nodes.contains(&node.id) && node.is_routable() {
-                    let snapped_x = snap_to_grid(node.x, UiConstants::GRID_SIZE);
-                    let snapped_y = snap_to_grid(node.y, UiConstants::GRID_SIZE);
+            let routable_selected: Vec<_> = scenario
+                .nodes
+                .iter()
+                .filter(|n| state.selected_nodes.contains(&n.id) && n.is_routable())
+                .map(|n| {
+                    (
+                        n.id.clone(),
+                        Pos2::new(n.x, n.y),
+                        Vec2::new(n.width, n.height),
+                    )
+                })
+                .collect();
 
-                    if (snapped_x - node.x).abs() > 0.001 || (snapped_y - node.y).abs() > 0.001 {
-                        reroute_needed = true;
+            if !routable_selected.is_empty() {
+                if let Some(delta) = find_valid_position_for_nodes(
+                    &routable_selected,
+                    &scenario.nodes,
+                    UiConstants::NODE_COLLISION_PADDING,
+                    UiConstants::GRID_SIZE,
+                ) {
+                    for node in &mut scenario.nodes {
+                        if state.selected_nodes.contains(&node.id) && node.is_routable() {
+                            let new_x = node.x + delta.x;
+                            let new_y = node.y + delta.y;
+
+                            if (new_x - node.x).abs() > 0.001 || (new_y - node.y).abs() > 0.001 {
+                                reroute_needed = true;
+                            }
+
+                            node.x = new_x;
+                            node.y = new_y;
+                        }
                     }
+                } else {
+                    for node in &mut scenario.nodes {
+                        if state.selected_nodes.contains(&node.id) && node.is_routable() {
+                            let snapped_x = snap_to_grid(node.x, UiConstants::GRID_SIZE);
+                            let snapped_y = snap_to_grid(node.y, UiConstants::GRID_SIZE);
 
-                    node.x = snapped_x;
-                    node.y = snapped_y;
+                            if (snapped_x - node.x).abs() > 0.001
+                                || (snapped_y - node.y).abs() > 0.001
+                            {
+                                reroute_needed = true;
+                            }
+
+                            node.x = snapped_x;
+                            node.y = snapped_y;
+                        }
+                    }
                 }
             }
 
@@ -1000,15 +1103,16 @@ impl<'a> CanvasRenderer<'a> {
             && let Some(released_node) =
                 get_node_from_index(&scenario.nodes, &node_index, &released_node_id)
         {
-            let node_center_screen = to_screen(released_node.get_rect().center());
+            let node_center_world = released_node.get_rect().center();
+            let released_node_size = Vec2::new(released_node.width, released_node.height);
 
             if let Some((from_id, to_id)) = find_connection_near_point(
                 scenario,
                 &node_index,
-                node_center_screen,
+                node_center_world,
                 view.pan_offset,
                 view.zoom,
-                UiConstants::LINK_INSERT_THRESHOLD * view.zoom,
+                UiConstants::LINK_INSERT_THRESHOLD,
                 &mut view.connection_renderer,
             ) && released_node_id != from_id
                 && released_node_id != to_id
@@ -1033,23 +1137,51 @@ impl<'a> CanvasRenderer<'a> {
                     let mid_x = (from_pos.x + to_pos.x) * 0.5;
                     let mid_y = (from_pos.y + to_pos.y) * 0.5;
 
+                    let node_height = released_node_size.y;
+                    let required_spacing = node_height + UiConstants::NODE_COLLISION_PADDING * 2.0;
                     let distance = to_pos.y - from_pos.y;
-                    let required = UiConstants::MIN_NODE_SPACING * 2.0;
 
-                    if distance < required {
-                        let push = required - distance;
+                    if distance < required_spacing * 2.0 {
+                        let push = required_spacing * 2.0 - distance;
+                        let downstream = collect_downstream_nodes(scenario, &to_id);
 
                         for node in &mut scenario.nodes {
-                            if node.y >= to_pos.y {
+                            if downstream.contains(&node.id) {
                                 node.y += push;
                             }
                         }
                     }
 
+                    let mut exclude = HashSet::new();
+                    exclude.insert(released_node_id.clone());
+
+                    let snapped_mid = Pos2::new(
+                        snap_to_grid(mid_x, UiConstants::GRID_SIZE),
+                        snap_to_grid(mid_y, UiConstants::GRID_SIZE),
+                    );
+
+                    let final_pos = if !check_collision(
+                        Rect::from_min_size(snapped_mid, released_node_size),
+                        &scenario.nodes,
+                        &exclude,
+                        UiConstants::NODE_COLLISION_PADDING,
+                    ) {
+                        snapped_mid
+                    } else {
+                        find_nearest_valid_position(
+                            snapped_mid,
+                            released_node_size,
+                            &scenario.nodes,
+                            &exclude,
+                            UiConstants::NODE_COLLISION_PADDING,
+                            UiConstants::GRID_SIZE,
+                        )
+                    };
+
                     for node in &mut scenario.nodes {
                         if node.id == released_node_id {
-                            node.x = mid_x;
-                            node.y = mid_y;
+                            node.x = final_pos.x;
+                            node.y = final_pos.y;
                             break;
                         }
                     }
@@ -1084,6 +1216,7 @@ impl<'a> CanvasRenderer<'a> {
 
                         if output_response.drag_started() && !*state.knife_tool_active {
                             *state.connection_from = Some((node.id.clone(), pin_index));
+                            *state.quick_connect_start_pos = None;
 
                             let branch_type = node.get_branch_type_for_pin(pin_index);
 
@@ -1137,6 +1270,7 @@ impl<'a> CanvasRenderer<'a> {
                         {
                             let pin_index = from_node.get_pin_index_for_branch(&conn.branch_type);
                             *state.connection_from = Some((conn.from_node.clone(), pin_index));
+                            *state.quick_connect_start_pos = None;
                         }
 
                         scenario
@@ -1146,13 +1280,14 @@ impl<'a> CanvasRenderer<'a> {
 
                     if let Some((from_id, pin_index)) = state.connection_from.as_ref()
                         && (input_response.hovered() || node_body_response.hovered())
-                        && input_cache.pointer_any_released
+                        && (input_cache.pointer_any_released || input_cache.secondary_released)
                         && !*state.knife_tool_active
                     {
                         if from_id != &node.id {
                             new_connection = Some((from_id.clone(), *pin_index, node.id.clone()));
                         }
                         *state.connection_from = None;
+                        *state.quick_connect_start_pos = None;
                     }
                 }
             }
@@ -1162,9 +1297,6 @@ impl<'a> CanvasRenderer<'a> {
             if let Some(from_node) = get_node_from_index(&scenario.nodes, &node_index, from_id)
                 && let Some(pointer_pos) = ui.ctx().pointer_latest_pos()
             {
-                let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
-                let end = pointer_pos;
-
                 let branch_type = from_node.get_branch_type_for_pin(*pin_index);
                 let preview_color = match branch_type {
                     BranchType::TrueBranch => ColorPalette::CONNECTION_TRUE,
@@ -1176,15 +1308,38 @@ impl<'a> CanvasRenderer<'a> {
                     BranchType::Default => ColorPalette::CONNECTION_DEFAULT,
                 };
 
-                painter.line_segment([start, end], Stroke::new(2.0 * view.zoom, preview_color));
+                if let Some(start_pos) = state.quick_connect_start_pos {
+                    let circle_radius = 8.0 * view.zoom;
+
+                    painter.circle_stroke(
+                        *start_pos,
+                        circle_radius,
+                        Stroke::new(2.0 * view.zoom, preview_color),
+                    );
+
+                    painter.line_segment(
+                        [*start_pos, pointer_pos],
+                        Stroke::new(2.0 * view.zoom, preview_color),
+                    );
+                } else {
+                    let start = to_screen(from_node.get_output_pin_pos_by_index(*pin_index));
+                    painter.line_segment(
+                        [start, pointer_pos],
+                        Stroke::new(2.0 * view.zoom, preview_color),
+                    );
+                }
             }
 
             if input_cache.key_escape || response.secondary_clicked() {
                 *state.connection_from = None;
+                *state.quick_connect_start_pos = None;
             }
 
-            if input_cache.pointer_any_released && !any_node_hovered {
+            if (input_cache.pointer_any_released || input_cache.secondary_released)
+                && !any_node_hovered
+            {
                 *state.connection_from = None;
+                *state.quick_connect_start_pos = None;
             }
         }
 

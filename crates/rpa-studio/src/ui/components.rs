@@ -178,7 +178,8 @@ impl PinRenderer {
         }
 
         let positions = node.get_output_pin_positions();
-        for (pin_index, _) in positions.iter().enumerate() {
+        for (pin_index, pos) in positions.iter().enumerate() {
+            let Some(_) = pos else { continue };
             let pin_screen = to_screen(node.get_output_pin_pos_by_index(pin_index));
             let branch_type = node.get_branch_type_for_pin(pin_index);
 

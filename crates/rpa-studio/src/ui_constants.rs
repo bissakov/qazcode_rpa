@@ -41,6 +41,7 @@ impl UiConstants {
     pub const GRID_MIN_ZOOM: f32 = 0.1;
     pub const MAX_GRID_LINES: usize = 200;
     pub const MIN_NODE_CELLS: u32 = 2;
+    pub const NODE_COLLISION_PADDING: f32 = 16.0;
 
     pub const LEFT_PANEL_WIDTH: f32 = 200.0;
     pub const PROPERTIES_PANEL_WIDTH: f32 = 280.0;
@@ -55,10 +56,8 @@ impl UiConstants {
     pub const MINIMAP_NODE_STROKE_WIDTH: f32 = 2.0;
 
     pub const LINK_INSERT_THRESHOLD: f32 = 15.0;
-    pub const MIN_NODE_SPACING: f32 = 100.0;
 
     pub const CONNECTION_ALIGNMENT_THRESHOLD: f32 = 5.0;
-    pub const CONNECTION_PIN_EXIT_OFFSET: f32 = 64.0;
     pub const CONNECTION_CORNER_RADIUS: f32 = 12.0;
 
     pub const ZOOM_MIN: f32 = 0.1;

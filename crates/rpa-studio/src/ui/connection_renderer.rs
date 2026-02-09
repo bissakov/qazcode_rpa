@@ -1,5 +1,5 @@
 use crate::ext::NodeExt;
-use crate::ui_constants::UiConstants;
+use crate::ui_constants::{UiConstants, snap_to_grid};
 use egui::epaint::CubicBezierShape;
 use egui::{Color32, Painter, Pos2, Stroke};
 use rpa_core::{BranchType, Node};
@@ -66,7 +66,15 @@ pub fn calculate_manhattan_waypoints(start: Pos2, end: Pos2) -> Vec<Pos2> {
         return vec![start, end];
     }
 
-    let mid_y = start.y + UiConstants::CONNECTION_PIN_EXIT_OFFSET;
+    let raw_mid_y = (start.y + end.y) / 2.0;
+    let snapped_mid_y = snap_to_grid(raw_mid_y, UiConstants::GRID_SIZE);
+    let min_offset = UiConstants::GRID_SIZE;
+
+    let mid_y = if end.y >= start.y {
+        snapped_mid_y.max(start.y + min_offset)
+    } else {
+        snapped_mid_y.min(start.y - min_offset)
+    };
 
     vec![
         start,

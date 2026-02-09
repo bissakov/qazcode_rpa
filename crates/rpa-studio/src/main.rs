@@ -1,4 +1,5 @@
 mod app;
+mod collision;
 mod colors;
 mod custom;
 mod dialogs;
@@ -19,8 +20,7 @@ use rpa_core::log::{LogActivity, LogEntry, LogLevel};
 use rpa_core::{CoreConstants, IrBuilder, ScenarioValidator, get_timestamp};
 use rust_i18n::t;
 use state::RpaApp;
-use std::sync::mpsc::channel;
-use std::sync::{Arc, RwLock};
+use std::sync::mpsc::{channel, sync_channel};
 use std::time::SystemTime;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -183,32 +183,33 @@ impl RpaApp {
             variables: self.project.main_scenario.variables.clone(),
         }];
 
-        let context = Arc::new(RwLock::new(ExecutionContext::new_without_sender(
+        let context = ExecutionContext::new_without_sender(
             start_time,
             scope_stack,
             variables,
-            stop_control,
-        )));
+            stop_control.clone(),
+        );
 
-        self.execution_context = Some(context.clone());
+        let (event_tx, event_rx) = sync_channel(1000);
+        let (cmd_tx, cmd_rx) = channel();
+
+        self.event_receiver = Some(event_rx);
+        self.cmd_sender = Some(cmd_tx);
 
         let project = std::sync::Arc::new(self.project.clone());
 
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut log = log_sender.clone();
-                let mut executor = rpa_core::execution::IrExecutor::new(
-                    &program,
-                    &project,
-                    context.clone(),
-                    &mut log,
-                );
+                let mut executor =
+                    rpa_core::execution::IrExecutor::new(&program, &project, context, &mut log)
+                        .with_channels(event_tx, cmd_rx);
 
                 if let Err(e) = executor.execute()
                     && e != "Execution stopped by user"
                 {
                     let _ = log_sender.send(LogEntry {
-                        timestamp: get_timestamp(context.read().unwrap().start_time),
+                        timestamp: get_timestamp(start_time),
                         node_id: None,
                         level: LogLevel::Error,
                         activity: LogActivity::System,

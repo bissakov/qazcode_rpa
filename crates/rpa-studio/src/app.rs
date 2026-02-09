@@ -1,7 +1,8 @@
 use crate::state::RpaApp;
 
 use eframe::egui;
-use rpa_core::CoreConstants;
+use rpa_core::log::{LogActivity, LogEntry, LogLevel};
+use rpa_core::{CoreConstants, ExecutionEvent};
 use rust_i18n::t;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -62,6 +63,8 @@ impl RpaApp {
     pub fn process_execution_updates(&mut self, _ctx: &egui::Context) {
         let mut execution_complete = false;
         let mut has_updates = false;
+
+        // Process log entries
         if let Some(receiver) = self.log_receiver.as_ref() {
             for log_entry in receiver.try_iter() {
                 if log_entry.message == CoreConstants::EXECUTION_COMPLETE_MARKER {
@@ -74,9 +77,41 @@ impl RpaApp {
             }
         }
 
+        // Process execution events
+        if let Some(receiver) = self.event_receiver.as_ref() {
+            for event in receiver.try_iter() {
+                match event {
+                    ExecutionEvent::StateSnapshot(snapshot) => {
+                        self.execution_snapshot = Some(snapshot);
+                        has_updates = true;
+                    }
+                    ExecutionEvent::Log(log_entry) => {
+                        self.project.execution_log.push(log_entry);
+                        has_updates = true;
+                    }
+                    ExecutionEvent::Completed => {
+                        execution_complete = true;
+                    }
+                    ExecutionEvent::Error(error) => {
+                        self.project.execution_log.push(LogEntry {
+                            timestamp: "[00:00.00]".to_string(),
+                            node_id: None,
+                            level: LogLevel::Error,
+                            activity: LogActivity::System,
+                            message: error,
+                        });
+                        has_updates = true;
+                    }
+                }
+            }
+        }
+
         if execution_complete {
             self.is_executing = false;
             self.log_receiver = None;
+            self.event_receiver = None;
+            self.cmd_sender = None;
+            self.execution_snapshot = None;
             self.needs_repaint = true;
         }
 

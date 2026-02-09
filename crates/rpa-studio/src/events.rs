@@ -1,10 +1,14 @@
 use crate::{
+    collision::find_nearest_valid_position,
     ext::ScenarioExt,
     state::{ClipboardData, RpaApp},
     ui::canvas,
+    ui_constants::UiConstants,
 };
 use eframe::egui;
+use egui::Vec2;
 use shared::NanoId;
+use std::collections::HashSet;
 
 impl RpaApp {
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
@@ -139,16 +143,31 @@ impl RpaApp {
                 self.needs_repaint = true;
             }
             canvas::ContextMenuAction::SpawnNode(activity) => {
-                let snapped_pos = egui::Pos2::new(
-                    crate::ui_constants::snap_to_grid(
-                        mouse_world_pos.x,
-                        crate::ui_constants::UiConstants::GRID_SIZE,
-                    ),
-                    crate::ui_constants::snap_to_grid(
-                        mouse_world_pos.y,
-                        crate::ui_constants::UiConstants::GRID_SIZE,
-                    ),
-                );
+                let is_note = matches!(activity, rpa_core::Activity::Note { .. });
+                let node_size = Vec2::new(128.0, 64.0);
+
+                let snapped_pos = if is_note {
+                    egui::Pos2::new(
+                        crate::ui_constants::snap_to_grid(
+                            mouse_world_pos.x,
+                            UiConstants::GRID_SIZE,
+                        ),
+                        crate::ui_constants::snap_to_grid(
+                            mouse_world_pos.y,
+                            UiConstants::GRID_SIZE,
+                        ),
+                    )
+                } else {
+                    let desired = egui::Pos2::new(mouse_world_pos.x, mouse_world_pos.y);
+                    find_nearest_valid_position(
+                        desired,
+                        node_size,
+                        &self.get_current_scenario().nodes,
+                        &HashSet::new(),
+                        UiConstants::NODE_COLLISION_PADDING,
+                        UiConstants::GRID_SIZE,
+                    )
+                };
 
                 self.get_current_scenario_mut()
                     .add_node(activity, snapped_pos.x, snapped_pos.y);

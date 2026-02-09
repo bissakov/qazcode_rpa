@@ -1,5 +1,5 @@
 use eframe::egui;
-use ui_automation::win32::automation::{
+use ui_automation::{
     Element, ElementId, ElementType as AutoElementType, Rect, control_to_selector,
     window_to_selector,
 };

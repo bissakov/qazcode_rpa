@@ -4,11 +4,13 @@ use crate::settings::AppSettings;
 use crate::ui::canvas::ResizeHandle;
 use crate::ui::connection_renderer::ConnectionRenderer;
 use crate::undo_redo::UndoRedoManager;
-use rpa_core::execution::ExecutionContext;
 use rpa_core::log::LogEntry;
-use rpa_core::{Connection, Node, Project, Scenario, StopControl, Variables};
+use rpa_core::{
+    Connection, ExecutionCommand, ExecutionEvent, ExecutionSnapshot, Node, Project, Scenario,
+    StopControl, Variables,
+};
 use shared::NanoId;
-use std::sync::{Arc, RwLock};
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
@@ -31,6 +33,8 @@ pub struct RpaApp {
     pub connection_from: Option<(NanoId, usize)>,
     pub settings: AppSettings,
     pub log_receiver: Option<std::sync::mpsc::Receiver<LogEntry>>,
+    pub event_receiver: Option<Receiver<ExecutionEvent>>,
+    pub cmd_sender: Option<Sender<ExecutionCommand>>,
     pub clipboard: ClipboardData,
     pub global_variables: Variables,
     pub knife_tool_active: bool,
@@ -43,7 +47,7 @@ pub struct RpaApp {
     #[allow(dead_code)]
     pub property_edit_debounce: f32,
     pub scenario_views: HashMap<NanoId, ScenarioViewState>,
-    pub execution_context: Option<Arc<RwLock<ExecutionContext>>>,
+    pub execution_snapshot: Option<ExecutionSnapshot>,
     pub pending_node_focus: Option<NanoId>,
     pub last_canvas_rect: Option<egui::Rect>,
     pub last_frame: Instant,
@@ -51,6 +55,7 @@ pub struct RpaApp {
     pub smoothed_frame_time: Duration,
     pub needs_repaint: bool,
     pub is_interacting: bool,
+    pub quick_connect_start_pos: Option<egui::Pos2>,
 }
 
 impl Default for RpaApp {
@@ -65,6 +70,8 @@ impl Default for RpaApp {
             connection_from: None,
             settings: AppSettings::default(),
             log_receiver: None,
+            event_receiver: None,
+            cmd_sender: None,
             clipboard: ClipboardData::default(),
             global_variables: Variables::new(),
             knife_tool_active: false,
@@ -76,7 +83,7 @@ impl Default for RpaApp {
             undo_redo: UndoRedoManager::new(),
             property_edit_debounce: 0.0,
             scenario_views: HashMap::new(),
-            execution_context: None,
+            execution_snapshot: None,
             pending_node_focus: None,
             last_canvas_rect: None,
             last_frame: Instant::now(),
@@ -84,6 +91,7 @@ impl Default for RpaApp {
             smoothed_frame_time: Duration::from_secs_f64(1.0 / 60.0),
             needs_repaint: true,
             is_interacting: false,
+            quick_connect_start_pos: None,
         }
     }
 }

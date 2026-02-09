@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+thiserror = "1"
+log = "0.4"
+regex = "1"
+
+[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
@@ -24,10 +29,7 @@ windows = { version = "0.60", features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_Security",
 ] }
-thiserror = "1"
 widestring = "1"
-log = "0.4"
-regex = "1"
 
 [lints]
 workspace = true

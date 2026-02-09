@@ -1,17 +1,19 @@
+use crate::collision::find_nearest_valid_position;
 use crate::ext::{LogLevelExt, ProjectExt, ScenarioExt};
 use crate::state::RpaApp;
 use crate::ui::canvas;
 use crate::ui_constants::{UiConstants, snap_to_grid};
 use arc_script::{Value, VariableType};
 use eframe::egui;
-use egui::{DragValue, Slider};
+use egui::{DragValue, Slider, Vec2};
 use egui_extras::{Column, TableBuilder};
 use rpa_core::log::{LogActivity, LogEntry, LogLevel};
 use rpa_core::{
-    Activity, CoreConstants, Project, Scenario, Variables, node_graph::VariableDirection,
-    variables::VariableScope,
+    Activity, CoreConstants, ExecutionCommand, Project, Scenario, Variables,
+    node_graph::VariableDirection, variables::VariableScope,
 };
 use rust_i18n::t;
+use std::collections::HashSet;
 use ui_explorer::render::render_ui_explorer_content;
 
 use crate::custom::scenario_tab;
@@ -52,6 +54,7 @@ impl RpaApp {
                     knife_path: &mut self.knife_path,
                     resizing_node: &mut self.resizing_node,
                     searched_activity: &mut self.searched_activity,
+                    quick_connect_start_pos: &mut self.quick_connect_start_pos,
                 };
 
                 let canvas_config = crate::ui::config::CanvasConfig {
@@ -110,7 +113,6 @@ impl RpaApp {
                         let world_pos =
                             ((pointer_pos.to_vec2() - view.pan_offset) / view.zoom).to_pos2();
 
-                        // Apply same logic as button click for CallScenario
                         let should_add_node = if matches!(*activity, Activity::CallScenario { .. })
                         {
                             !self.project.scenarios.is_empty()
@@ -130,10 +132,25 @@ impl RpaApp {
                                     (*activity).clone()
                                 };
 
-                            let snapped_pos = egui::Pos2::new(
-                                snap_to_grid(world_pos.x, UiConstants::GRID_SIZE),
-                                snap_to_grid(world_pos.y, UiConstants::GRID_SIZE),
-                            );
+                            let is_note = matches!(final_activity, Activity::Note { .. });
+                            let node_size = Vec2::new(128.0, 64.0);
+
+                            let snapped_pos = if is_note {
+                                egui::Pos2::new(
+                                    snap_to_grid(world_pos.x, UiConstants::GRID_SIZE),
+                                    snap_to_grid(world_pos.y, UiConstants::GRID_SIZE),
+                                )
+                            } else {
+                                find_nearest_valid_position(
+                                    world_pos,
+                                    node_size,
+                                    &self.get_current_scenario().nodes,
+                                    &HashSet::new(),
+                                    UiConstants::NODE_COLLISION_PADDING,
+                                    UiConstants::GRID_SIZE,
+                                )
+                            };
+
                             self.get_current_scenario_mut().add_node(
                                 final_activity,
                                 snapped_pos.x,
@@ -971,6 +988,9 @@ impl RpaApp {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Wait);
                     if ui.button(t!("toolbar.stop").as_ref()).clicked() {
                         self.stop_control.request_stop();
+                        if let Some(ref cmd_tx) = self.cmd_sender {
+                            let _ = cmd_tx.send(ExecutionCommand::Stop);
+                        }
                     }
                 } else {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
@@ -1391,31 +1411,33 @@ impl RpaApp {
                 ui.add_space(5.0);
 
                 if self.is_executing {
-                    if let Some(ref context) = self.execution_context {
-                        let ctx = context.read().unwrap();
+                    if let Some(ref snapshot) = self.execution_snapshot {
+                        let mut global_vars = Variables::new();
+                        for (name, value) in &snapshot.global_vars {
+                            global_vars.set(&**name, value.clone(), VariableScope::Global);
+                        }
+
                         self.render_variables(
                             ui,
                             t!("panels.global_variables").as_ref(),
-                            &ctx.global_variables,
+                            &global_vars,
                         );
-                        let scenario = self.get_current_scenario();
+
                         let scenario_id = self.get_current_scenario_id();
-                        if let Some(runtime_vars) = ctx.find_scenario_variables(scenario_id.clone())
-                        {
-                            let merged = scenario.variables.merge(runtime_vars);
+                        if let Some(scenario_vars) = snapshot.scenario_vars.get(&scenario_id) {
+                            let mut local_vars = Variables::new();
+                            for (name, value) in scenario_vars {
+                                local_vars.set(&**name, value.clone(), VariableScope::Scenario);
+                            }
+
                             self.render_variables(
                                 ui,
                                 t!("panels.local_variables").as_ref(),
-                                &merged,
-                            );
-                        } else {
-                            self.render_variables(
-                                ui,
-                                t!("panels.local_variables").as_ref(),
-                                &scenario.variables,
+                                &local_vars,
                             );
                         }
                     } else {
+                        // No snapshot yet, show original variables
                         self.render_variables(
                             ui,
                             t!("panels.global_variables").as_ref(),

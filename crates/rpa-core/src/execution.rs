@@ -1,4 +1,5 @@
 use crate::constants::CoreConstants;
+use crate::events::{ExecutionCommand, ExecutionEvent, ExecutionSnapshot};
 use crate::ir::{Instruction, IrProgram};
 use crate::log::{LogActivity, LogEntry, LogLevel};
 use crate::node_graph::{Project, VariableDirection};
@@ -7,9 +8,8 @@ use crate::variables::{VariableScope, Variables};
 use arc_script::{Value, eval_expr, parse_expr};
 use shared::NanoId;
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, RwLock};
-use std::time::SystemTime;
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Debug, Clone)]
 pub struct ScopeFrame {
@@ -33,8 +33,11 @@ pub struct ExecutionContext {
 pub struct IrExecutor<'a, L: LogOutput> {
     program: &'a IrProgram,
     project: &'a Project,
-    context: Arc<RwLock<ExecutionContext>>,
+    pub context: ExecutionContext,
     log: &'a mut L,
+    event_tx: Option<SyncSender<ExecutionEvent>>,
+    cmd_rx: Option<Receiver<ExecutionCommand>>,
+    last_snapshot: Instant,
     error_handlers: Vec<usize>,
     iteration_counts: HashMap<usize, usize>,
     call_stack: Vec<CallFrame>,
@@ -147,7 +150,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
     pub fn new(
         program: &'a IrProgram,
         project: &'a Project,
-        context: Arc<RwLock<ExecutionContext>>,
+        context: ExecutionContext,
         log: &'a mut L,
     ) -> Self {
         Self {
@@ -155,6 +158,9 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             project,
             context,
             log,
+            event_tx: None,
+            cmd_rx: None,
+            last_snapshot: Instant::now(),
             error_handlers: Vec::new(),
             iteration_counts: HashMap::new(),
             call_stack: Vec::new(),
@@ -163,13 +169,89 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
         }
     }
 
+    pub fn with_channels(
+        mut self,
+        event_tx: SyncSender<ExecutionEvent>,
+        cmd_rx: Receiver<ExecutionCommand>,
+    ) -> Self {
+        self.event_tx = Some(event_tx);
+        self.cmd_rx = Some(cmd_rx);
+        self
+    }
+
+    fn check_commands(&mut self) -> Result<(), String> {
+        if let Some(ref cmd_rx) = self.cmd_rx {
+            for cmd in cmd_rx.try_iter() {
+                match cmd {
+                    ExecutionCommand::Stop => {
+                        self.context.stop_control.request_stop();
+                        return Err("Execution stopped by user".to_string());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn maybe_send_snapshot(&mut self) {
+        if self.event_tx.is_none() {
+            return;
+        }
+
+        if self.last_snapshot.elapsed() < Duration::from_millis(100) {
+            return;
+        }
+
+        let timestamp = get_timestamp(self.context.start_time);
+
+        let global_vars: HashMap<String, Value> = self
+            .context
+            .global_variables
+            .iter()
+            .map(|(name, value, _)| (name.to_string(), value.clone()))
+            .collect();
+
+        let scenario_vars: HashMap<NanoId, HashMap<String, Value>> = self
+            .context
+            .scope_stack
+            .iter()
+            .map(|frame| {
+                let vars = frame
+                    .variables
+                    .iter()
+                    .map(|(name, value, _)| (name.to_string(), value.clone()))
+                    .collect();
+                (frame.scenario_id.clone(), vars)
+            })
+            .collect();
+
+        let snapshot = ExecutionSnapshot {
+            timestamp,
+            global_vars,
+            scenario_vars,
+        };
+
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.try_send(ExecutionEvent::StateSnapshot(snapshot));
+        }
+
+        self.last_snapshot = Instant::now();
+    }
+
     pub fn execute(&mut self) -> Result<(), String> {
         let mut pc = self.program.entry_point;
 
         while pc < self.program.instructions.len() {
-            if self.context.read().unwrap().is_stopped() {
+            self.check_commands()?;
+
+            if self.context.is_stopped() {
+                if let Some(ref tx) = self.event_tx {
+                    let _ = tx.try_send(ExecutionEvent::Completed);
+                }
                 return Err("Execution stopped by user".to_string());
             }
+
+            self.maybe_send_snapshot();
 
             match self.execute_instruction(pc) {
                 Ok(next_pc) => {
@@ -179,18 +261,24 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     pc = next_pc;
                 }
                 Err(e) => {
+                    if let Some(ref tx) = self.event_tx {
+                        let _ = tx.try_send(ExecutionEvent::Error(e.clone()));
+                    }
                     return self.handle_error(e, pc);
                 }
             }
+        }
+
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.try_send(ExecutionEvent::Completed);
         }
 
         Ok(())
     }
 
     fn get_combined_variables(&self) -> Variables {
-        let ctx = self.context.read().unwrap();
-        let mut combined = ctx.global_variables.clone();
-        if let Some(vars) = ctx.get_scenario_variables() {
+        let mut combined = self.context.global_variables.clone();
+        if let Some(vars) = self.context.get_scenario_variables() {
             for (name, val, scope) in vars.iter() {
                 combined.set(name, val.clone(), scope.clone());
             }
@@ -216,7 +304,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         }
                     });
 
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 if let Some(scenario) = scenario {
                     self.log.log(LogEntry {
                         timestamp,
@@ -252,7 +340,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         }
                     });
 
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 if let Some(scenario) = scenario {
                     self.log.log(LogEntry {
                         timestamp,
@@ -268,24 +356,18 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                             if matches!(
                                 binding.direction,
                                 VariableDirection::Out | VariableDirection::InOut
-                            ) && let Some(val) = self
-                                .context
-                                .read()
-                                .unwrap()
-                                .resolve_variable(&binding.target_var_name)
+                            ) && let Some(val) =
+                                self.context.resolve_variable(&binding.target_var_name)
                             {
                                 param_values.push((binding.source_var_name.clone(), val));
                             }
                         }
 
-                        self.context.write().unwrap().scope_stack.pop();
+                        self.context.scope_stack.pop();
 
                         for (var_name, value) in param_values {
-                            self.context.write().unwrap().set_variable(
-                                &var_name,
-                                value,
-                                VariableScope::Scenario,
-                            );
+                            self.context
+                                .set_variable(&var_name, value, VariableScope::Scenario);
                         }
 
                         self.current_scenario_id = frame.scenario_id.clone();
@@ -306,7 +388,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 }
             }
             Instruction::Log { level, message } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 let combined_vars = self.get_combined_variables();
 
                 match parse_expr(message) {
@@ -327,7 +409,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 }
             }
             Instruction::Delay { milliseconds } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: self.current_node_id.clone(),
@@ -336,35 +418,23 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     message: format!("Waiting for {milliseconds} ms"),
                 });
 
-                if self
-                    .context
-                    .read()
-                    .unwrap()
-                    .stop_control
-                    .sleep_interruptible(*milliseconds)
-                {
+                if self.context.stop_control.sleep_interruptible(*milliseconds) {
                     Ok(pc + 1)
                 } else {
                     Err("Execution stopped by user".into())
                 }
             }
             Instruction::SetVar { var, value, scope } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
 
                 match scope {
                     VariableScope::Global => {
-                        self.context.write().unwrap().global_variables.set(
-                            var,
-                            value.clone(),
-                            scope.clone(),
-                        );
+                        self.context
+                            .global_variables
+                            .set(var, value.clone(), scope.clone());
                     }
                     VariableScope::Scenario => {
-                        self.context.write().unwrap().set_variable(
-                            var,
-                            value.clone(),
-                            scope.clone(),
-                        );
+                        self.context.set_variable(var, value.clone(), scope.clone());
                     }
                 }
 
@@ -378,7 +448,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 Ok(pc + 1)
             }
             Instruction::Evaluate { expr } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
 
                 let combined_vars = self.get_combined_variables();
                 let result = match eval_expr(expr, &combined_vars) {
@@ -407,7 +477,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             }
             Instruction::Jump { target } => Ok(*target),
             Instruction::JumpIf { condition, target } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
 
                 let combined_vars = self.get_combined_variables();
                 let (message, next_pc, level) = match eval_expr(condition, &combined_vars) {
@@ -444,7 +514,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 Ok(next_pc)
             }
             Instruction::JumpIfNot { condition, target } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
 
                 let combined_vars = self.get_combined_variables();
                 let (message, next_pc, level) = match eval_expr(condition, &combined_vars) {
@@ -481,7 +551,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 Ok(next_pc)
             }
             Instruction::LoopInit { index, start } => {
-                self.context.write().unwrap().set_variable(
+                self.context.set_variable(
                     index,
                     Value::Number(*start as f64),
                     VariableScope::Scenario,
@@ -496,7 +566,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 step,
             } => {
                 self.log.log(LogEntry {
-                    timestamp: get_timestamp(self.context.read().unwrap().start_time),
+                    timestamp: get_timestamp(self.context.start_time),
                     node_id: self.current_node_id.clone(),
                     level: LogLevel::Info,
                     activity: LogActivity::Loop,
@@ -514,7 +584,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             } => {
                 if *step == 0 {
                     self.log.log(LogEntry {
-                        timestamp: get_timestamp(self.context.read().unwrap().start_time),
+                        timestamp: get_timestamp(self.context.start_time),
                         node_id: self.current_node_id.clone(),
                         level: LogLevel::Warning,
                         activity: LogActivity::Loop,
@@ -523,12 +593,11 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     return Ok(*end_target);
                 }
 
-                let current = {
-                    let ctx = self.context.read().unwrap();
-                    ctx.resolve_variable(index)
-                        .and_then(|v: Value| v.as_number())
-                        .map_or(*end, |n| n as i64)
-                };
+                let current = self
+                    .context
+                    .resolve_variable(index)
+                    .and_then(|v: Value| v.as_number())
+                    .map_or(*end, |n| n as i64);
 
                 let should_continue = if *step > 0 {
                     current < *end
@@ -547,25 +616,22 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 step,
                 check_target,
             } => {
-                let current = {
-                    let ctx = self.context.read().unwrap();
-                    match ctx.resolve_variable(index) {
-                        Some(Value::Number(n)) => n as i64,
-                        Some(other) => {
-                            return Err(format!(
-                                "Loop index '{}' has wrong type: expected number, got {:?}",
-                                index, other
-                            ));
-                        }
-                        None => {
-                            return Err(format!("Loop index '{}' not found", index));
-                        }
+                let current = match self.context.resolve_variable(index) {
+                    Some(Value::Number(n)) => n as i64,
+                    Some(other) => {
+                        return Err(format!(
+                            "Loop index '{}' has wrong type: expected number, got {:?}",
+                            index, other
+                        ));
+                    }
+                    None => {
+                        return Err(format!("Loop index '{}' not found", index));
                     }
                 };
 
                 let next = current + step;
 
-                self.context.write().unwrap().set_variable(
+                self.context.set_variable(
                     index,
                     Value::Number(next as f64),
                     VariableScope::Scenario,
@@ -578,7 +644,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 body_target,
                 end_target,
             } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 let combined_vars = self.get_combined_variables();
                 match eval_expr(condition, &combined_vars) {
                     Ok(Value::Boolean(true)) => {
@@ -611,7 +677,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 }
             }
             Instruction::LoopContinue { check_target } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: self.current_node_id.clone(),
@@ -622,7 +688,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 Ok(*check_target)
             }
             Instruction::LoopBreak { end_target } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: self.current_node_id.clone(),
@@ -634,7 +700,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             }
             Instruction::PushErrorHandler { catch_target } => {
                 self.error_handlers.push(*catch_target);
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: self.current_node_id.clone(),
@@ -646,7 +712,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             }
             Instruction::PopErrorHandler => {
                 self.error_handlers.pop();
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: self.current_node_id.clone(),
@@ -681,7 +747,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     });
 
                 if let Some(_scenario) = scenario {
-                    let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                    let timestamp = get_timestamp(self.context.start_time);
                     self.log.log(LogEntry {
                         timestamp,
                         node_id: self.current_node_id.clone(),
@@ -698,15 +764,15 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                     for binding in parameters {
                         match binding.direction {
                             VariableDirection::In | VariableDirection::InOut => {
-                                let source_value = {
-                                    let ctx = self.context.read().unwrap();
-                                    if binding.source_scope
-                                        == Some(crate::variables::VariableScope::Global)
-                                    {
-                                        ctx.global_variables.get(&binding.source_var_name).cloned()
-                                    } else {
-                                        ctx.resolve_variable(&binding.source_var_name)
-                                    }
+                                let source_value = if binding.source_scope
+                                    == Some(crate::variables::VariableScope::Global)
+                                {
+                                    self.context
+                                        .global_variables
+                                        .get(&binding.source_var_name)
+                                        .cloned()
+                                } else {
+                                    self.context.resolve_variable(&binding.source_var_name)
                                 };
                                 if let Some(val) = source_value {
                                     child_scope.variables.set(
@@ -726,7 +792,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         }
                     }
 
-                    self.context.write().unwrap().scope_stack.push(child_scope);
+                    self.context.scope_stack.push(child_scope);
 
                     self.call_stack.push(CallFrame {
                         scenario_id: self.current_scenario_id.clone(),
@@ -740,7 +806,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                         Ok(start_index)
                     } else {
                         self.call_stack.pop();
-                        self.context.write().unwrap().scope_stack.pop();
+                        self.context.scope_stack.pop();
                         Err(format!("Scenario {} not found in IR program", scenario_id))
                     }
                 } else {
@@ -750,7 +816,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
                 }
             }
             Instruction::RunPowershell { code: _ } => {
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: self.current_node_id.clone(),
@@ -766,7 +832,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             } => {
                 self.current_node_id = Some(node_id.clone());
 
-                let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+                let timestamp = get_timestamp(self.context.start_time);
                 self.log.log(LogEntry {
                     timestamp,
                     node_id: Some(node_id.clone()),
@@ -782,7 +848,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
     fn handle_error(&mut self, error: String, _pc: usize) -> Result<(), String> {
         if error == "Execution stopped by user" {
-            let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+            let timestamp = get_timestamp(self.context.start_time);
             self.log.log(LogEntry {
                 timestamp,
                 node_id: self.current_node_id.clone(),
@@ -793,14 +859,14 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
             return Err(error);
         }
 
-        self.context.write().unwrap().global_variables.set(
+        self.context.global_variables.set(
             CoreConstants::ERROR_VARIABLE_NAME,
             Value::String(error.clone()),
             VariableScope::Global,
         );
 
         if let Some(catch_target) = self.error_handlers.pop() {
-            let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+            let timestamp = get_timestamp(self.context.start_time);
             self.log.log(LogEntry {
                 timestamp,
                 node_id: self.current_node_id.clone(),
@@ -824,7 +890,7 @@ impl<'a, L: LogOutput> IrExecutor<'a, L> {
 
             Ok(())
         } else {
-            let timestamp = get_timestamp(self.context.read().unwrap().start_time);
+            let timestamp = get_timestamp(self.context.start_time);
             self.log.log(LogEntry {
                 timestamp,
                 node_id: self.current_node_id.clone(),
@@ -851,21 +917,17 @@ pub fn execute_project_with_typed_vars(
     }];
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let context = Arc::new(RwLock::new(ExecutionContext::new(
-            start_time,
-            scope_stack,
-            global_variables,
-            stop_control,
-        )));
+        let context =
+            ExecutionContext::new(start_time, scope_stack, global_variables, stop_control);
 
         let mut log = log_sender.clone();
 
-        let mut executor = IrExecutor::new(program, project, context.clone(), &mut log);
+        let mut executor = IrExecutor::new(program, project, context, &mut log);
         if let Err(e) = executor.execute()
             && e != "Execution stopped by user"
         {
             let _ = log_sender.send(LogEntry {
-                timestamp: get_timestamp(context.read().unwrap().start_time),
+                timestamp: get_timestamp(start_time),
                 node_id: executor.current_node_id.clone(),
                 level: LogLevel::Error,
                 activity: LogActivity::System,

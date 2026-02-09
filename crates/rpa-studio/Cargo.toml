@@ -27,4 +27,6 @@ nanoid.workspace = true
 uuid.workspace = true
 
 [build-dependencies]
+
+[target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.5.2"

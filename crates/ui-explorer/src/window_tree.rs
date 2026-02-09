@@ -2,10 +2,7 @@ use crate::properties::{ElementType, SelectedElement, WindowNode};
 use eframe::egui;
 use shared::NanoId;
 use std::collections::HashSet;
-use ui_automation::{
-    automation::{Element, ElementId, find_child_elements},
-    win32::automation::Rect,
-};
+use ui_automation::{Element, ElementId, Rect, find_child_elements};
 
 pub fn get_window_controls_by_hwnd(window_hwnd: isize) -> Result<Vec<Element>, String> {
     let window_id = ElementId(window_hwnd);
